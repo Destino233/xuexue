@@ -20,12 +20,15 @@ fun main() = application {
 
     Window(
         onCloseRequest = {
-            if (state.documents.any { it.dirty }) closeRequested = true else exitApplication()
+            if (state.documents.any { it.dirty }) closeRequested = true else {
+                state.persistLayout()
+                exitApplication()
+            }
         },
         title = state.workspaceRoot?.fileName?.let { "$it - XueXue" } ?: "XueXue",
         state = rememberWindowState(width = 1440.dp, height = 900.dp),
     ) {
-        window.minimumSize = Dimension(840, 600)
+        window.minimumSize = Dimension(720, 560)
         LaunchedEffect(Unit) { state.restoreLastWorkspace() }
         WorkbenchApp(
             state = state,
@@ -33,9 +36,9 @@ fun main() = application {
             onCancelClose = { closeRequested = false },
             onConfirmClose = {
                 state.documents.filter { it.dirty }.forEach { state.selectTab(it.relativePath); state.saveActive() }
+                state.persistLayout()
                 exitApplication()
             },
         )
     }
 }
-

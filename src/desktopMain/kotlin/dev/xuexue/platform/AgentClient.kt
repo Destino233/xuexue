@@ -26,6 +26,7 @@ data class AgentMessage(
     val role: String,
     val content: String,
     val error: Boolean = false,
+    val decision: String? = null,
 )
 
 data class AgentProviderConfig(
@@ -103,4 +104,3 @@ class OpenAiCompatibleAgentClient : AgentClient {
         }
     }
 }
-

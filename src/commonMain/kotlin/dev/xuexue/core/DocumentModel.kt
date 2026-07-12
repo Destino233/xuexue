@@ -8,6 +8,7 @@ enum class DocumentKind {
     TEXT,
     PDF,
     IMAGE,
+    AGENT,
     UNSUPPORTED,
 }
 
@@ -24,6 +25,9 @@ enum class ToolWindow {
     SEARCH,
     BACKLINKS,
     OUTLINE,
+    PROPERTIES,
+    GRAPH,
+    TASKS,
     AGENT,
 }
 
@@ -54,6 +58,8 @@ data class MarkdownAnalysis(
     val headings: List<Heading>,
     val links: List<WikiLink>,
     val tags: Set<String>,
+    val blockIds: Set<String> = emptySet(),
+    val properties: Set<String> = emptySet(),
 )
 
 sealed interface MarkdownBlock {
@@ -70,14 +76,22 @@ object MarkdownParser {
     private val wikiLink = Regex("!?\\[\\[([^]#^|]+)(?:[#^][^]|]+)?(?:\\|([^]]+))?]]")
     private val tag = Regex("(?<![\\p{L}\\p{N}_#])#([\\p{L}\\p{N}_/-]+)")
     private val orderedItem = Regex("^\\s*\\d+[.)]\\s+(.+)$")
+    private val blockId = Regex("(?:^|\\s)\\^([A-Za-z0-9_-]+)\\s*$")
+    private val property = Regex("^([A-Za-z0-9_.-]+)\\s*:")
 
     fun analyze(source: String): MarkdownAnalysis {
         val headings = mutableListOf<Heading>()
         val links = mutableListOf<WikiLink>()
         val tags = linkedSetOf<String>()
+        val blockIds = linkedSetOf<String>()
+        val properties = linkedSetOf<String>()
+        var inFrontmatter = false
 
         source.lineSequence().forEachIndexed { index, line ->
             val trimmed = line.trimStart()
+            if (index == 0 && trimmed.trim() == "---") inFrontmatter = true
+            else if (inFrontmatter && trimmed.trim() == "---") inFrontmatter = false
+            else if (inFrontmatter) property.find(trimmed)?.groupValues?.getOrNull(1)?.let(properties::add)
             val hashes = trimmed.takeWhile { it == '#' }.length
             if (hashes in 1..6 && trimmed.getOrNull(hashes) == ' ') {
                 headings += Heading(hashes, trimmed.drop(hashes + 1).trim(), index + 1)
@@ -90,8 +104,9 @@ object MarkdownParser {
                 )
             }
             tag.findAll(line).forEach { match -> tags += match.groupValues[1] }
+            blockId.find(line)?.groupValues?.getOrNull(1)?.let(blockIds::add)
         }
-        return MarkdownAnalysis(headings, links, tags)
+        return MarkdownAnalysis(headings, links, tags, blockIds, properties)
     }
 
     fun blocks(source: String): List<MarkdownBlock> {
@@ -180,4 +195,3 @@ object MarkdownParser {
         return result
     }
 }
-

@@ -30,7 +30,14 @@ class WorkspaceIndex(notes: List<IndexedNote>) {
         ?.distinctBy { it.relativePath }
         .orEmpty()
 
+    fun notePaths(): List<String> = notesByPath.values.map(IndexedNote::relativePath).sortedBy(String::lowercase)
+
+    fun tags(): Set<String> = notesByPath.values.flatMap { it.analysis.tags }.toSet()
+
+    fun blockIds(): Set<String> = notesByPath.values.flatMap { it.analysis.blockIds }.toSet()
+
+    fun properties(): Set<String> = notesByPath.values.flatMap { it.analysis.properties }.toSet()
+
     private fun normalize(path: String): String = path.replace('\\', '/').removePrefix("./")
     private fun stem(path: String): String = normalize(path).substringAfterLast('/').substringBeforeLast('.')
 }
-

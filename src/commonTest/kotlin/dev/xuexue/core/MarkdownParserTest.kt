@@ -21,6 +21,14 @@ class MarkdownParserTest {
     }
 
     @Test
+    fun extractsFrontmatterPropertiesAndBlockIds() {
+        val analysis = MarkdownParser.analyze("---\ntitle: Note\naliases: [N]\n---\nParagraph ^stable-block\n")
+
+        assertEquals(setOf("title", "aliases"), analysis.properties)
+        assertEquals(setOf("stable-block"), analysis.blockIds)
+    }
+
+    @Test
     fun indexResolvesRelativeLinksAndBacklinks() {
         val source = IndexedNote(
             "folder/source.md",
@@ -35,4 +43,3 @@ class MarkdownParserTest {
         assertNull(index.resolve(source.relativePath, "missing"))
     }
 }
-

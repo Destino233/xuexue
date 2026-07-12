@@ -11,6 +11,7 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.util.Base64
 import java.util.Properties
+import java.util.UUID
 import kotlin.io.path.extension
 import kotlin.io.path.isDirectory
 import kotlin.io.path.name
@@ -21,23 +22,110 @@ data class SearchHit(
     val relativePath: String,
     val line: Int,
     val preview: String,
+    val column: Int = 1,
+    val matchLength: Int = 0,
+    val previewMatchStart: Int = 0,
+)
+
+data class FileMutationResult(
+    val relativePath: String,
+    val affectedMarkdown: List<String> = emptyList(),
+    val updatedContents: Map<String, String> = emptyMap(),
+)
+
+data class RenamedEntry(
+    val oldRelativePath: String,
+    val newRelativePath: String,
+)
+
+data class RenameBatch(
+    val entries: List<RenamedEntry>,
+    val affectedMarkdown: List<String>,
+    val originalContents: Map<String, String>,
+    val updatedContents: Map<String, String>,
+)
+
+data class TrashedEntry(
+    val original: Path,
+    val trashed: Path,
+)
+
+data class TrashBatch(val entries: List<TrashedEntry>)
+
+data class PersistedLayoutPreset(
+    val name: String,
+    val leftPanelVisible: Boolean,
+    val agentPanelVisible: Boolean,
+    val activityRailVisible: Boolean,
+    val activityRailRight: Boolean,
+    val toolPanelDock: String,
+    val leftWidth: Float,
+    val agentWidth: Float,
+    val bottomPanelHeight: Float,
+    val activeTool: String,
+    val toolTabs: List<String>,
+    val toolPanelPinned: Boolean,
+    val toolPanelExpanded: Boolean,
+    val agentFloating: Boolean,
+    val documentSplit: String,
+    val secondaryTool: String? = null,
 )
 
 data class PersistedWorkbench(
     val workspace: String? = null,
     val openDocuments: List<String> = emptyList(),
     val activeDocument: String? = null,
+    val recentDocuments: List<String> = emptyList(),
     val activeTool: String? = null,
     val leftWidth: Float = 260f,
     val agentWidth: Float = 350f,
+    val activityRailVisible: Boolean = true,
+    val activityRailRight: Boolean = false,
+    val toolPanelDock: String = "LEFT",
+    val bottomPanelHeight: Float = 230f,
+    val documentSplit: String = "NONE",
+    val secondaryDocument: String? = null,
+    val activeAgentSession: String? = null,
+    val toolPanelPinned: Boolean = true,
+    val toolPanelExpanded: Boolean = false,
+    val detachedDocuments: List<String> = emptyList(),
+    val agentFloating: Boolean = false,
+    val toolTabs: List<String> = emptyList(),
+    val secondaryTool: String? = null,
+    val leftPanelVisible: Boolean = true,
+    val agentPanelVisible: Boolean = true,
+    val workspaceTrusted: Boolean = true,
+    val agentReadOnlyMode: Boolean = false,
+    val agentOfflineMode: Boolean = false,
+    val agentAllowWrite: Boolean = true,
+    val agentAllowShell: Boolean = true,
+    val customLayoutPresets: List<PersistedLayoutPreset> = emptyList(),
     val editorModes: Map<String, String> = emptyMap(),
     val cursorOffsets: Map<String, Int> = emptyMap(),
+    val editorBlockIndices: Map<String, Int> = emptyMap(),
     val pdfPages: Map<String, Int> = emptyMap(),
     val pdfZooms: Map<String, Float> = emptyMap(),
+    val pdfFitModes: Map<String, String> = emptyMap(),
+    val pdfViewModes: Map<String, String> = emptyMap(),
+    val pdfSidePanels: Map<String, String> = emptyMap(),
+    val pdfRotations: Map<String, Float> = emptyMap(),
 )
 
 class WorkspaceService {
     fun scan(root: Path): WorkspaceEntry = scanEntry(root, root)
+
+    fun workspaceRevision(root: Path): Long = Files.walk(root).use { paths ->
+        paths
+            .filter { path -> !path.startsWith(root.resolve(".xuexue")) }
+            .sorted()
+            .mapToLong { path ->
+                val relative = root.relativize(path).pathString.replace('\\', '/')
+                val modified = runCatching { Files.getLastModifiedTime(path).toMillis() }.getOrDefault(0L)
+                val size = runCatching { if (Files.isRegularFile(path)) Files.size(path) else 0L }.getOrDefault(0L)
+                relative.hashCode().toLong() * 31L + modified * 17L + size
+            }
+            .reduce(1_125_899_906_842_597L) { revision, value -> revision * 31L + value }
+    }
 
     private fun scanEntry(root: Path, path: Path): WorkspaceEntry {
         val children = if (path.isDirectory()) {
@@ -91,6 +179,172 @@ class WorkspaceService {
         return candidate
     }
 
+    fun createEntry(root: Path, parentRelative: String, name: String, directory: Boolean): Path {
+        val parent = resolveInside(root, parentRelative)
+        require(Files.isDirectory(parent)) { "Target folder is no longer available." }
+        val cleanName = validateEntryName(name)
+        val target = parent.resolve(cleanName).normalize()
+        require(target.startsWith(root.normalize()) && !Files.exists(target)) { "An entry named '$cleanName' already exists." }
+        if (directory) Files.createDirectory(target)
+        else atomicWrite(target, if (cleanName.endsWith(".md", true)) "# ${target.nameWithoutExtension}\n\n" else "")
+        return target
+    }
+
+    fun markdownReferenceImpacts(root: Path, relativePath: String): List<String> {
+        val source = resolveInside(root, relativePath)
+        if (!Files.isRegularFile(source) || !source.extension.equals("md", true)) return emptyList()
+        val oldStem = source.nameWithoutExtension
+        return Files.walk(root).use { paths ->
+            paths.filter { path ->
+                Files.isRegularFile(path) && path.extension.equals("md", true) && !path.startsWith(root.resolve(".xuexue"))
+            }.filter { path ->
+                val content = runCatching { readText(path) }.getOrDefault("")
+                MarkdownParser.analyze(content).links.any { link -> link.target.substringAfterLast('/').removeSuffix(".md") == oldStem }
+            }.map { root.relativize(it).pathString.replace('\\', '/') }.toList()
+        }
+    }
+
+    fun renameEntry(root: Path, relativePath: String, newName: String): FileMutationResult {
+        val batch = renameEntries(root, mapOf(relativePath to newName))
+        val renamed = batch.entries.single()
+        return FileMutationResult(
+            relativePath = renamed.newRelativePath,
+            affectedMarkdown = batch.affectedMarkdown,
+            updatedContents = batch.updatedContents,
+        )
+    }
+
+    fun renameEntries(root: Path, renames: Map<String, String>): RenameBatch {
+        val normalizedRoot = root.toAbsolutePath().normalize()
+        val requested = renames.entries.mapNotNull { (relative, name) ->
+            val source = resolveInside(normalizedRoot, relative)
+            require(Files.exists(source)) { "The entry is no longer available: $relative" }
+            val cleanName = validateEntryName(name)
+            val target = source.resolveSibling(cleanName).normalize()
+            if (source == target) null else Triple(relative.replace('\\', '/'), source, target)
+        }
+        require(requested.isNotEmpty()) { "Change at least one name." }
+        val sources = requested.map { it.second }.toSet()
+        require(requested.none { (_, source, _) -> sources.any { other -> other != source && source.startsWith(other) } }) {
+            "Rename a folder or its contents, not both in the same batch."
+        }
+        val targets = requested.map { it.third }
+        require(targets.distinct().size == targets.size) { "Two entries cannot use the same destination name." }
+        requested.forEach { (_, _, target) ->
+            require(target.startsWith(normalizedRoot) && (!Files.exists(target) || target in sources)) {
+                "An entry named '${target.fileName}' already exists."
+            }
+        }
+
+        val stemRenames = requested.filter { (_, source, _) -> Files.isRegularFile(source) && source.extension.equals("md", true) }
+            .groupBy({ it.second.nameWithoutExtension }, { it.third.nameWithoutExtension })
+            .mapValues { (oldStem, newStems) ->
+                require(newStems.distinct().size == 1) { "Notes named '$oldStem' must use the same new base name in one batch." }
+                newStems.first()
+            }
+        val affected = if (stemRenames.isEmpty()) emptyList() else Files.walk(normalizedRoot).use { paths ->
+            paths.filter { path ->
+                Files.isRegularFile(path) && path.extension.equals("md", true) && !path.startsWith(normalizedRoot.resolve(".xuexue"))
+            }.filter { path ->
+                MarkdownParser.analyze(runCatching { readText(path) }.getOrDefault("")).links.any { link ->
+                    link.target.substringAfterLast('/').removeSuffix(".md") in stemRenames
+                }
+            }.map { normalizedRoot.relativize(it).pathString.replace('\\', '/') }.toList()
+        }
+        val originals = affected.associateWith { path -> readText(normalizedRoot.resolve(path)) }
+        val updated = originals.mapValues { (_, content) -> rewriteWikiTargets(content, stemRenames) }
+        val entries = requested.map { (relative, _, target) ->
+            RenamedEntry(relative, normalizedRoot.relativize(target).pathString.replace('\\', '/'))
+        }
+        try {
+            moveAtomically(requested.map { it.second to it.third }, normalizedRoot)
+            val finalPaths = entries.associate { it.oldRelativePath to it.newRelativePath }
+            updated.forEach { (path, content) -> atomicWrite(normalizedRoot.resolve(finalPaths[path] ?: path), content) }
+        } catch (error: Throwable) {
+            runCatching { moveAtomically(requested.map { it.third to it.second }, normalizedRoot) }
+            originals.forEach { (path, content) -> runCatching { atomicWrite(normalizedRoot.resolve(path), content) } }
+            throw error
+        }
+        return RenameBatch(entries, affected, originals, updated)
+    }
+
+    fun undoRename(root: Path, batch: RenameBatch) {
+        val normalizedRoot = root.toAbsolutePath().normalize()
+        moveAtomically(
+            batch.entries.map { resolveInside(normalizedRoot, it.newRelativePath) to resolveInside(normalizedRoot, it.oldRelativePath) },
+            normalizedRoot,
+        )
+        batch.originalContents.forEach { (path, content) -> atomicWrite(normalizedRoot.resolve(path), content) }
+    }
+
+    fun copyEntries(root: Path, relativePaths: List<String>, targetRelative: String): List<String> {
+        val targetDirectory = resolveInside(root, targetRelative)
+        require(Files.isDirectory(targetDirectory)) { "Target folder is no longer available." }
+        val copied = mutableListOf<Path>()
+        try {
+            return relativePaths.distinct().map { relative ->
+                val source = resolveInside(root, relative)
+                require(Files.exists(source)) { "Source is no longer available: $relative" }
+                val target = targetDirectory.resolve(source.fileName).normalize()
+                require(!Files.exists(target)) { "${source.fileName} already exists in the target folder." }
+                copyRecursively(source, target)
+                copied.add(target)
+                root.relativize(target).pathString.replace('\\', '/')
+            }
+        } catch (error: Throwable) {
+            copied.asReversed().forEach { runCatching { deleteRecursively(it) } }
+            throw error
+        }
+    }
+
+    fun moveEntries(root: Path, relativePaths: List<String>, targetRelative: String): List<String> {
+        val targetDirectory = resolveInside(root, targetRelative)
+        require(Files.isDirectory(targetDirectory)) { "Target folder is no longer available." }
+        val moved = mutableListOf<Pair<Path, Path>>()
+        try {
+            return relativePaths.distinct().map { relative ->
+                val source = resolveInside(root, relative)
+                val target = targetDirectory.resolve(source.fileName).normalize()
+                require(source != target && !target.startsWith(source)) { "A folder cannot be moved into itself." }
+                require(!Files.exists(target)) { "${source.fileName} already exists in the target folder." }
+                Files.move(source, target)
+                moved += source to target
+                root.relativize(target).pathString.replace('\\', '/')
+            }
+        } catch (error: Throwable) {
+            moved.asReversed().forEach { (source, target) -> runCatching { if (Files.exists(target)) Files.move(target, source) } }
+            throw error
+        }
+    }
+
+    fun trashEntries(root: Path, relativePaths: List<String>): TrashBatch {
+        val trashRoot = root.resolve(".xuexue/trash/${System.currentTimeMillis()}")
+        Files.createDirectories(trashRoot)
+        val entries = mutableListOf<TrashedEntry>()
+        try {
+            relativePaths.distinct().forEach { relative ->
+                val source = resolveInside(root, relative)
+                require(source != root && Files.exists(source)) { "Entry is no longer available: $relative" }
+                val target = trashRoot.resolve(relative).normalize()
+                Files.createDirectories(target.parent)
+                Files.move(source, target)
+                entries += TrashedEntry(source, target)
+            }
+        } catch (error: Throwable) {
+            entries.asReversed().forEach { entry -> runCatching { Files.createDirectories(entry.original.parent); Files.move(entry.trashed, entry.original) } }
+            throw error
+        }
+        return TrashBatch(entries)
+    }
+
+    fun restoreTrash(batch: TrashBatch) {
+        batch.entries.sortedBy { it.original.nameCount }.forEach { entry ->
+            require(!Files.exists(entry.original)) { "Cannot restore ${entry.original.fileName}: the path is occupied." }
+            Files.createDirectories(entry.original.parent)
+            Files.move(entry.trashed, entry.original)
+        }
+    }
+
     fun search(root: Path, query: String): List<SearchHit> {
         if (query.isBlank()) return emptyList()
         val normalized = query.trim()
@@ -102,11 +356,17 @@ class WorkspaceService {
                     Files.size(path) <= MAX_TEXT_BYTES
             }.forEach { path ->
                 Files.readAllLines(path, StandardCharsets.UTF_8).forEachIndexed { index, line ->
-                    if (line.contains(normalized, ignoreCase = true) && hits.size < 200) {
+                    val matchIndex = line.indexOf(normalized, ignoreCase = true)
+                    if (matchIndex >= 0 && hits.size < 200) {
+                        val previewStart = (matchIndex - 60).coerceAtLeast(0)
+                        val previewEnd = (previewStart + 180).coerceAtMost(line.length)
                         hits += SearchHit(
                             relativePath = root.relativize(path).pathString.replace('\\', '/'),
                             line = index + 1,
-                            preview = line.trim().take(180),
+                            preview = line.substring(previewStart, previewEnd),
+                            column = matchIndex + 1,
+                            matchLength = normalized.length,
+                            previewMatchStart = matchIndex - previewStart,
                         )
                     }
                 }
@@ -147,13 +407,59 @@ class WorkspaceService {
             setProperty("workspace", root.toAbsolutePath().normalize().pathString)
             setProperty("openDocuments", state.openDocuments.joinToString(",") { encode(it) })
             setProperty("activeDocument", state.activeDocument?.let(::encode).orEmpty())
+            setProperty("recentDocuments", state.recentDocuments.joinToString(",") { encode(it) })
             setProperty("activeTool", state.activeTool.orEmpty())
             setProperty("leftWidth", state.leftWidth.toString())
             setProperty("agentWidth", state.agentWidth.toString())
+            setProperty("activityRailVisible", state.activityRailVisible.toString())
+            setProperty("activityRailRight", state.activityRailRight.toString())
+            setProperty("toolPanelDock", state.toolPanelDock)
+            setProperty("bottomPanelHeight", state.bottomPanelHeight.toString())
+            setProperty("documentSplit", state.documentSplit)
+            setProperty("secondaryDocument", state.secondaryDocument?.let(::encode).orEmpty())
+            setProperty("activeAgentSession", state.activeAgentSession.orEmpty())
+            setProperty("toolPanelPinned", state.toolPanelPinned.toString())
+            setProperty("toolPanelExpanded", state.toolPanelExpanded.toString())
+            setProperty("detachedDocuments", state.detachedDocuments.joinToString(",") { encode(it) })
+            setProperty("agentFloating", state.agentFloating.toString())
+            setProperty("toolTabs", state.toolTabs.joinToString(","))
+            setProperty("secondaryTool", state.secondaryTool.orEmpty())
+            setProperty("leftPanelVisible", state.leftPanelVisible.toString())
+            setProperty("agentPanelVisible", state.agentPanelVisible.toString())
+            setProperty("workspaceTrusted", state.workspaceTrusted.toString())
+            setProperty("agentReadOnlyMode", state.agentReadOnlyMode.toString())
+            setProperty("agentOfflineMode", state.agentOfflineMode.toString())
+            setProperty("agentAllowWrite", state.agentAllowWrite.toString())
+            setProperty("agentAllowShell", state.agentAllowShell.toString())
+            setProperty("layoutPreset.count", state.customLayoutPresets.size.toString())
+            state.customLayoutPresets.forEachIndexed { index, preset ->
+                val prefix = "layoutPreset.$index."
+                setProperty(prefix + "name", encode(preset.name))
+                setProperty(prefix + "leftPanelVisible", preset.leftPanelVisible.toString())
+                setProperty(prefix + "agentPanelVisible", preset.agentPanelVisible.toString())
+                setProperty(prefix + "activityRailVisible", preset.activityRailVisible.toString())
+                setProperty(prefix + "activityRailRight", preset.activityRailRight.toString())
+                setProperty(prefix + "toolPanelDock", preset.toolPanelDock)
+                setProperty(prefix + "leftWidth", preset.leftWidth.toString())
+                setProperty(prefix + "agentWidth", preset.agentWidth.toString())
+                setProperty(prefix + "bottomPanelHeight", preset.bottomPanelHeight.toString())
+                setProperty(prefix + "activeTool", preset.activeTool)
+                setProperty(prefix + "toolTabs", preset.toolTabs.joinToString(","))
+                setProperty(prefix + "toolPanelPinned", preset.toolPanelPinned.toString())
+                setProperty(prefix + "toolPanelExpanded", preset.toolPanelExpanded.toString())
+                setProperty(prefix + "agentFloating", preset.agentFloating.toString())
+                setProperty(prefix + "documentSplit", preset.documentSplit)
+                setProperty(prefix + "secondaryTool", preset.secondaryTool.orEmpty())
+            }
             state.editorModes.forEach { (path, mode) -> setProperty("mode.${encode(path)}", mode) }
             state.cursorOffsets.forEach { (path, offset) -> setProperty("cursor.${encode(path)}", offset.toString()) }
+            state.editorBlockIndices.forEach { (path, index) -> setProperty("blockIndex.${encode(path)}", index.toString()) }
             state.pdfPages.forEach { (path, page) -> setProperty("page.${encode(path)}", page.toString()) }
             state.pdfZooms.forEach { (path, zoom) -> setProperty("zoom.${encode(path)}", zoom.toString()) }
+            state.pdfFitModes.forEach { (path, mode) -> setProperty("pdfFit.${encode(path)}", mode) }
+            state.pdfViewModes.forEach { (path, mode) -> setProperty("pdfMode.${encode(path)}", mode) }
+            state.pdfSidePanels.forEach { (path, panel) -> setProperty("pdfPanel.${encode(path)}", panel) }
+            state.pdfRotations.forEach { (path, rotation) -> setProperty("pdfRotation.${encode(path)}", rotation.toString()) }
         }
         val target = directory.resolve("workbench.properties")
         val temp = Files.createTempFile(directory, "workbench.", ".tmp")
@@ -176,21 +482,85 @@ class WorkspaceService {
         val cursors = properties.stringPropertyNames()
             .filter { it.startsWith("cursor.") }
             .associate { decode(it.removePrefix("cursor.")) to properties.getProperty(it).toIntOrNull().orZero() }
+        val blockIndices = properties.stringPropertyNames()
+            .filter { it.startsWith("blockIndex.") }
+            .associate { decode(it.removePrefix("blockIndex.")) to properties.getProperty(it).toIntOrNull().orZero() }
         val zooms = properties.stringPropertyNames()
             .filter { it.startsWith("zoom.") }
             .associate { decode(it.removePrefix("zoom.")) to (properties.getProperty(it).toFloatOrNull() ?: 1f) }
+        val pdfModes = properties.stringPropertyNames()
+            .filter { it.startsWith("pdfMode.") }
+            .associate { decode(it.removePrefix("pdfMode.")) to properties.getProperty(it) }
+        val pdfFitModes = properties.stringPropertyNames()
+            .filter { it.startsWith("pdfFit.") }
+            .associate { decode(it.removePrefix("pdfFit.")) to properties.getProperty(it) }
+        val pdfPanels = properties.stringPropertyNames()
+            .filter { it.startsWith("pdfPanel.") }
+            .associate { decode(it.removePrefix("pdfPanel.")) to properties.getProperty(it) }
+        val pdfRotations = properties.stringPropertyNames()
+            .filter { it.startsWith("pdfRotation.") }
+            .associate { decode(it.removePrefix("pdfRotation.")) to (properties.getProperty(it).toFloatOrNull() ?: 0f) }
+        val customLayouts = (0 until (properties.getProperty("layoutPreset.count")?.toIntOrNull() ?: 0)).mapNotNull { index ->
+            val prefix = "layoutPreset.$index."
+            val encodedName = properties.getProperty(prefix + "name") ?: return@mapNotNull null
+            PersistedLayoutPreset(
+                name = runCatching { decode(encodedName) }.getOrDefault(encodedName),
+                leftPanelVisible = properties.getProperty(prefix + "leftPanelVisible")?.toBooleanStrictOrNull() ?: true,
+                agentPanelVisible = properties.getProperty(prefix + "agentPanelVisible")?.toBooleanStrictOrNull() ?: false,
+                activityRailVisible = properties.getProperty(prefix + "activityRailVisible")?.toBooleanStrictOrNull() ?: true,
+                activityRailRight = properties.getProperty(prefix + "activityRailRight")?.toBooleanStrictOrNull() ?: false,
+                toolPanelDock = properties.getProperty(prefix + "toolPanelDock", "LEFT"),
+                leftWidth = properties.getProperty(prefix + "leftWidth")?.toFloatOrNull() ?: 260f,
+                agentWidth = properties.getProperty(prefix + "agentWidth")?.toFloatOrNull() ?: 350f,
+                bottomPanelHeight = properties.getProperty(prefix + "bottomPanelHeight")?.toFloatOrNull() ?: 230f,
+                activeTool = properties.getProperty(prefix + "activeTool", "FILES"),
+                toolTabs = properties.getProperty(prefix + "toolTabs", "").split(',').filter(String::isNotBlank),
+                toolPanelPinned = properties.getProperty(prefix + "toolPanelPinned")?.toBooleanStrictOrNull() ?: true,
+                toolPanelExpanded = properties.getProperty(prefix + "toolPanelExpanded")?.toBooleanStrictOrNull() ?: false,
+                agentFloating = properties.getProperty(prefix + "agentFloating")?.toBooleanStrictOrNull() ?: false,
+                documentSplit = properties.getProperty(prefix + "documentSplit", "NONE"),
+                secondaryTool = properties.getProperty(prefix + "secondaryTool", "").takeIf(String::isNotBlank),
+            )
+        }
         return PersistedWorkbench(
             workspace = properties.getProperty("workspace"),
             openDocuments = properties.getProperty("openDocuments", "")
                 .split(',').filter { it.isNotBlank() }.map(::decode),
             activeDocument = properties.getProperty("activeDocument", "").takeIf { it.isNotBlank() }?.let(::decode),
+            recentDocuments = properties.getProperty("recentDocuments", "").split(',').filter { it.isNotBlank() }.mapNotNull { encoded -> runCatching { decode(encoded) }.getOrNull() },
             activeTool = properties.getProperty("activeTool", "").takeIf { it.isNotBlank() },
             leftWidth = properties.getProperty("leftWidth")?.toFloatOrNull() ?: 260f,
             agentWidth = properties.getProperty("agentWidth")?.toFloatOrNull() ?: 350f,
+            activityRailVisible = properties.getProperty("activityRailVisible")?.toBooleanStrictOrNull() ?: true,
+            activityRailRight = properties.getProperty("activityRailRight")?.toBooleanStrictOrNull() ?: false,
+            toolPanelDock = properties.getProperty("toolPanelDock", "LEFT"),
+            bottomPanelHeight = properties.getProperty("bottomPanelHeight")?.toFloatOrNull() ?: 230f,
+            documentSplit = properties.getProperty("documentSplit", "NONE"),
+            secondaryDocument = properties.getProperty("secondaryDocument", "").takeIf { it.isNotBlank() }?.let(::decode),
+            activeAgentSession = properties.getProperty("activeAgentSession", "").takeIf { it.isNotBlank() },
+            toolPanelPinned = properties.getProperty("toolPanelPinned")?.toBooleanStrictOrNull() ?: true,
+            toolPanelExpanded = properties.getProperty("toolPanelExpanded")?.toBooleanStrictOrNull() ?: false,
+            detachedDocuments = properties.getProperty("detachedDocuments", "").split(',').filter { it.isNotBlank() }.map(::decode),
+            agentFloating = properties.getProperty("agentFloating")?.toBooleanStrictOrNull() ?: false,
+            toolTabs = properties.getProperty("toolTabs", "").split(',').filter { it.isNotBlank() },
+            secondaryTool = properties.getProperty("secondaryTool", "").takeIf(String::isNotBlank),
+            leftPanelVisible = properties.getProperty("leftPanelVisible")?.toBooleanStrictOrNull() ?: true,
+            agentPanelVisible = properties.getProperty("agentPanelVisible")?.toBooleanStrictOrNull() ?: true,
+            workspaceTrusted = properties.getProperty("workspaceTrusted")?.toBooleanStrictOrNull() ?: true,
+            agentReadOnlyMode = properties.getProperty("agentReadOnlyMode")?.toBooleanStrictOrNull() ?: false,
+            agentOfflineMode = properties.getProperty("agentOfflineMode")?.toBooleanStrictOrNull() ?: false,
+            agentAllowWrite = properties.getProperty("agentAllowWrite")?.toBooleanStrictOrNull() ?: true,
+            agentAllowShell = properties.getProperty("agentAllowShell")?.toBooleanStrictOrNull() ?: true,
+            customLayoutPresets = customLayouts,
             editorModes = modes,
             cursorOffsets = cursors,
+            editorBlockIndices = blockIndices,
             pdfPages = pages,
             pdfZooms = zooms,
+            pdfFitModes = pdfFitModes,
+            pdfViewModes = pdfModes,
+            pdfSidePanels = pdfPanels,
+            pdfRotations = pdfRotations,
         )
     }
 
@@ -209,6 +579,86 @@ class WorkspaceService {
     }
 
     private fun appStateFile(): Path = Path.of(System.getProperty("user.home"), ".xuexue", "last-workspace")
+
+    private fun resolveInside(root: Path, relative: String): Path {
+        val normalizedRoot = root.toAbsolutePath().normalize()
+        val path = normalizedRoot.resolve(relative.replace('\\', '/')).normalize()
+        require(path.startsWith(normalizedRoot)) { "Path escapes the workspace." }
+        return path
+    }
+
+    private fun validateEntryName(name: String): String {
+        val clean = name.trim()
+        require(clean.isNotEmpty() && clean !in setOf(".", "..") && '/' !in clean && '\\' !in clean) { "Enter a valid file or folder name." }
+        return clean
+    }
+
+    private fun copyRecursively(source: Path, target: Path) {
+        if (Files.isDirectory(source)) {
+            Files.walk(source).use { paths ->
+                paths.forEach { path ->
+                    val destination = target.resolve(source.relativize(path).pathString)
+                    if (Files.isDirectory(path)) Files.createDirectories(destination)
+                    else Files.copy(path, destination)
+                }
+            }
+        } else {
+            Files.copy(source, target)
+        }
+    }
+
+    private fun deleteRecursively(path: Path) {
+        if (!Files.exists(path)) return
+        Files.walk(path).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists) }
+    }
+
+    private fun rewriteWikiTarget(content: String, oldStem: String, newStem: String): String {
+        return rewriteWikiTargets(content, mapOf(oldStem to newStem))
+    }
+
+    private fun rewriteWikiTargets(content: String, renames: Map<String, String>): String {
+        val target = Regex("(!?\\[\\[)([^]#^|]+)")
+        return target.replace(content) { match ->
+            val raw = match.groupValues[2]
+            val normalized = raw.trim()
+            val oldStem = normalized.substringAfterLast('/').removeSuffix(".md")
+            val newStem = renames[oldStem] ?: return@replace match.value
+            val prefix = normalized.substringBeforeLast('/', "").let { if (it.isBlank()) "" else "$it/" }
+            val extension = if (normalized.endsWith(".md")) ".md" else ""
+            match.groupValues[1] + prefix + newStem + extension
+        }
+    }
+
+    private fun moveAtomically(moves: List<Pair<Path, Path>>, root: Path) {
+        if (moves.isEmpty()) return
+        val stagingRoot = root.resolve(".xuexue/rename-staging/${UUID.randomUUID()}")
+        Files.createDirectories(stagingRoot)
+        val staged = mutableListOf<Triple<Path, Path, Path>>()
+        try {
+            moves.forEachIndexed { index, (source, target) ->
+                require(Files.exists(source)) { "The entry is no longer available: ${source.fileName}" }
+                val temporary = stagingRoot.resolve(index.toString())
+                Files.move(source, temporary)
+                staged += Triple(source, temporary, target)
+            }
+            staged.forEach { (_, temporary, target) ->
+                Files.createDirectories(target.parent)
+                Files.move(temporary, target)
+            }
+        } catch (error: Throwable) {
+            staged.asReversed().forEach { (source, temporary, target) ->
+                runCatching {
+                    when {
+                        Files.exists(temporary) -> Files.move(temporary, source)
+                        Files.exists(target) -> Files.move(target, source)
+                    }
+                }
+            }
+            throw error
+        } finally {
+            runCatching { deleteRecursively(stagingRoot) }
+        }
+    }
     private fun encode(value: String): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value.toByteArray())
     private fun decode(value: String): String = String(Base64.getUrlDecoder().decode(value))
     private fun Int?.orZero(): Int = this ?: 0
