@@ -1,34 +1,49 @@
 package dev.xuexue
 
-import dev.xuexue.core.DocumentKind
-import dev.xuexue.core.DocumentSplitDirection
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import dev.xuexue.core.AgentApprovalDecision
 import dev.xuexue.core.AgentApprovalRequest
 import dev.xuexue.core.AgentOperationKind
+import dev.xuexue.core.AgentStreamEvent
+import dev.xuexue.core.DocumentKind
+import dev.xuexue.core.DocumentSplitDirection
+import dev.xuexue.core.PiAgentMessage
+import dev.xuexue.core.PiModelResponse
+import dev.xuexue.core.PiToolCall
+import dev.xuexue.core.PiToolDefinition
+import dev.xuexue.core.ToolWindow
 import dev.xuexue.core.WorkbenchCommand
 import dev.xuexue.core.WorkbenchFocusTarget
-import dev.xuexue.core.ToolWindow
-import dev.xuexue.platform.AgentMessage
 import dev.xuexue.platform.AgentClient
+import dev.xuexue.platform.AgentMessage
 import dev.xuexue.platform.AgentProviderConfig
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
-import kotlinx.coroutines.CoroutineScope
+import dev.xuexue.platform.PdfDocumentMetadata
+import dev.xuexue.platform.PdfPageDimensions
+import dev.xuexue.platform.PdfPageRaster
+import dev.xuexue.platform.PdfRasterPurpose
+import dev.xuexue.platform.PdfRasterRequest
+import dev.xuexue.platform.PdfReaderBackend
+import dev.xuexue.platform.PdfSearchMatch
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.nio.file.Files
+import java.nio.file.Path
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertTrue
-import kotlin.test.assertNull
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class WorkbenchStateTest {
     @Test
@@ -65,39 +80,45 @@ class WorkbenchStateTest {
     }
 
     @Test
-    fun runningAgentQueuesSteeringUntilCurrentResponseCompletes() = runBlocking {
-        val started = CompletableDeferred<Unit>()
-        val release = CompletableDeferred<Unit>()
-        var calls = 0
-        val client = object : AgentClient {
-            override suspend fun stream(messages: List<AgentMessage>, config: AgentProviderConfig, onText: (String) -> Unit) {
-                calls++
-                if (calls == 1) {
-                    started.complete(Unit)
-                    release.await()
+    fun runningAgentQueuesSteeringUntilCurrentResponseCompletes() =
+        runBlocking {
+            val started = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            var calls = 0
+            val client =
+                object : AgentClient {
+                    override suspend fun stream(
+                        messages: List<AgentMessage>,
+                        config: AgentProviderConfig,
+                        onEvent: (AgentStreamEvent) -> Unit,
+                    ) {
+                        calls++
+                        if (calls == 1) {
+                            started.complete(Unit)
+                            release.await()
+                        }
+                        onEvent(AgentStreamEvent.TextDelta("done"))
+                    }
                 }
-                onText("done")
+            val state = WorkbenchState(this, agentClient = client)
+            state.agentModel = "test-model"
+            state.agentApiKey = "test-key"
+            state.agentInput = "first"
+            state.sendAgentMessage()
+            started.await()
+
+            state.agentInput = "adjust direction"
+            state.sendAgentMessage()
+            assertTrue(state.agentRunning)
+            assertEquals("steering_queued", state.agentMessages.last().role)
+
+            release.complete(Unit)
+            withTimeout(2_000) {
+                while (state.agentRunning || calls < 2) yield()
             }
+            assertEquals(2, calls)
+            assertTrue(state.agentMessages.any { it.role == "steering" && it.content == "adjust direction" })
         }
-        val state = WorkbenchState(this, agentClient = client)
-        state.agentModel = "test-model"
-        state.agentApiKey = "test-key"
-        state.agentInput = "first"
-        state.sendAgentMessage()
-        started.await()
-
-        state.agentInput = "adjust direction"
-        state.sendAgentMessage()
-        assertTrue(state.agentRunning)
-        assertEquals("steering_queued", state.agentMessages.last().role)
-
-        release.complete(Unit)
-        withTimeout(2_000) {
-            while (state.agentRunning || calls < 2) yield()
-        }
-        assertEquals(2, calls)
-        assertTrue(state.agentMessages.any { it.role == "steering" && it.content == "adjust direction" })
-    }
 
     @Test
     fun unavailableAgentKeepsDraftAndDoesNotCreateMessages() {
@@ -114,25 +135,130 @@ class WorkbenchStateTest {
     }
 
     @Test
-    fun agentSnippetContextIsSentWithTheNextRequest() = runBlocking {
-        val captured = CompletableDeferred<List<AgentMessage>>()
-        val client = object : AgentClient {
-            override suspend fun stream(messages: List<AgentMessage>, config: AgentProviderConfig, onText: (String) -> Unit) {
-                captured.complete(messages)
-                onText("done")
+    fun agentSnippetContextIsSentWithTheNextRequest() =
+        runBlocking {
+            val captured = CompletableDeferred<List<AgentMessage>>()
+            val client =
+                object : AgentClient {
+                    override suspend fun stream(
+                        messages: List<AgentMessage>,
+                        config: AgentProviderConfig,
+                        onEvent: (AgentStreamEvent) -> Unit,
+                    ) {
+                        captured.complete(messages)
+                        onEvent(AgentStreamEvent.TextDelta("done"))
+                    }
+                }
+            val state = WorkbenchState(this, agentClient = client)
+            state.agentModel = "test-model"
+            state.agentApiKey = "test-key"
+            state.addAgentSnippetContext("Reading.pdf · 第 3 页选区", "Source: [[Reading.pdf#page=3]]\n\nImportant quote")
+            state.agentInput = "summarize"
+
+            state.sendAgentMessage()
+
+            val request = withTimeout(2_000) { captured.await() }
+            assertTrue(request.any { it.role == "system" && it.content.contains("Important quote") && it.content.contains("Reading.pdf") })
+        }
+
+    @Test
+    fun structuredAgentEventsAreProjectedIntoInspectableUiMessages() =
+        runBlocking {
+            val client =
+                object : AgentClient {
+                    override suspend fun stream(
+                        messages: List<AgentMessage>,
+                        config: AgentProviderConfig,
+                        onEvent: (AgentStreamEvent) -> Unit,
+                    ) {
+                        onEvent(AgentStreamEvent.ReasoningDelta("Checking the workspace"))
+                        onEvent(AgentStreamEvent.ToolStarted("call-1", "read", "Note.md"))
+                        onEvent(AgentStreamEvent.ToolProgress("call-1", "Reading 12 lines"))
+                        onEvent(AgentStreamEvent.ToolFinished("call-1", "File contents"))
+                        onEvent(AgentStreamEvent.FileDiff("Note.md", "@@ -1 +1 @@\n-old\n+new"))
+                        onEvent(AgentStreamEvent.TextDelta("Finished"))
+                        onEvent(AgentStreamEvent.Usage(inputTokens = 120, outputTokens = 30, costUsd = 0.0012))
+                    }
+                }
+            val state = WorkbenchState(this, agentClient = client)
+            state.agentModel = "test-model"
+            state.agentApiKey = "test-key"
+            state.agentInput = "update the note"
+
+            state.sendAgentMessage()
+            withTimeout(2_000) { while (state.agentRunning) yield() }
+
+            assertTrue(state.agentMessages.any { it.role == "reasoning" && it.content.contains("Checking") })
+            assertTrue(state.agentMessages.any { it.role == "tool_call" && it.streamId == "call-1" && it.content.contains("12 lines") })
+            assertTrue(state.agentMessages.any { it.role == "tool" && it.streamId == "call-1" && it.content == "File contents" })
+            assertTrue(state.agentMessages.any { it.role == "diff" && it.content.contains("+++ b/Note.md") })
+            assertTrue(state.agentMessages.any { it.role == "assistant" && it.content == "Finished" })
+            assertEquals(150, state.activeAgentSession.inputTokens + state.activeAgentSession.outputTokens)
+            assertEquals(0.0012, state.activeAgentSession.costUsd)
+        }
+
+    @Test
+    fun agentToolLoopWritesInsideWorkspaceAndContinuesWithTheToolResult() =
+        runBlocking {
+            val root = Files.createTempDirectory("xuexue-agent-tools")
+            var calls = 0
+            val client =
+                object : AgentClient {
+                    override suspend fun stream(
+                        messages: List<AgentMessage>,
+                        config: AgentProviderConfig,
+                        onEvent: (AgentStreamEvent) -> Unit,
+                    ) = Unit
+
+                    override suspend fun complete(
+                        messages: List<PiAgentMessage>,
+                        tools: List<PiToolDefinition>,
+                        config: AgentProviderConfig,
+                        onEvent: (AgentStreamEvent) -> Unit,
+                    ): PiModelResponse {
+                        calls++
+                        return if (calls == 1) {
+                            assertTrue(tools.any { it.name == "write" })
+                            PiModelResponse(
+                                toolCalls =
+                                    listOf(
+                                        PiToolCall(
+                                            "write-1",
+                                            "write",
+                                            buildJsonObject {
+                                                put("path", "Note.md")
+                                                put("content", "Created by the agent")
+                                            },
+                                        ),
+                                    ),
+                            )
+                        } else {
+                            assertEquals("tool", messages.last().role)
+                            assertTrue(messages.last().content.contains("Wrote Note.md"))
+                            onEvent(AgentStreamEvent.TextDelta("File created."))
+                            PiModelResponse(content = "File created.")
+                        }
+                    }
+                }
+            val state = WorkbenchState(this, agentClient = client)
+            try {
+                state.openWorkspace(root)
+                state.agentModel = "test-model"
+                state.agentApiKey = "test-key"
+                state.agentInput = "Create Note.md"
+                state.sendAgentMessage()
+
+                withTimeout(2_000) { while (state.agentRunning) yield() }
+                assertEquals("Created by the agent", Files.readString(root.resolve("Note.md")))
+                assertEquals(2, calls)
+                assertTrue(state.agentMessages.any { it.role == "tool" && it.content.contains("Wrote Note.md") })
+                assertTrue(state.agentMessages.any { it.role == "diff" && it.content.contains("+++ b/Note.md") })
+                assertTrue(state.agentMessages.any { it.role == "assistant" && it.content == "File created." })
+            } finally {
+                state.closeWorkspace().join()
+                Files.walk(root).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists) }
             }
         }
-        val state = WorkbenchState(this, agentClient = client)
-        state.agentModel = "test-model"
-        state.agentApiKey = "test-key"
-        state.addAgentSnippetContext("Reading.pdf · 第 3 页选区", "Source: [[Reading.pdf#page=3]]\n\nImportant quote")
-        state.agentInput = "summarize"
-
-        state.sendAgentMessage()
-
-        val request = withTimeout(2_000) { captured.await() }
-        assertTrue(request.any { it.role == "system" && it.content.contains("Important quote") && it.content.contains("Reading.pdf") })
-    }
 
     @Test
     fun focusCommandsRevealAndTargetWorkbenchRegions() {
@@ -163,7 +289,79 @@ class WorkbenchStateTest {
         state.setPdfPosition(zoom = 1.5f, document = pdf)
         assertEquals("MANUAL", pdf.pdfFitMode)
         assertEquals(1.5f, pdf.pdfZoom)
+
+        state.setPdfPosition(page = 4, scrollOffset = 620, document = pdf)
+        assertEquals(4, pdf.pdfPage)
+        assertEquals(620, pdf.pdfScrollOffset)
+
+        pdf.pdfHorizontalOffset = 120
+        pdf.pdfVerticalOffset = 340
+        state.setPdfPosition(page = 5, document = pdf)
+        assertEquals(0, pdf.pdfScrollOffset)
+        assertEquals(0, pdf.pdfHorizontalOffset)
+        assertEquals(0, pdf.pdfVerticalOffset)
     }
+
+    @Test
+    fun pdfUiOperationsUseTheInjectedBackendBoundary() =
+        runBlocking {
+            val root = Files.createTempDirectory("xuexue-pdf-backend")
+            val stateJob = SupervisorJob()
+            val requests = mutableListOf<PdfRasterRequest>()
+            val inspectedPaths = mutableListOf<Path>()
+            val backend =
+                object : PdfReaderBackend {
+                    override suspend fun inspect(path: Path): PdfDocumentMetadata {
+                        inspectedPaths.add(path)
+                        return PdfDocumentMetadata(pageCount = 7)
+                    }
+
+                    override suspend fun pageDimensions(
+                        path: Path,
+                        pageIndex: Int,
+                    ): PdfPageDimensions = PdfPageDimensions(612f, 792f)
+
+                    override suspend fun render(request: PdfRasterRequest): PdfPageRaster {
+                        requests += request
+                        return PdfPageRaster(request.pageIndex, 1, 1, byteArrayOf(1, 2, 3, 4))
+                    }
+
+                    override suspend fun search(
+                        path: Path,
+                        query: String,
+                    ): List<PdfSearchMatch> = listOf(PdfSearchMatch(pageIndex = 4, preview = "matching text"))
+
+                    override suspend fun extractPageText(
+                        path: Path,
+                        pageIndex: Int,
+                    ): String = "page $pageIndex"
+                }
+            val state =
+                WorkbenchState(
+                    scope = CoroutineScope(stateJob + Dispatchers.Unconfined),
+                    pdfReaderBackend = backend,
+                )
+            try {
+                Files.write(root.resolve("Reading.pdf"), byteArrayOf(0))
+                state.openWorkspace(root)
+                state.openRelative("Reading.pdf", pinned = true)
+                val tab = state.activeDocument!!
+
+                assertEquals(7, state.inspectPdf(tab).pageCount)
+                assertEquals(root.resolve("Reading.pdf"), inspectedPaths.single())
+                assertEquals(
+                    byteArrayOf(1, 2, 3, 4).toList(),
+                    state.renderPdfPage(tab, 2, 96f, PdfRasterPurpose.VIEWPORT).rgbaBytes.toList(),
+                )
+                assertEquals(PdfRasterPurpose.VIEWPORT, requests.single().purpose)
+                assertEquals(4, state.searchPdf(tab, "match").single().pageIndex)
+                assertEquals("page 3", state.extractPdfPageText(tab, 3))
+            } finally {
+                state.closeWorkspace().join()
+                stateJob.cancelAndJoin()
+                Files.walk(root).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists) }
+            }
+        }
 
     @Test
     fun agentDocumentIsUniqueAndTakesWorkbenchFocus() {
@@ -334,7 +532,12 @@ class WorkbenchStateTest {
     @Test
     fun navigationHistoryRestoresCursorAndPdfPage() {
         val state = WorkbenchState(CoroutineScope(EmptyCoroutineContext))
-        val note = DocumentTab("A.md", DocumentKind.MARKDOWN, "alpha", pinned = true).apply { cursor = androidx.compose.ui.text.TextRange(3) }
+        val note =
+            DocumentTab("A.md", DocumentKind.MARKDOWN, "alpha", pinned = true).apply {
+                cursor =
+                    androidx.compose.ui.text
+                        .TextRange(3)
+            }
         val pdf = DocumentTab("B.pdf", DocumentKind.PDF, "", pinned = true).apply { pdfPage = 6 }
         state.documents += note
         state.documents += pdf
@@ -381,40 +584,41 @@ class WorkbenchStateTest {
     }
 
     @Test
-    fun saveFailureCanRetryAndSaveAsInsideWorkspace() = runBlocking {
-        val root = Files.createTempDirectory("xuexue-save-recovery")
-        val stateJob = SupervisorJob()
-        val state = WorkbenchState(CoroutineScope(stateJob + Dispatchers.Unconfined))
-        try {
-            Files.createDirectories(root.resolve("notes"))
-            Files.writeString(root.resolve("notes/Note.md"), "original")
-            state.openWorkspace(root)
-            state.openRelative("notes/Note.md", pinned = true)
-            val tab = state.activeDocument!!
-            tab.content = "changed"
+    fun saveFailureCanRetryAndSaveAsInsideWorkspace() =
+        runBlocking {
+            val root = Files.createTempDirectory("xuexue-save-recovery")
+            val stateJob = SupervisorJob()
+            val state = WorkbenchState(CoroutineScope(stateJob + Dispatchers.Unconfined))
+            try {
+                Files.createDirectories(root.resolve("notes"))
+                Files.writeString(root.resolve("notes/Note.md"), "original")
+                state.openWorkspace(root)
+                state.openRelative("notes/Note.md", pinned = true)
+                val tab = state.activeDocument!!
+                tab.content = "changed"
 
-            Files.delete(root.resolve("notes/Note.md"))
-            Files.delete(root.resolve("notes"))
-            Files.writeString(root.resolve("notes"), "blocks parent directory")
-            state.save(tab)
-            assertNotNull(tab.saveError)
+                Files.delete(root.resolve("notes/Note.md"))
+                Files.delete(root.resolve("notes"))
+                Files.writeString(root.resolve("notes"), "blocks parent directory")
+                state.save(tab).join()
+                assertNotNull(tab.saveError)
 
-            Files.delete(root.resolve("notes"))
-            Files.createDirectories(root.resolve("notes"))
-            state.retrySave(tab)
-            assertNull(tab.saveError)
-            assertEquals("changed", Files.readString(root.resolve("notes/Note.md")))
+                Files.delete(root.resolve("notes"))
+                Files.createDirectories(root.resolve("notes"))
+                state.retrySave(tab).join()
+                assertNull(tab.saveError)
+                assertEquals("changed", Files.readString(root.resolve("notes/Note.md")))
 
-            tab.content = "saved elsewhere"
-            state.saveAs(tab, root.resolve("Recovered.md"))
-            assertEquals("Recovered.md", tab.relativePath)
-            assertEquals("saved elsewhere", Files.readString(root.resolve("Recovered.md")))
-            assertTrue("Recovered.md" in state.recentDocuments)
-        } finally {
-            state.closeWorkspace()
-            stateJob.cancelAndJoin()
-            val paths = if (Files.exists(root)) Files.walk(root).use { it.sorted(Comparator.reverseOrder()).toList() } else emptyList()
-            paths.forEach { path -> runCatching { Files.deleteIfExists(path) } }
+                tab.content = "saved elsewhere"
+                state.saveAs(tab, root.resolve("Recovered.md"))?.join()
+                assertEquals("Recovered.md", tab.relativePath)
+                assertEquals("saved elsewhere", Files.readString(root.resolve("Recovered.md")))
+                assertTrue("Recovered.md" in state.recentDocuments)
+            } finally {
+                state.closeWorkspace().join()
+                stateJob.cancelAndJoin()
+                val paths = if (Files.exists(root)) Files.walk(root).use { it.sorted(Comparator.reverseOrder()).toList() } else emptyList()
+                paths.forEach { path -> runCatching { Files.deleteIfExists(path) } }
+            }
         }
-    }
 }

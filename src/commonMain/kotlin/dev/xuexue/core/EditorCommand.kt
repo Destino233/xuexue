@@ -1,6 +1,9 @@
 package dev.xuexue.core
 
-data class TextSelection(val start: Int, val end: Int) {
+data class TextSelection(
+    val start: Int,
+    val end: Int,
+) {
     fun normalized(length: Int): TextSelection {
         val first = minOf(start, end).coerceIn(0, length)
         val last = maxOf(start, end).coerceIn(0, length)
@@ -28,7 +31,11 @@ enum class EditorCommand {
 }
 
 object EditorCommands {
-    fun apply(command: EditorCommand, source: String, selection: TextSelection): EditResult {
+    fun apply(
+        command: EditorCommand,
+        source: String,
+        selection: TextSelection,
+    ): EditResult {
         val range = selection.normalized(source.length)
         return when (command) {
             EditorCommand.BOLD -> wrap(source, range, "**", "**", "bold")
@@ -59,9 +66,15 @@ object EditorCommands {
         return EditResult(text, TextSelection(bodyStart, bodyStart + body.length))
     }
 
-    private fun prefixLines(source: String, selection: TextSelection, prefix: String): EditResult {
-        val lineStart = source.lastIndexOf('\n', (selection.start - 1).coerceAtLeast(0))
-            .let { if (it < 0) 0 else it + 1 }
+    private fun prefixLines(
+        source: String,
+        selection: TextSelection,
+        prefix: String,
+    ): EditResult {
+        val lineStart =
+            source
+                .lastIndexOf('\n', (selection.start - 1).coerceAtLeast(0))
+                .let { if (it < 0) 0 else it + 1 }
         val lineEnd = source.indexOf('\n', selection.end).let { if (it < 0) source.length else it }
         val original = source.substring(lineStart, lineEnd)
         val replacement = original.lineSequence().joinToString("\n") { prefix + it }
@@ -71,9 +84,14 @@ object EditorCommands {
         )
     }
 
-    private fun prefixNumberedLines(source: String, selection: TextSelection): EditResult {
-        val lineStart = source.lastIndexOf('\n', (selection.start - 1).coerceAtLeast(0))
-            .let { if (it < 0) 0 else it + 1 }
+    private fun prefixNumberedLines(
+        source: String,
+        selection: TextSelection,
+    ): EditResult {
+        val lineStart =
+            source
+                .lastIndexOf('\n', (selection.start - 1).coerceAtLeast(0))
+                .let { if (it < 0) 0 else it + 1 }
         val lineEnd = source.indexOf('\n', selection.end).let { if (it < 0) source.length else it }
         val original = source.substring(lineStart, lineEnd)
         val replacement = original.lines().mapIndexed { index, line -> "${index + 1}. $line" }.joinToString("\n")
@@ -83,4 +101,3 @@ object EditorCommands {
         )
     }
 }
-

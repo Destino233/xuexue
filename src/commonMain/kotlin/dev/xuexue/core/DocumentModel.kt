@@ -63,19 +63,41 @@ data class MarkdownAnalysis(
 )
 
 sealed interface MarkdownBlock {
-    data class HeadingBlock(val level: Int, val text: String) : MarkdownBlock
-    data class Paragraph(val text: String) : MarkdownBlock
-    data class Quote(val text: String) : MarkdownBlock
-    data class ListItem(val text: String, val ordered: Boolean) : MarkdownBlock
-    data class CodeBlock(val language: String?, val code: String) : MarkdownBlock
-    data class MathBlock(val source: String) : MarkdownBlock
+    data class HeadingBlock(
+        val level: Int,
+        val text: String,
+    ) : MarkdownBlock
+
+    data class Paragraph(
+        val text: String,
+    ) : MarkdownBlock
+
+    data class Quote(
+        val text: String,
+    ) : MarkdownBlock
+
+    data class ListItem(
+        val text: String,
+        val ordered: Boolean,
+        val ordinal: Int? = null,
+    ) : MarkdownBlock
+
+    data class CodeBlock(
+        val language: String?,
+        val code: String,
+    ) : MarkdownBlock
+
+    data class MathBlock(
+        val source: String,
+    ) : MarkdownBlock
+
     data object Divider : MarkdownBlock
 }
 
 object MarkdownParser {
     private val wikiLink = Regex("!?\\[\\[([^]#^|]+)(?:[#^][^]|]+)?(?:\\|([^]]+))?]]")
     private val tag = Regex("(?<![\\p{L}\\p{N}_#])#([\\p{L}\\p{N}_/-]+)")
-    private val orderedItem = Regex("^\\s*\\d+[.)]\\s+(.+)$")
+    private val orderedItem = Regex("^\\s*(\\d+)[.)]\\s+(.+)$")
     private val blockId = Regex("(?:^|\\s)\\^([A-Za-z0-9_-]+)\\s*$")
     private val property = Regex("^([A-Za-z0-9_.-]+)\\s*:")
 
@@ -89,26 +111,40 @@ object MarkdownParser {
 
         source.lineSequence().forEachIndexed { index, line ->
             val trimmed = line.trimStart()
-            if (index == 0 && trimmed.trim() == "---") inFrontmatter = true
-            else if (inFrontmatter && trimmed.trim() == "---") inFrontmatter = false
-            else if (inFrontmatter) property.find(trimmed)?.groupValues?.getOrNull(1)?.let(properties::add)
+            if (index == 0 && trimmed.trim() == "---") {
+                inFrontmatter = true
+            } else if (inFrontmatter && trimmed.trim() == "---") {
+                inFrontmatter = false
+            } else if (inFrontmatter) {
+                property
+                    .find(trimmed)
+                    ?.groupValues
+                    ?.getOrNull(1)
+                    ?.let(properties::add)
+            }
             val hashes = trimmed.takeWhile { it == '#' }.length
             if (hashes in 1..6 && trimmed.getOrNull(hashes) == ' ') {
                 headings += Heading(hashes, trimmed.drop(hashes + 1).trim(), index + 1)
             }
             wikiLink.findAll(line).forEach { match ->
-                links += WikiLink(
-                    target = match.groupValues[1].trim(),
-                    alias = match.groupValues[2].trim().ifBlank { null },
-                    line = index + 1,
-                )
+                links +=
+                    WikiLink(
+                        target = match.groupValues[1].trim(),
+                        alias = match.groupValues[2].trim().ifBlank { null },
+                        line = index + 1,
+                    )
             }
             tag.findAll(line).forEach { match -> tags += match.groupValues[1] }
-            blockId.find(line)?.groupValues?.getOrNull(1)?.let(blockIds::add)
+            blockId
+                .find(line)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.let(blockIds::add)
         }
         return MarkdownAnalysis(headings, links, tags, blockIds, properties)
     }
 
+    @Suppress("LongMethod", "CyclomaticComplexMethod")
     fun blocks(source: String): List<MarkdownBlock> {
         val result = mutableListOf<MarkdownBlock>()
         val paragraph = mutableListOf<String>()
@@ -118,10 +154,9 @@ object MarkdownParser {
         var inMath = false
 
         fun flushParagraph() {
-            if (paragraph.isNotEmpty()) {
-                result += MarkdownBlock.Paragraph(paragraph.joinToString(" ").trim())
-                paragraph.clear()
-            }
+            if (paragraph.isEmpty()) return
+            result += MarkdownBlock.Paragraph(paragraph.joinToString(" ").trim())
+            paragraph.clear()
         }
 
         source.lineSequence().forEach { rawLine ->
@@ -170,28 +205,54 @@ object MarkdownParser {
                     flushParagraph()
                     result += MarkdownBlock.HeadingBlock(hashes, trimmed.drop(hashes + 1).trim())
                 }
+
                 trimmed == "---" || trimmed == "***" -> {
                     flushParagraph()
                     result += MarkdownBlock.Divider
                 }
+
                 trimmed.startsWith("> ") -> {
                     flushParagraph()
                     result += MarkdownBlock.Quote(trimmed.removePrefix("> "))
                 }
+
                 trimmed.startsWith("- ") || trimmed.startsWith("* ") -> {
                     flushParagraph()
                     result += MarkdownBlock.ListItem(trimmed.drop(2), ordered = false)
                 }
+
                 orderedItem.matches(trimmed) -> {
                     flushParagraph()
-                    result += MarkdownBlock.ListItem(orderedItem.matchEntire(trimmed)!!.groupValues[1], ordered = true)
+                    val match = orderedItem.matchEntire(trimmed)!!
+                    result +=
+                        MarkdownBlock.ListItem(
+                            match.groupValues[2],
+                            ordered = true,
+                            ordinal = match.groupValues[1].toIntOrNull(),
+                        )
                 }
-                else -> paragraph += trimmed
+
+                else -> {
+                    paragraph += trimmed
+                }
             }
         }
-        if (inFence) result += MarkdownBlock.CodeBlock(fenceLanguage, fenced.joinToString("\n"))
-        else if (inMath) result += MarkdownBlock.MathBlock(fenced.joinToString("\n"))
+        appendTrailingBlock(result, fenced, fenceLanguage, inFence, inMath)
         flushParagraph()
         return result
+    }
+
+    private fun appendTrailingBlock(
+        result: MutableList<MarkdownBlock>,
+        fenced: List<String>,
+        fenceLanguage: String?,
+        inFence: Boolean,
+        inMath: Boolean,
+    ) {
+        if (inFence) {
+            result += MarkdownBlock.CodeBlock(fenceLanguage, fenced.joinToString("\n"))
+        } else if (inMath) {
+            result += MarkdownBlock.MathBlock(fenced.joinToString("\n"))
+        }
     }
 }

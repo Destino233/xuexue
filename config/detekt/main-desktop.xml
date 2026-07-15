@@ -1,0 +1,613 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ComplexCondition:ToolWindows.kt:!state.isLoading &amp;&amp; state.backgroundTasks.isEmpty() &amp;&amp; !state.agentRunning &amp;&amp; state.errorMessage == null</ID>
+    <ID>ComplexCondition:ToolWindows.kt:name.isBlank() || name in setOf(".", "..") || '/' in name || '\\' in name</ID>
+    <ID>CyclomaticComplexMethod:AgentViews.kt:@Composable fun AgentPanel</ID>
+    <ID>CyclomaticComplexMethod:AgentViews.kt:@Composable private fun AgentMessageBubble</ID>
+    <ID>CyclomaticComplexMethod:DocumentModel.kt:MarkdownParser$fun blocks: List&lt;MarkdownBlock&gt;</ID>
+    <ID>CyclomaticComplexMethod:DocumentViews.kt:@Composable private fun DocumentTabs</ID>
+    <ID>CyclomaticComplexMethod:DocumentViews.kt:@Composable private fun MarkdownBlockView</ID>
+    <ID>CyclomaticComplexMethod:DocumentViews.kt:@Composable private fun StructuredNodeEditor</ID>
+    <ID>CyclomaticComplexMethod:MarkdownEditing.kt:MarkdownEditing$fun parseNodes: List&lt;MarkdownEditNode&gt;</ID>
+    <ID>CyclomaticComplexMethod:PdfDocumentView.kt:@Composable internal fun PdfDocument</ID>
+    <ID>CyclomaticComplexMethod:ToolWindows.kt:@Composable private fun FileTreeRow</ID>
+    <ID>CyclomaticComplexMethod:ToolWindows.kt:@Composable private fun FilesTool</ID>
+    <ID>CyclomaticComplexMethod:ToolWindows.kt:private fun buildVisibleEntries: List&lt;Pair&lt;WorkspaceEntry, Int&gt;&gt;</ID>
+    <ID>CyclomaticComplexMethod:WorkbenchApp.kt:@Composable fun WorkbenchApp</ID>
+    <ID>CyclomaticComplexMethod:WorkbenchApp.kt:@Composable private fun DesktopWorkbench</ID>
+    <ID>CyclomaticComplexMethod:WorkbenchState.kt:WorkbenchState$fun execute</ID>
+    <ID>CyclomaticComplexMethod:WorkbenchState.kt:WorkbenchState$fun openRelative</ID>
+    <ID>CyclomaticComplexMethod:WorkbenchState.kt:WorkbenchState$suspend fun openWorkspace</ID>
+    <ID>CyclomaticComplexMethod:WorkbenchSubstates.kt:WorkbenchLayoutState$fun applyCustomPreset</ID>
+    <ID>CyclomaticComplexMethod:WorkspaceService.kt:WorkspaceService$fun loadWorkbench: PersistedWorkbench</ID>
+    <ID>CyclomaticComplexMethod:WorkspaceService.kt:WorkspaceService$fun renameEntries: RenameBatch</ID>
+    <ID>FunctionNaming:AgentViews.kt:@Composable fun AgentPanel</ID>
+    <ID>FunctionNaming:AgentViews.kt:@Composable fun AgentSettingsDialog</ID>
+    <ID>FunctionNaming:AgentViews.kt:@Composable internal fun AgentToolHint</ID>
+    <ID>FunctionNaming:AgentViews.kt:@Composable private fun AgentAvailabilityBanner</ID>
+    <ID>FunctionNaming:AgentViews.kt:@Composable private fun AgentMessageBubble</ID>
+    <ID>FunctionNaming:AgentViews.kt:@Composable private fun SettingsSectionItem</ID>
+    <ID>FunctionNaming:AgentViews.kt:@Composable private fun SettingsStatusRow</ID>
+    <ID>FunctionNaming:AgentViews.kt:@Composable private fun ToggleSetting</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable fun DetachedDocumentView</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable fun DocumentWorkspace</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable internal fun EditorTool</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun CompactMarkdownAccessory</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun CompactMarkdownModeBar</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun DiffVersionPane</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun DocumentContent</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun DocumentDropPreviewTarget</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun DocumentTabDockPreview</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun DocumentTabs</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun EmptyDocumentArea</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun ExternalChangeBanner</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun ExternalDeletedBanner</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun ImageDocument</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun LinkedMarkdownText</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun MarkdownBlockView</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun MarkdownCompletionPopup</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun MarkdownDocument</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun MarkdownEditor</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun MarkdownReader</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun MarkdownToolbar</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun ModeSelector</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun SaveFailureBanner</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun SecondaryDocumentPane</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun StructuredMarkdownEditor</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun StructuredNodeEditor</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun TextDocument</ID>
+    <ID>FunctionNaming:DocumentViews.kt:@Composable private fun UnsupportedDocument</ID>
+    <ID>FunctionNaming:PdfDocumentView.kt:@Composable internal fun PdfDocument</ID>
+    <ID>FunctionNaming:PdfDocumentView.kt:@Composable private fun PdfModeItem</ID>
+    <ID>FunctionNaming:PdfDocumentView.kt:@Composable private fun PdfPageItem</ID>
+    <ID>FunctionNaming:PdfDocumentView.kt:@Composable private fun PdfSidePanelView</ID>
+    <ID>FunctionNaming:PdfDocumentView.kt:@Composable private fun PdfTextSelectionDialog</ID>
+    <ID>FunctionNaming:PdfDocumentView.kt:@Composable private fun PdfThumbnail</ID>
+    <ID>FunctionNaming:Theme.kt:@Composable fun XueXueTheme</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable fun RemotePdfDialog</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable fun ToolPanel</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable internal fun ToolIcon</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable private fun BacklinksTool</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable private fun CenterMessage</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable private fun DirectoryTargetDialog</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable private fun FileTreeRow</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable private fun FilesTool</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable private fun GraphNode</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable private fun GraphTool</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable private fun LinkSection</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable private fun OutlineTool</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable private fun PropertiesTool</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable private fun SearchTool</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable private fun SecondaryToolHeader</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable private fun SectionLabel</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable private fun TaskCenterTool</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable private fun TaskRow</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable private fun ToolContent</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable private fun ToolPanelHeader</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable private fun WorkspaceDragHandle</ID>
+    <ID>FunctionNaming:ToolWindows.kt:@Composable private fun WorkspaceTree</ID>
+    <ID>FunctionNaming:WorkbenchApp.kt:@Composable fun WorkbenchApp</ID>
+    <ID>FunctionNaming:WorkbenchApp.kt:@Composable private fun ActivityRail</ID>
+    <ID>FunctionNaming:WorkbenchApp.kt:@Composable private fun CompactNavItem</ID>
+    <ID>FunctionNaming:WorkbenchApp.kt:@Composable private fun CompactWorkbench</ID>
+    <ID>FunctionNaming:WorkbenchApp.kt:@Composable private fun DesktopWorkbench</ID>
+    <ID>FunctionNaming:WorkbenchApp.kt:@Composable private fun DockPreviewTarget</ID>
+    <ID>FunctionNaming:WorkbenchApp.kt:@Composable private fun HeaderAction</ID>
+    <ID>FunctionNaming:WorkbenchApp.kt:@Composable private fun HeaderIconAction</ID>
+    <ID>FunctionNaming:WorkbenchApp.kt:@Composable private fun HorizontalPanelResizer</ID>
+    <ID>FunctionNaming:WorkbenchApp.kt:@Composable private fun PanelResizer</ID>
+    <ID>FunctionNaming:WorkbenchApp.kt:@Composable private fun RailItem</ID>
+    <ID>FunctionNaming:WorkbenchApp.kt:@Composable private fun StatusBar</ID>
+    <ID>FunctionNaming:WorkbenchApp.kt:@Composable private fun ToolDockPreviewOverlay</ID>
+    <ID>FunctionNaming:WorkbenchApp.kt:@Composable private fun UnsavedDialog</ID>
+    <ID>FunctionNaming:WorkbenchApp.kt:@Composable private fun WorkbenchHeader</ID>
+    <ID>FunctionNaming:WorkbenchDialogs.kt:@Composable fun CommandPaletteDialog</ID>
+    <ID>FunctionNaming:WorkbenchDialogs.kt:@Composable fun QuickOpenDialog</ID>
+    <ID>FunctionNaming:WorkbenchDialogs.kt:@Composable fun WelcomeScreen</ID>
+    <ID>FunctionNaming:WorkbenchDialogs.kt:@Composable private fun DialogCenterMessage</ID>
+    <ID>IgnoredReturnValue:WorkbenchTaskController.kt:WorkbenchTaskController$remove(id)</ID>
+    <ID>ImplicitDefaultLocale:AgentViews.kt:"%.4f".format(it)</ID>
+    <ID>ImplicitDefaultLocale:WorkbenchRemotePdfController.kt:WorkbenchRemotePdfController$"%.1f KB".format(value / 1024f)</ID>
+    <ID>ImplicitDefaultLocale:WorkbenchRemotePdfController.kt:WorkbenchRemotePdfController$"%.1f MB".format(value / (1024f * 1024f))</ID>
+    <ID>InjectDispatcher:AgentClient.kt:OpenAiCompatibleAgentClient$IO</ID>
+    <ID>InjectDispatcher:DocumentViews.kt:IO</ID>
+    <ID>InjectDispatcher:WorkbenchAgentController.kt:WorkbenchAgentController$IO</ID>
+    <ID>InjectDispatcher:WorkbenchDocumentController.kt:WorkbenchDocumentController$IO</ID>
+    <ID>InjectDispatcher:WorkbenchFileController.kt:WorkbenchFileController$IO</ID>
+    <ID>InjectDispatcher:WorkbenchPdfController.kt:WorkbenchPdfController$IO</ID>
+    <ID>InjectDispatcher:WorkbenchRemotePdfController.kt:WorkbenchRemotePdfController$IO</ID>
+    <ID>InjectDispatcher:WorkbenchState.kt:WorkbenchState$IO</ID>
+    <ID>LargeClass:WorkbenchState.kt:WorkbenchState : WorkbenchLayoutModelAgentRuntimeModel</ID>
+    <ID>LongMethod:AgentViews.kt:@Composable fun AgentPanel</ID>
+    <ID>LongMethod:AgentViews.kt:@Composable fun AgentSettingsDialog</ID>
+    <ID>LongMethod:AgentViews.kt:@Composable private fun AgentMessageBubble</ID>
+    <ID>LongMethod:DocumentViews.kt:@Composable private fun DocumentTabs</ID>
+    <ID>LongMethod:PdfDocumentView.kt:@Composable internal fun PdfDocument</ID>
+    <ID>LongMethod:ToolWindows.kt:@Composable private fun FilesTool</ID>
+    <ID>LongMethod:WorkbenchApp.kt:@Composable fun WorkbenchApp</ID>
+    <ID>LongMethod:WorkbenchApp.kt:@Composable private fun CompactWorkbench</ID>
+    <ID>LongMethod:WorkbenchApp.kt:@Composable private fun DesktopWorkbench</ID>
+    <ID>LongMethod:WorkbenchApp.kt:@Composable private fun WorkbenchHeader</ID>
+    <ID>LongMethod:WorkbenchState.kt:WorkbenchState$suspend fun openWorkspace</ID>
+    <ID>LongMethod:WorkspaceService.kt:WorkspaceService$fun loadWorkbench: PersistedWorkbench</ID>
+    <ID>LongParameterList:PdfDocumentView.kt:@Composable private fun PdfPageItem</ID>
+    <ID>LongParameterList:ToolWindows.kt:@Composable private fun FileTreeRow</ID>
+    <ID>LongParameterList:ToolWindows.kt:@Composable private fun ToolPanelHeader</ID>
+    <ID>LongParameterList:ToolWindows.kt:@Composable private fun WorkspaceTree</ID>
+    <ID>LongParameterList:WorkbenchDocumentController.kt:WorkbenchDocumentController</ID>
+    <ID>LoopWithTooManyJumpStatements:MarkdownEditing.kt:MarkdownEditing$while</ID>
+    <ID>MaxLineLength:AgentViews.kt:Button(onClick = { state.decideAgentApproval(AgentApprovalDecision.ALLOW_ONCE) }, modifier = Modifier.height(31.dp)) { Text("仅本次允许") }</ID>
+    <ID>MaxLineLength:AgentViews.kt:Checkbox(checked = state.includeActiveDocument, onCheckedChange = { state.includeActiveDocument = it }, modifier = Modifier.size(28.dp))</ID>
+    <ID>MaxLineLength:AgentViews.kt:Column</ID>
+    <ID>MaxLineLength:AgentViews.kt:HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Icon(Icons.AutoMirrored.Filled.Send, if (state.agentRunning) "发送 Steering" else "发送", tint = if (canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Icon(Icons.Default.AttachFile, null, Modifier.size(15.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Icon(Icons.Default.ErrorOutline, null, Modifier.size(17.dp), tint = MaterialTheme.colorScheme.error)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Icon(Icons.Default.SmartToy, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.tertiary)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Icon(Icons.Default.SmartToy, null, Modifier.size(36.dp), tint = MaterialTheme.colorScheme.tertiary)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Icon(section.icon, null, Modifier.size(17.dp), tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:AgentViews.kt:IconButton</ID>
+    <ID>MaxLineLength:AgentViews.kt:IconButton(onClick = { state.removeAgentContext(path) }, modifier = Modifier.size(23.dp)) { Icon(Icons.Default.Close, "移除上下文", Modifier.size(13.dp)) }</ID>
+    <ID>MaxLineLength:AgentViews.kt:Modifier.fillMaxSize().background(MaterialTheme.colorScheme.tertiary.copy(alpha = if (active) 0.16f else 0.06f)).border(if (active) 2.dp else 1.dp, MaterialTheme.colorScheme.tertiary)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.58f)).padding(horizontal = 10.dp, vertical = 8.dp)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.58f)).padding(start = 10.dp, end = 5.dp, top = 7.dp, bottom = 7.dp)</ID>
+    <ID>MaxLineLength:AgentViews.kt:OutlinedTextField(state.agentApiKey, { state.agentApiKey = it }, label = { Text("API Key") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())</ID>
+    <ID>MaxLineLength:AgentViews.kt:OutlinedTextField(state.agentEndpoint, { state.agentEndpoint = it }, label = { Text("Endpoint") }, singleLine = true, modifier = Modifier.fillMaxWidth())</ID>
+    <ID>MaxLineLength:AgentViews.kt:OutlinedTextField(state.agentModel, { state.agentModel = it }, label = { Text("Model") }, singleLine = true, modifier = Modifier.fillMaxWidth())</ID>
+    <ID>MaxLineLength:AgentViews.kt:Row</ID>
+    <ID>MaxLineLength:AgentViews.kt:Text("API Key 仅保存在当前进程。Provider 目录、OAuth 与自定义 Provider 将使用此分区。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Text("OpenAI 兼容接口", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Text("可附带当前文档内容；运行时可随时停止。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Text("正在生成…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Text("等待确认", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Text("释放以添加 ${state.dragPayload!!.displayName}", color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.SemiBold)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Text(agentOperationLabel(request.operation), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))</ID>
+    <ID>MaxLineLength:AgentViews.kt:Text(detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Text(detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1, overflow = TextOverflow.Ellipsis)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Text(if (decision == "accepted") "已接受" else "已拒绝", style = MaterialTheme.typography.labelSmall, color = if (decision == "accepted") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Text(if (state.agentModel.isBlank()) "尚未配置模型" else state.agentModel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1, overflow = TextOverflow.Ellipsis)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Text(path.substringAfterLast('/'), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary, maxLines = 1)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Text(request.detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Text(request.target, style = MaterialTheme.typography.bodySmall, fontFamily = CodeFont, maxLines = 2, overflow = TextOverflow.Ellipsis)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Text(session.costUsd?.let { "费用 \$${"%.4f".format(it)}" } ?: "费用 --", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Text(session.name, style = MaterialTheme.typography.labelMedium, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))</ID>
+    <ID>MaxLineLength:AgentViews.kt:Text(shown, style = MaterialTheme.typography.bodyMedium, color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface, fontFamily = if (role in setOf("tool", "tool_call")) dev.xuexue.ui.CodeFont else null)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Text(snippet.title, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary, maxLines = 1)</ID>
+    <ID>MaxLineLength:AgentViews.kt:Text(title, style = MaterialTheme.typography.bodyMedium, color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline)</ID>
+    <ID>MaxLineLength:AgentViews.kt:TextButton(onClick = { onDecision("rejected") }) { Text("拒绝", color = MaterialTheme.colorScheme.error) }</ID>
+    <ID>MaxLineLength:AgentViews.kt:TextButton(onClick = { state.decideAgentApproval(AgentApprovalDecision.ALLOW_SESSION) }, modifier = Modifier.height(31.dp)) { Text("本会话允许") }</ID>
+    <ID>MaxLineLength:AgentViews.kt:TextButton(onClick = { state.decideAgentApproval(AgentApprovalDecision.DENY) }, modifier = Modifier.height(31.dp)) { Text("拒绝", color = MaterialTheme.colorScheme.error) }</ID>
+    <ID>MaxLineLength:AgentViews.kt:ToggleSetting</ID>
+    <ID>MaxLineLength:AgentViews.kt:VerticalDivider(Modifier.fillMaxHeight(), thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)</ID>
+    <ID>MaxLineLength:AgentViews.kt:androidx.compose.material3</ID>
+    <ID>MaxLineLength:AgentViews.kt:if</ID>
+    <ID>MaxLineLength:AgentViews.kt:if (active &amp;&amp; state.agentRunning) CircularProgressIndicator(Modifier.size(11.dp), strokeWidth = 1.5.dp)</ID>
+    <ID>MaxLineLength:AgentViews.kt:if (collapsible) TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "折叠" else "查看完整输出") }</ID>
+    <ID>MaxLineLength:AgentViews.kt:if (document.kind == DocumentKind.PDF) "${document.displayName} · 第 ${document.pdfPage + 1} 页" else document.displayName</ID>
+    <ID>MaxLineLength:AgentViews.kt:leadingIcon = { Icon(if (state.agentFloating) Icons.Default.CloseFullscreen else Icons.AutoMirrored.Filled.OpenInNew, null) }</ID>
+    <ID>MaxLineLength:AgentViews.kt:line.startsWith("+") -&gt; MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)</ID>
+    <ID>MaxLineLength:AgentViews.kt:text = { OutlinedTextField(renameInput, { renameInput = it }, singleLine = true, modifier = Modifier.fillMaxWidth()) }</ID>
+    <ID>MaxLineLength:AgentViews.kt:val canSend = state.agentSendAvailability == AgentSendAvailability.READY &amp;&amp; state.agentInput.isNotBlank()</ID>
+    <ID>MaxLineLength:AgentViews.kt:val shown = if (expanded) content.ifBlank { "…" } else content.lines().take(6).joinToString("\n") + "\n…"</ID>
+    <ID>MaxLineLength:DocumentViews.kt:"code", "mermaid", "frontmatter", "table", "extension" -&gt; MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:"code", "mermaid", "frontmatter", "table", "math", "extension" -&gt; TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp, lineHeight = 20.sp, fontFamily = CodeFont)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:"heading" -&gt; TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 21.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:"quote", "callout" -&gt; TextStyle(color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp, lineHeight = 23.sp)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:.</ID>
+    <ID>MaxLineLength:DocumentViews.kt:BasicTextField(value, { value = it; state.updateContent(tab, it.text, it.selection) }, Modifier.fillMaxSize().padding(22.dp), textStyle = TextStyle(fontFamily = CodeFont, fontSize = 13.sp, lineHeight = 20.sp, color = MaterialTheme.colorScheme.onSurface), cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Button(onClick = state::createMarkdown) { Icon(Icons.Default.Add, null, Modifier.size(17.dp)); Spacer(Modifier.width(6.dp)); Text("新建笔记") }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:DiffVersionPane("外部版本", document.externalContent.orEmpty(), MaterialTheme.colorScheme.secondary, Modifier.weight(1f))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:DocumentDropPreviewTarget("下方分栏", active == DocumentDropTarget.BOTTOM, Modifier.align(Alignment.BottomCenter).fillMaxWidth(0.58f).height(108.dp))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:DocumentDropPreviewTarget("主文档区", active == DocumentDropTarget.PRIMARY, Modifier.align(Alignment.Center).width(250.dp).height(112.dp))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:DocumentDropPreviewTarget("右侧分栏", active == DocumentDropTarget.RIGHT, Modifier.align(Alignment.CenterEnd).width(150.dp).fillMaxHeight(0.72f))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:DocumentDropPreviewTarget("拖到窗口外以独立打开", active == DocumentDropTarget.DETACH, Modifier.align(Alignment.TopCenter).width(236.dp).height(54.dp))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:EditorTool(Icons.AutoMirrored.Filled.FormatListBulleted, "无序列表", { state.execute(WorkbenchCommand.EditMarkdown(EditorCommand.BULLET_LIST), tab) })</ID>
+    <ID>MaxLineLength:DocumentViews.kt:EditorTool(Icons.AutoMirrored.Filled.OpenInNew, "在系统中打开", { resolvedPath?.let { runCatching { Desktop.getDesktop().open(it.toFile()) } } })</ID>
+    <ID>MaxLineLength:DocumentViews.kt:EditorTool(Icons.Default.Code, "行内代码", { state.execute(WorkbenchCommand.EditMarkdown(EditorCommand.INLINE_CODE), tab) })</ID>
+    <ID>MaxLineLength:DocumentViews.kt:EditorTool(Icons.Default.FormatBold, "粗体", { state.execute(WorkbenchCommand.EditMarkdown(EditorCommand.BOLD), tab) })</ID>
+    <ID>MaxLineLength:DocumentViews.kt:EditorTool(Icons.Default.FormatItalic, "斜体", { state.execute(WorkbenchCommand.EditMarkdown(EditorCommand.ITALIC), tab) })</ID>
+    <ID>MaxLineLength:DocumentViews.kt:EditorTool(Icons.Default.FormatListNumbered, "有序列表", { state.execute(WorkbenchCommand.EditMarkdown(EditorCommand.NUMBERED_LIST), tab) })</ID>
+    <ID>MaxLineLength:DocumentViews.kt:EditorTool(Icons.Default.InsertLink, "链接", { state.execute(WorkbenchCommand.EditMarkdown(EditorCommand.LINK), tab) })</ID>
+    <ID>MaxLineLength:DocumentViews.kt:EditorTool(Icons.Default.LooksOne, "一级标题", { state.execute(WorkbenchCommand.EditMarkdown(EditorCommand.HEADING_1), tab) })</ID>
+    <ID>MaxLineLength:DocumentViews.kt:EditorTool(Icons.Default.LooksTwo, "二级标题", { state.execute(WorkbenchCommand.EditMarkdown(EditorCommand.HEADING_2), tab) })</ID>
+    <ID>MaxLineLength:DocumentViews.kt:EditorTool(icon, editorCommandLabel(command), { state.execute(WorkbenchCommand.EditMarkdown(command), tab) })</ID>
+    <ID>MaxLineLength:DocumentViews.kt:HorizontalDivider(Modifier.fillMaxWidth().height(1.dp), color = MaterialTheme.colorScheme.outlineVariant)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Icon(Icons.Default.Description, null, Modifier.size(15.dp), tint = MaterialTheme.colorScheme.primary)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Icon(completionIcon(completion.kind), null, Modifier.size(15.dp), tint = MaterialTheme.colorScheme.primary)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Icon(documentIcon(tab.kind), null, Modifier.size(16.dp), tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:IconButton(onClick = onClick, modifier = Modifier.size(32.dp)) { Icon(icon, description, modifier = Modifier.size(17.dp)) }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:IconButton(onClick = state::navigateBack, enabled = state.canNavigateBack, modifier = Modifier.size(32.dp)) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", Modifier.size(17.dp)) }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:IconButton(onClick = { onCloseTab(tab) }, modifier = Modifier.size(27.dp)) { Icon(Icons.Default.Close, "关闭", Modifier.size(15.dp)) }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:IconButton(onClick = { state.execute(WorkbenchCommand.ClearDocumentSplit) }, modifier = Modifier.size(28.dp)) { Icon(Icons.Default.Close, "关闭分栏", Modifier.size(15.dp)) }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:LaunchedEffect(tab.content) { if (value.text != tab.content) value = TextFieldValue(tab.content, tab.cursor.coerceIn(tab.content.length)) }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:LinkedMarkdownText(state, tab, block.text, MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:MarkdownBlock.Divider -&gt; HorizontalDivider(Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outlineVariant)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Modifier.fillMaxSize().background(MaterialTheme.colorScheme.primary.copy(alpha = if (active) 0.13f else 0.05f)).border(if (active) 2.dp else 1.dp, MaterialTheme.colorScheme.primary)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.error.copy(alpha = 0.09f)).padding(horizontal = 10.dp, vertical = 5.dp)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Modifier.fillMaxWidth().height(28.dp).background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)).padding(horizontal = 14.dp)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Modifier.fillMaxWidth().height(34.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)).padding(horizontal = 7.dp)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).background(MaterialTheme.colorScheme.error.copy(alpha = 0.09f)).padding(horizontal = 10.dp, vertical = 5.dp)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Modifier.widthIn(max = 460.dp).fillMaxWidth().height(34.dp).clickable { state.navigateTo(path) }.padding(horizontal = 8.dp)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Regex("(?&lt;![\\p{L}\\p{N}_#])#[\\p{L}\\p{N}_/-]+").findAll(text).forEach { match -&gt; addStyle(SpanStyle(color = Color(0xFF4B6288)), match.range.first, match.range.last + 1) }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Regex("(?&lt;!\\*)\\*([^*]+)\\*(?!\\*)").findAll(text).forEach { match -&gt; addStyle(SpanStyle(fontStyle = FontStyle.Italic), match.range.first, match.range.last + 1) }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Regex("\\*\\*([^*]+)\\*\\*").findAll(text).forEach { match -&gt; addStyle(SpanStyle(fontWeight = FontWeight.Bold), match.range.first, match.range.last + 1) }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Regex("\\[\\[([^]]+)]]").findAll(text).forEach { match -&gt; addStyle(SpanStyle(color = Color(0xFF2F6758), fontWeight = FontWeight.Medium), match.range.first, match.range.last + 1) }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Row</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.Center) { Text(block.source, fontFamily = CodeFont, color = MaterialTheme.colorScheme.onSecondaryContainer) }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Spacer(Modifier.height(10.dp))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Surface</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text("${(zoom * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(42.dp))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text("保存失败：${document.saveError}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text("文件已从磁盘删除。当前编辑内容仍保留在内存中。", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text("文件已在外部修改，本地也有未保存更改。", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text("最近文件", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text("段落 · 双链 · 属性 · 块引用 · 扩展节点", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text("纯文本", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text("释放以插入 [[${state.dragPayload!!.displayName}]]", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text(completion.detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1, overflow = TextOverflow.Ellipsis)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text(completion.label, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text(content, fontFamily = CodeFont, style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(10.dp))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text(document.displayName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text(document.relativePath, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text(if (block.ordered) "1." else "•", color = MaterialTheme.colorScheme.primary, modifier = Modifier.width(25.dp))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text(if (document.dirty) "未保存" else "已保存", style = MaterialTheme.typography.labelSmall, color = if (document.dirty) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.secondary)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text(language, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text(node.prefix.lineSequence().firstOrNull()?.removePrefix("&gt; ").orEmpty(), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.tertiary)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text(node.prefix.trim().removePrefix("```" ).ifBlank { if (node.type == "mermaid") "mermaid" else "code" }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text(path, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text(tab.displayName, style = MaterialTheme.typography.bodyMedium, fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:Text(title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = accent, modifier = Modifier.padding(9.dp))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:TextButton(onClick = onAttach) { Icon(Icons.Default.CloseFullscreen, null, Modifier.size(15.dp)); Spacer(Modifier.width(4.dp)); Text("停靠回主窗口") }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:TextButton(onClick = onQuickOpen) { Icon(Icons.Default.Search, null, Modifier.size(16.dp)); Spacer(Modifier.width(5.dp)); Text("快速打开") }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:TextButton(onClick = { menuOpen = true }) { Text(document?.displayName ?: "选择文档", maxLines = 1, overflow = TextOverflow.Ellipsis) }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:TooltipBox</ID>
+    <ID>MaxLineLength:DocumentViews.kt:VerticalDivider(Modifier.fillMaxHeight(), thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:VerticalDivider(Modifier.height(22.dp).padding(horizontal = 5.dp), thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:VerticalDivider(Modifier.height(22.dp).padding(horizontal = 6.dp), thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:androidx.compose.material3</ID>
+    <ID>MaxLineLength:DocumentViews.kt:color = if (mode == active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant</ID>
+    <ID>MaxLineLength:DocumentViews.kt:confirmButton = { Button(onClick = { state.mergeExternalVersion(document); showDiff = false }) { Text("插入冲突标记") } }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = horizontalPadding, vertical = 24.dp)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = horizontalPadding, vertical = 38.dp)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:else</ID>
+    <ID>MaxLineLength:DocumentViews.kt:if</ID>
+    <ID>MaxLineLength:DocumentViews.kt:if (!compact) IconButton(onClick = state::navigateForward, enabled = state.canNavigateForward, modifier = Modifier.size(32.dp)) { Icon(Icons.AutoMirrored.Filled.ArrowForward, "前进", Modifier.size(17.dp)) }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION) state.saveAs(document, chooser.selectedFile.toPath())</ID>
+    <ID>MaxLineLength:DocumentViews.kt:if (node in setOf("source", "paragraph", "math")) EditorTool(Icons.Default.Functions, "公式块", { state.execute(WorkbenchCommand.EditMarkdown(EditorCommand.MATH_BLOCK), tab) })</ID>
+    <ID>MaxLineLength:DocumentViews.kt:if (node in setOf("source", "paragraph", "quote", "callout")) EditorTool(Icons.Default.FormatQuote, "引用", { state.execute(WorkbenchCommand.EditMarkdown(EditorCommand.QUOTE), tab) })</ID>
+    <ID>MaxLineLength:DocumentViews.kt:if (selected) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(2.dp).background(MaterialTheme.colorScheme.primary))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:is MarkdownBlock.CodeBlock</ID>
+    <ID>MaxLineLength:DocumentViews.kt:is MarkdownBlock.MathBlock</ID>
+    <ID>MaxLineLength:DocumentViews.kt:is MarkdownBlock.Paragraph -&gt; LinkedMarkdownText(state, tab, block.text, TextStyle(fontSize = 15.sp, lineHeight = 25.sp))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:is MarkdownBlock.Quote</ID>
+    <ID>MaxLineLength:DocumentViews.kt:listOf(EditorMode.EDIT to "编辑", EditorMode.SOURCE to "源码", EditorMode.READ to "阅读")</ID>
+    <ID>MaxLineLength:DocumentViews.kt:modifier</ID>
+    <ID>MaxLineLength:DocumentViews.kt:modifier = Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, androidx.compose.foundation.shape.RoundedCornerShape(5.dp))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:modifier = Modifier.weight(1f).border(if (active) 1.dp else 0.dp, if (active) accent.copy(alpha = 0.55f) else Color.Transparent, androidx.compose.foundation.shape.RoundedCornerShape(4.dp))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:modifier = modifier.then(if (note != null) Modifier.clickable { state.navigateWikiLink(tab.relativePath, target.orEmpty()) } else Modifier)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:modifier = modifier.widthIn(min = 240.dp, max = 430.dp).border(1.dp, MaterialTheme.colorScheme.outlineVariant, androidx.compose.foundation.shape.RoundedCornerShape(4.dp))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:note.analysis.headings.take(3).forEach { heading -&gt; Text(heading.text, style = MaterialTheme.typography.labelSmall) }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:onClick = { state.activePath?.let { state.execute(WorkbenchCommand.DetachDocument(it)) }; actionsOpen = false }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:onClick = { state.activePath?.let { state.execute(WorkbenchCommand.SplitDocument(it, DocumentSplitDirection.BOTTOM)) }; actionsOpen = false }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:onClick = { state.activePath?.let { state.execute(WorkbenchCommand.SplitDocument(it, DocumentSplitDirection.RIGHT)) }; actionsOpen = false }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:onClick = { state.execute(WorkbenchCommand.DetachDocument(tab.relativePath)); menuOpen = false }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:onClick = { state.execute(WorkbenchCommand.PinDocument(tab.relativePath)); menuOpen = false }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:onClick = { state.execute(WorkbenchCommand.SplitDocument(tab.relativePath, DocumentSplitDirection.BOTTOM)); menuOpen = false }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:onClick = { state.execute(WorkbenchCommand.SplitDocument(tab.relativePath, DocumentSplitDirection.RIGHT)); menuOpen = false }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:onDragStart = { local -&gt; tabCoordinates?.localToRoot(local)?.let { state.beginDocumentTabDrag(tab.relativePath, it) } }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:private</ID>
+    <ID>MaxLineLength:DocumentViews.kt:tab.dirty -&gt; Text("保存中", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:tab.saveError != null -&gt; Text("保存失败", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:val initialSelectionEnd = (tab.cursor.end - node.start - node.prefix.length).coerceIn(initialSelectionStart, node.body.length)</ID>
+    <ID>MaxLineLength:DocumentViews.kt:val listState = rememberLazyListState(initialFirstVisibleItemIndex = tab.editorBlockIndex.coerceIn(0, (nodes.lastIndex).coerceAtLeast(0)))</ID>
+    <ID>MaxLineLength:DocumentViews.kt:var value by remember(tab, node.start, node.type) { mutableStateOf(TextFieldValue(node.body, TextRange(initialSelectionStart, initialSelectionEnd))) }</ID>
+    <ID>MaxLineLength:DocumentViews.kt:when { error != null -&gt; Text(error!!, color = MaterialTheme.colorScheme.error); bitmap == null -&gt; CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp); else -&gt; Image(bitmap!!, tab.displayName, Modifier.fillMaxSize().graphicsLayer(scaleX = zoom, scaleY = zoom), contentScale = ContentScale.Fit) }</ID>
+    <ID>MaxLineLength:MarkdownCompletion.kt:MarkdownCompletionEngine$.</ID>
+    <ID>MaxLineLength:MarkdownCompletion.kt:MarkdownCompletionEngine$MarkdownCompletion(MarkdownCompletionKind.WIKI_LINK, target.substringAfterLast('/'), path, "[[$target]]", wikiStart, safeCursor)</ID>
+    <ID>MaxLineLength:MarkdownEditing.kt:MarkdownEditing$val endIndex = ((index + 1) until lines.size).firstOrNull { lines[it].text.trim() == "$$" } ?: lines.lastIndex</ID>
+    <ID>MaxLineLength:MarkdownEditing.kt:MarkdownEditing$val endIndex = ((index + 1) until lines.size).firstOrNull { lines[it].text.trimStart().startsWith("```") } ?: lines.lastIndex</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:Box</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp) }</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("此页没有可提取文本。", color = MaterialTheme.colorScheme.onSurfaceVariant) }</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(error!!, color = MaterialTheme.colorScheme.error) }</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) { Text("选择页面后可添加高亮或批注。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:Button(onClick = { searchRequest++ }, enabled = searchQuery.isNotBlank() &amp;&amp; !searchRunning, modifier = Modifier.height(32.dp)) { Text("查找") }</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:EditorTool(Icons.AutoMirrored.Filled.NavigateBefore, "上一页", { if (tab.pdfPage &gt; 0) state.setPdfPosition(page = tab.pdfPage - 1, document = tab) })</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:EditorTool(Icons.Default.ZoomOut, "缩小", { state.setPdfPosition(zoom = tab.pdfZoom - 0.15f, document = tab) })</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:Icon(if (annotation.kind == "highlight") Icons.Default.Highlight else Icons.AutoMirrored.Filled.Comment, null, Modifier.size(16.dp), tint = if (annotation.kind == "highlight") MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.tertiary)</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:IconButton(onClick = { selectedPage = null }, modifier = Modifier.size(28.dp)) { Icon(Icons.Default.Close, "关闭上下文栏", Modifier.size(15.dp)) }</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:IconButton(onClick = { state.removePdfAnnotation(tab, annotation) }, modifier = Modifier.size(27.dp)) { Icon(Icons.Default.DeleteOutline, "删除批注", Modifier.size(14.dp), tint = MaterialTheme.colorScheme.error) }</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:Modifier.width((680f * zoom).dp).graphicsLayer(rotationZ = rotation).background(Color.White)</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:PdfPageItem(state, tab, tab.pdfPage.coerceIn(0, pageCount - 1), tab.pdfZoom * 0.68f, rotation, selectedPage == tab.pdfPage, searchMatches.any { it.pageIndex == tab.pdfPage }, Modifier.weight(1f)) { selectedPage = tab.pdfPage }</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:Row</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:Surface(color = Color.White, modifier = Modifier.width((680f * zoom).dp).height((880f * zoom).dp)) { Box(contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) } }</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:Surface(color = MaterialTheme.colorScheme.error.copy(alpha = 0.08f), modifier = Modifier.width(360.dp).height(180.dp)) { Box(contentAlignment = Alignment.Center) { Text("此页渲染失败", color = MaterialTheme.colorScheme.error) } }</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:Text(" / ${pageCount.coerceAtLeast(1)}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:Text("${(tab.pdfZoom * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(45.dp))</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:Text("${page + 1}", style = MaterialTheme.typography.labelSmall, color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:Text("第 ${annotation.page + 1} 页", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:Text(annotation.text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:Text(if (panel == PdfSidePanel.THUMBNAILS) "$pageCount 页" else "${tab.pdfAnnotations.size}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:Text(if (panel == PdfSidePanel.THUMBNAILS) "缩略图" else "批注", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:Text(searchMatches[searchMatchIndex].preview, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1, overflow = TextOverflow.Ellipsis)</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:TextButton(onClick = { Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(selection), null) }, enabled = selection.isNotBlank()) { Text("复制") }</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:TextButton(onClick = { state.setPdfPosition(page = tab.pdfPage, document = tab) }) { Text("重试") }</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:VerticalDivider(Modifier.fillMaxHeight(), thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:VerticalDivider(Modifier.height(22.dp).padding(horizontal = 5.dp), thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:contentScale = if (fitMode == PdfFitMode.WIDTH) ContentScale.FillWidth else ContentScale.None</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:else -&gt; "${searchMatchIndex + 1} / ${searchMatches.size} · 第 ${searchMatches[searchMatchIndex].pageIndex + 1} 页"</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:if (tab.pdfPage + 1 &lt; pageCount) PdfPageItem(state, tab, tab.pdfPage + 1, tab.pdfZoom * 0.68f, rotation, selectedPage == tab.pdfPage + 1, searchMatches.any { it.pageIndex == tab.pdfPage + 1 }, Modifier.weight(1f)) { selectedPage = tab.pdfPage + 1 }</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:items(pageCount) { page -&gt; PdfPageItem(state, tab, page, tab.pdfZoom * if (compact) 0.72f else 1f, rotation, selectedPage == page, searchMatches.any { it.pageIndex == page }, Modifier.fillMaxWidth()) { selectedPage = page } }</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:modifier = (if (fitMode == PdfFitMode.WIDTH) Modifier.fillMaxWidth() else Modifier).graphicsLayer(rotationZ = rotation).background(Color.White).border(pageBorderWidth, pageBorder)</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:modifier = Modifier.width(118.dp).height(152.dp).border(if (selected) 2.dp else 1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:pageInput.toIntOrNull()?.let { page -&gt; state.setPdfPosition(page = (page - 1).coerceIn(0, (pageCount - 1).coerceAtLeast(0)), document = tab) }</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:runTrackedPdfTask</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:tab.pdfSidePanel = (if (sidePanel == PdfSidePanel.ANNOTATIONS) PdfSidePanel.NONE else PdfSidePanel.ANNOTATIONS).name</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:tab.pdfSidePanel = (if (sidePanel == PdfSidePanel.THUMBNAILS) PdfSidePanel.NONE else PdfSidePanel.THUMBNAILS).name</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:text = { OutlinedTextField(annotationText, { annotationText = it }, label = { Text("批注内容") }, minLines = 3, maxLines = 6, modifier = Modifier.fillMaxWidth()) }</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:textStyle = TextStyle(fontSize = 13.sp, lineHeight = 20.sp, color = MaterialTheme.colorScheme.onSurface)</ID>
+    <ID>MaxLineLength:PdfDocumentView.kt:val configuredSidePanel = runCatching { PdfSidePanel.valueOf(tab.pdfSidePanel) }.getOrDefault(PdfSidePanel.THUMBNAILS)</ID>
+    <ID>MaxLineLength:PdfReaderBackend.kt:PdfReaderBackend$/** UI-facing PDF boundary. A MuPDF actor/tile backend can replace this implementation without changing Compose views. */</ID>
+    <ID>MaxLineLength:Theme.kt:titleLarge = TextStyle(fontSize = 20.sp, lineHeight = 27.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp)</ID>
+    <ID>MaxLineLength:Theme.kt:titleMedium = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp)</ID>
+    <ID>MaxLineLength:Theme.kt:titleSmall = TextStyle(fontSize = 13.sp, lineHeight = 19.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Column</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Icon(Icons.Default.Folder, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.secondary)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Icon(icon, null, Modifier.size(18.dp), tint = when { error -&gt; MaterialTheme.colorScheme.error; running -&gt; MaterialTheme.colorScheme.tertiary; else -&gt; MaterialTheme.colorScheme.primary })</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Icon(icon, null, modifier = Modifier.size(17.dp), tint = if (entry.isDirectory) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:IconButton(onClick = onClick, modifier = Modifier.size(32.dp)) { Icon(icon, description, modifier = Modifier.size(18.dp)) }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:IconButton(onClick = state::clearFileOperationMessage, modifier = Modifier.size(27.dp)) { Icon(Icons.Default.Close, "关闭", Modifier.size(14.dp)) }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(26.dp)) { Icon(Icons.Default.MoreVert, "文件操作", Modifier.size(15.dp)) }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:LazyColumn</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)).padding(horizontal = 9.dp, vertical = 6.dp)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Modifier.fillMaxWidth().clickable { document.cursor = androidx.compose.ui.text.TextRange(lineOffset(document.content, heading.line)) }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Modifier.fillMaxWidth().height(31.dp).background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.34f)).padding(start = 10.dp, end = 3.dp)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:OutlinedTextField(nameInput, { nameInput = it }, singleLine = true, label = { Text("名称") }, modifier = Modifier.fillMaxWidth())</ID>
+    <ID>MaxLineLength:ToolWindows.kt:OutlinedTextField(query, { query = it }, singleLine = true, placeholder = { Text("筛选目标文件夹") }, leadingIcon = { Icon(Icons.Default.Search, null) }, modifier = Modifier.fillMaxWidth())</ID>
+    <ID>MaxLineLength:ToolWindows.kt:OutlinedTextField(url, { url = it }, label = { Text("HTTP 或 HTTPS 地址") }, singleLine = true, modifier = Modifier.fillMaxWidth())</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Row</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Surface</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text("后台任务", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text("块 ID · 别名 · 插件字段", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text("将同步更新 ${state.renameImpactPaths.size} 篇笔记中的双链：", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text("局部关系", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.Start))</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text("属性窗口为标签、日期、别名和插件字段保留统一入口。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text("已选择 ${selected.size} 项", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary, modifier = Modifier.weight(1f))</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text("文件将保存到工作区的 Downloads 目录。下载进度、取消与失败重试在任务中心处理。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text("逐项确认新名称。执行时会同步更新 Markdown 双链，并可作为一批撤销。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text(detail, style = MaterialTheme.typography.bodySmall, color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text(document.displayName, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text(entry.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text(heading.text, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (heading.level == 1) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text(hit.relativePath, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text(if (parentPath.isBlank()) "位置：工作区根目录" else "位置：$parentPath", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text(key, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(82.dp))</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text(message, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text(path, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text(path, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1, overflow = TextOverflow.Ellipsis)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text(text.uppercase(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp))</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text(toolTitle(tool), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:Text(toolTitle(tool), style = MaterialTheme.typography.labelSmall, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))</ID>
+    <ID>MaxLineLength:ToolWindows.kt:TextButton(onClick = state::requestRemotePdfDialog) { Icon(Icons.Default.Download, null, Modifier.size(15.dp)); Spacer(Modifier.width(4.dp)); Text("远程 PDF") }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:TextButton(onClick = { menuOpen = true }, modifier = Modifier.height(28.dp)) { Text("切换", style = MaterialTheme.typography.labelSmall) }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:ToolIcon(Icons.Default.SmartToy, "添加到 Agent 上下文", { state.execute(WorkbenchCommand.AddAgentContext(hit.relativePath)) })</ID>
+    <ID>MaxLineLength:ToolWindows.kt:ToolIcon(if (showHidden) Icons.Default.VisibilityOff else Icons.Default.Visibility, if (showHidden) "隐藏点文件" else "显示点文件", { showHidden = !showHidden })</ID>
+    <ID>MaxLineLength:ToolWindows.kt:TooltipBox</ID>
+    <ID>MaxLineLength:ToolWindows.kt:androidx.compose.material3.DropdownMenuItem(text = { Text("删除", color = MaterialTheme.colorScheme.error) }, leadingIcon = { Icon(Icons.Default.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) }, onClick = { menuOpen = false; onDelete() })</ID>
+    <ID>MaxLineLength:ToolWindows.kt:androidx.compose.material3.DropdownMenuItem(text = { Text("在文件管理器中定位") }, leadingIcon = { Icon(Icons.Default.FolderOpen, null) }, onClick = { menuOpen = false; onLocate() })</ID>
+    <ID>MaxLineLength:ToolWindows.kt:androidx.compose.material3.DropdownMenuItem(text = { Text("复制路径") }, leadingIcon = { Icon(Icons.Default.ContentCopy, null) }, onClick = { menuOpen = false; onCopyPath() })</ID>
+    <ID>MaxLineLength:ToolWindows.kt:androidx.compose.material3.DropdownMenuItem(text = { Text("重命名") }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { menuOpen = false; onRename() })</ID>
+    <ID>MaxLineLength:ToolWindows.kt:color = if (renameError == null) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error</ID>
+    <ID>MaxLineLength:ToolWindows.kt:confirmButton = { Button(onClick = { state.downloadRemotePdf(url) }, enabled = url.isNotBlank() &amp;&amp; !state.agentOfflineMode) { Text("开始下载") } }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:confirmButton = { Button(onClick = { state.execute(WorkbenchCommand.DeleteWorkspaceEntries(paths)); selected.clear(); deleteConfirmation = null }) { Text("移入回收站") } }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:else</ID>
+    <ID>MaxLineLength:ToolWindows.kt:entry.name.substringAfterLast('.', "").lowercase() in setOf("png", "jpg", "jpeg", "gif", "webp") -&gt; Icons.Default.Image</ID>
+    <ID>MaxLineLength:ToolWindows.kt:fun matches: Boolean</ID>
+    <ID>MaxLineLength:ToolWindows.kt:if</ID>
+    <ID>MaxLineLength:ToolWindows.kt:if (!entry.isDirectory) androidx.compose.material3.DropdownMenuItem(text = { Text("添加到 Agent 上下文") }, leadingIcon = { Icon(Icons.Default.SmartToy, null) }, onClick = { menuOpen = false; onAgent() })</ID>
+    <ID>MaxLineLength:ToolWindows.kt:if (active) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(2.dp).background(MaterialTheme.colorScheme.primary))</ID>
+    <ID>MaxLineLength:ToolWindows.kt:if (active) IconButton(onClick = { state.closeToolTab(tool) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Default.Close, "关闭 ${toolTitle(tool)}", Modifier.size(13.dp)) }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:if (directory.relativePath.isNotBlank()) Text(directory.relativePath, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1, overflow = TextOverflow.Ellipsis)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:if (end &gt; start) addStyle(SpanStyle(color = MaterialTheme.colorScheme.onPrimary, background = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold), start, end)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:if (incoming.isEmpty() &amp;&amp; outgoing.isEmpty()) Text("暂无已解析的链接", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(top = 12.dp))</ID>
+    <ID>MaxLineLength:ToolWindows.kt:if (links.isEmpty()) Text("暂无", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp))</ID>
+    <ID>MaxLineLength:ToolWindows.kt:if (loading) { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp); Spacer(Modifier.height(9.dp)) }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:if (selectionMode) Checkbox(checked = selected, onCheckedChange = { onSelect() }, modifier = Modifier.size(24.dp))</ID>
+    <ID>MaxLineLength:ToolWindows.kt:if (state.canUndoFileOperation) TextButton(onClick = state::undoLastFileOperation) { Icon(Icons.AutoMirrored.Filled.Undo, null, Modifier.size(15.dp)); Spacer(Modifier.width(4.dp)); Text("撤销") }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:incoming.take(4).forEach { note -&gt; GraphNode(note.title, secondary = true) { state.navigateTo(note.relativePath); state.autoHideToolPanelAfterAction() }; Spacer(Modifier.height(7.dp)) }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:leadingIcon = { Icon(if (expanded) Icons.Default.CloseFullscreen else Icons.Default.OpenInFull, null) }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:modifier</ID>
+    <ID>MaxLineLength:ToolWindows.kt:onDoubleTap = { if (!selectionMode) { if (entry.isDirectory) onToggle() else onOpen(entry.relativePath, true) } }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:onDrag = { change, _ -&gt; coordinates?.localToRoot(change.position)?.let(state::updateWorkspaceDrag); change.consume() }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:onDrag = { change, _ -&gt; dragCoordinates?.localToRoot(change.position)?.let(onDrag); change.consume() }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:onDragStart = { entry, position -&gt; state.beginWorkspaceDrag(entry.relativePath, entry.name, position) }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:onDragStart = { local -&gt; coordinates?.localToRoot(local)?.let { state.beginWorkspaceDrag(relativePath, displayName, it) } }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:onLocate = { entry -&gt; state.resolveWorkspacePath(entry.relativePath)?.parent?.toFile()?.let { runCatching { Desktop.getDesktop().open(it) } } }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:onOpen = { path, pinned -&gt; state.execute(WorkbenchCommand.OpenWorkspaceEntry(path, pinned)); state.autoHideToolPanelAfterAction() }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:onRename = { entry -&gt; dialogEntry = entry; nameInput = entry.name; entryDialog = EntryDialogMode.RENAME; state.inspectRenameImpact(entry.relativePath) }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:onTap = { if (selectionMode) onSelect() else if (entry.isDirectory) onToggle() else onOpen(entry.relativePath, false) }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:onToggleSplit = { if (state.secondaryTool == null) state.splitToolWindow() else state.closeToolSplit() }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:outgoing.take(4).forEach { note -&gt; Spacer(Modifier.height(7.dp)); GraphNode(note.title, secondary = false) { state.navigateTo(note.relativePath); state.autoHideToolPanelAfterAction() } }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:root?.let(::flattenDirectories).orEmpty().filter { it.name.contains(query, true) || it.relativePath.contains(query, true) }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:state.execute(WorkbenchCommand.BatchRenameWorkspaceEntries(changed.mapValues { it.value.trim() }))</ID>
+    <ID>MaxLineLength:ToolWindows.kt:state.renameImpactLoading -&gt; Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp); Spacer(Modifier.width(7.dp)); Text("正在分析引用影响…", style = MaterialTheme.typography.bodySmall) }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:state.renameImpactPaths.isEmpty() -&gt; Text("没有发现需要更新的 Markdown 双链。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:ToolWindows.kt:state.renameImpactPaths.take(4).forEach { Text("• $it", style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:tags.forEach { tag -&gt; Text("#$tag", color = MaterialTheme.colorScheme.tertiary, modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:text = { Text((if (target == dock) "· " else "") + when (target) { ToolPanelDock.LEFT -&gt; "停靠到左侧"; ToolPanelDock.RIGHT -&gt; "停靠到右侧"; ToolPanelDock.BOTTOM -&gt; "停靠到底部"; ToolPanelDock.FLOAT -&gt; "转为浮动窗口" }) }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:title = { Text(when (mode) { EntryDialogMode.CREATE_FILE -&gt; "新建文件"; EntryDialogMode.CREATE_FOLDER -&gt; "新建文件夹"; EntryDialogMode.RENAME -&gt; "重命名" }) }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:trailingIcon = { if (filter.isNotEmpty()) IconButton(onClick = { filter = "" }) { Icon(Icons.Default.Clear, "清除") } }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:val absolute = state.resolveWorkspacePath(entry.relativePath)?.toAbsolutePath()?.toString().orEmpty()</ID>
+    <ID>MaxLineLength:ToolWindows.kt:val expanded = remember(root.relativePath) { mutableStateMapOf&lt;String, Boolean&gt;().apply { put(root.relativePath, true) } }</ID>
+    <ID>MaxLineLength:ToolWindows.kt:}</ID>
+    <ID>MaxLineLength:WorkbenchAgentController.kt:WorkbenchAgentController$add(AgentMessage("system", "Attached selected context (${snippet.title}):\n${snippet.content.take(8_000)}"))</ID>
+    <ID>MaxLineLength:WorkbenchAgentController.kt:WorkbenchAgentController$add(AgentMessage("system", "You are the workspace assistant in XueXue. Be concise and preserve user files."))</ID>
+    <ID>MaxLineLength:WorkbenchAgentController.kt:WorkbenchAgentController$legacyPath != null &amp;&amp; Files.isRegularFile(legacyPath, java.nio.file.LinkOption.NOFOLLOW_LINKS)</ID>
+    <ID>MaxLineLength:WorkbenchAgentController.kt:WorkbenchAgentController$runCatching { json.decodeFromString&lt;List&lt;AgentMessage&gt;&gt;(Files.readString(legacyPath)) }.getOrDefault(emptyList())</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:.</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:Button(onClick = { state.saveCurrentLayoutPreset(presetName); savePresetDialog = false }, enabled = presetName.isNotBlank()) { Text("保存") }</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:CompactNavItem(Icons.Default.Description, "文档", page == CompactWorkbenchPage.DOCUMENT) { page = CompactWorkbenchPage.DOCUMENT }</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:CompactNavItem(Icons.Default.FolderOpen, "文件", page == CompactWorkbenchPage.FILES) { page = CompactWorkbenchPage.FILES }</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:CompactNavItem(Icons.Default.Search, "搜索", page == CompactWorkbenchPage.SEARCH) { page = CompactWorkbenchPage.SEARCH }</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:CompactNavItem(Icons.Default.SmartToy, "Agent", page == CompactWorkbenchPage.AGENT) { page = CompactWorkbenchPage.AGENT }</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:CompactWorkbenchPage.AGENT -&gt; AgentPanel(state, {}, onSettings, onOpenDocument = state::openAgentDocument, modifier = Modifier.fillMaxSize())</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:CompactWorkbenchPage.DOCUMENT -&gt; DocumentWorkspace(state, {}, onSettings, onQuickOpen, Modifier.fillMaxSize(), compact = true)</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:DockPreviewTarget("停靠右侧", active == ToolPanelDock.RIGHT, Modifier.align(Alignment.CenterEnd).width(138.dp).fillMaxHeight(0.68f))</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:DockPreviewTarget("停靠左侧", active == ToolPanelDock.LEFT, Modifier.align(Alignment.CenterStart).width(138.dp).fillMaxHeight(0.68f))</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:DockPreviewTarget("停靠底部", active == ToolPanelDock.BOTTOM, Modifier.align(Alignment.BottomCenter).fillMaxWidth(0.55f).height(116.dp))</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:DockPreviewTarget("浮动窗口", active == ToolPanelDock.FLOAT, Modifier.align(Alignment.Center).width(220.dp).height(108.dp))</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:Icon(Icons.Default.AutoStories, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(17.dp))</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:Icon(Icons.Default.SmartToy, "打开 Agent 底部面板", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onTertiaryContainer)</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:Icon(icon, contentDescription = label, tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:Icon(icon, label, tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:IconButton</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:Modifier.fillMaxWidth().height(24.dp).background(MaterialTheme.colorScheme.background).padding(horizontal = 10.dp)</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:Text(label, style = MaterialTheme.typography.labelSmall, color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:Text(state.status, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:ToolPanel(state, Modifier.fillMaxWidth().requiredHeight((if (state.toolPanelExpanded) 420f else state.bottomPanelHeight).dp).focusRequester(toolFocus).focusable())</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:ToolPanel(state, Modifier.requiredWidth((if (state.toolPanelExpanded) 480f else state.leftPanelWidth).dp).fillMaxHeight().focusRequester(toolFocus).focusable())</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:XueXueTheme { DetachedDocumentView(state, document, onSettings = { overlay = Overlay.SETTINGS }, onAttach = { state.attachDocument(path) }) }</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:event.isAltPressed &amp;&amp; event.key == Key.D -&gt; state.execute(WorkbenchCommand.Focus(WorkbenchFocusTarget.DOCUMENT))</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:event.isAltPressed &amp;&amp; event.key == Key.F -&gt; state.execute(WorkbenchCommand.OpenTool(ToolWindow.FILES))</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:event.isAltPressed &amp;&amp; event.key == Key.L -&gt; state.execute(WorkbenchCommand.OpenTool(ToolWindow.BACKLINKS))</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:event.isAltPressed &amp;&amp; event.key == Key.R -&gt; state.execute(WorkbenchCommand.Focus(WorkbenchFocusTarget.ACTIVITY_RAIL))</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:event.isAltPressed &amp;&amp; event.key == Key.S -&gt; state.execute(WorkbenchCommand.OpenTool(ToolWindow.SEARCH))</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:event.isAltPressed &amp;&amp; event.key == Key.T -&gt; state.execute(WorkbenchCommand.Focus(WorkbenchFocusTarget.TOOL_WINDOW))</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:event.key == Key.Tab -&gt; state.execute(if (event.isShiftPressed) WorkbenchCommand.PreviousDocument else WorkbenchCommand.NextDocument)</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:if (state.activityRailVisible &amp;&amp; !state.activityRailRight) ActivityRail(state.activeTool, railSelect, onSettings, Modifier.focusRequester(activityFocus).focusable())</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:if (state.activityRailVisible &amp;&amp; state.activityRailRight) ActivityRail(state.activeTool, railSelect, onSettings, Modifier.focusRequester(activityFocus).focusable())</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:if (tab.dirty) Text("未保存", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:if (tab.kind == dev.xuexue.core.DocumentKind.AGENT) "Agent · ${state.activeAgentSession.name}" else tab.relativePath</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:leadingIcon = { Icon(if (preset == BuiltInLayoutPreset.READING) Icons.Default.AutoStories else if (preset == BuiltInLayoutPreset.WRITING) Icons.Default.Description else Icons.Default.SmartToy, null) }</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:modifier = Modifier.fillMaxWidth().height(44.dp).background(MaterialTheme.colorScheme.background).padding(horizontal = 10.dp)</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:modifier = Modifier.requiredWidth(state.agentPanelWidth.dp).fillMaxHeight().focusRequester(agentFocus).focusable()</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:modifier = Modifier.weight(1f).fillMaxHeight().padding(4.dp).focusRequester(documentFocus).focusable()</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:onClick = { state.activityRailVisible = !state.activityRailVisible; state.persistLayout(); presetsOpen = false }</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:onClick = { state.activityRailVisible = true; state.activityRailRight = !state.activityRailRight; state.persistLayout(); presetsOpen = false }</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:onCreate = { chooseWorkspace(create = true)?.let { path -&gt; scope.launch { state.openWorkspace(path) } } }</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:onDrag = { delta -&gt; state.agentPanelWidth = (state.agentPanelWidth - delta).coerceIn(300f, 540f) }</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:onDrag = { delta -&gt; state.bottomPanelHeight = (state.bottomPanelHeight - delta).coerceIn(150f, 420f) }</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:onDrag = { delta -&gt; state.leftPanelWidth = (state.leftPanelWidth - delta).coerceIn(210f, 480f) }</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:onOpen = { chooseWorkspace(create = false)?.let { path -&gt; scope.launch { state.openWorkspace(path) } } }</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:private</ID>
+    <ID>MaxLineLength:WorkbenchApp.kt:text = { androidx.compose.material3.OutlinedTextField(presetName, { presetName = it }, singleLine = true, label = { Text("名称") }) }</ID>
+    <ID>MaxLineLength:WorkbenchDialogs.kt:Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Description, null, tint = Color.White, modifier = Modifier.size(27.dp)) }</ID>
+    <ID>MaxLineLength:WorkbenchDialogs.kt:Column</ID>
+    <ID>MaxLineLength:WorkbenchDialogs.kt:Column { Text("打开已有目录", fontWeight = FontWeight.SemiBold); Text("文件系统始终是内容真源", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }</ID>
+    <ID>MaxLineLength:WorkbenchDialogs.kt:Column { Text("新建工作区", fontWeight = FontWeight.SemiBold); Text("选择一个目录作为新的知识工作区", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }</ID>
+    <ID>MaxLineLength:WorkbenchDialogs.kt:Icon(dialogFileIcon(file.name), null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)</ID>
+    <ID>MaxLineLength:WorkbenchDialogs.kt:OutlinedTextField(query, { query = it }, placeholder = { Text("搜索命令") }, singleLine = true, modifier = Modifier.fillMaxWidth())</ID>
+    <ID>MaxLineLength:WorkbenchDialogs.kt:Surface</ID>
+    <ID>MaxLineLength:WorkbenchDialogs.kt:Text(file.relativePath, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1, overflow = TextOverflow.Ellipsis)</ID>
+    <ID>MaxLineLength:WorkbenchDialogs.kt:add(Triple("保存当前布局", Icons.Default.Add) { state.saveCurrentLayoutPreset("自定义布局 ${state.customLayoutPresets.size + 1}") })</ID>
+    <ID>MaxLineLength:WorkbenchDialogs.kt:add(Triple("应用 Agent 协作布局", Icons.Default.SmartToy) { state.applyBuiltInLayoutPreset(BuiltInLayoutPreset.AGENT) })</ID>
+    <ID>MaxLineLength:WorkbenchDialogs.kt:add(Triple("聚焦 Agent", Icons.Default.SmartToy) { state.execute(WorkbenchCommand.Focus(WorkbenchFocusTarget.AGENT)) })</ID>
+    <ID>MaxLineLength:WorkbenchDialogs.kt:add(Triple("聚焦工具窗口", Icons.Default.FolderOpen) { state.execute(WorkbenchCommand.Focus(WorkbenchFocusTarget.TOOL_WINDOW)) })</ID>
+    <ID>MaxLineLength:WorkbenchDialogs.kt:add(Triple("聚焦文档区", Icons.Default.Description) { state.execute(WorkbenchCommand.Focus(WorkbenchFocusTarget.DOCUMENT)) })</ID>
+    <ID>MaxLineLength:WorkbenchDialogs.kt:add(Triple("聚焦活动栏", Icons.Default.MoreVert) { state.execute(WorkbenchCommand.Focus(WorkbenchFocusTarget.ACTIVITY_RAIL)) })</ID>
+    <ID>MaxLineLength:WorkbenchFileController.kt:WorkbenchFileController$private fun DocumentTab.isUnder: Boolean</ID>
+    <ID>MaxLineLength:WorkbenchPdfController.kt:WorkbenchPdfController$json.decodeFromString&lt;Map&lt;String, List&lt;PdfAnnotation&gt;&gt;&gt;(Files.readString(path)).toMutableMap()</ID>
+    <ID>MaxLineLength:WorkbenchPdfController.kt:WorkbenchPdfController$json.decodeFromString&lt;Map&lt;String, List&lt;PdfAnnotation&gt;&gt;&gt;(Files.readString(path))[documentPath].orEmpty()</ID>
+    <ID>MaxLineLength:WorkbenchPdfController.kt:WorkbenchPdfController$private fun annotationsPath: Path</ID>
+    <ID>MaxLineLength:WorkbenchRemotePdfController.kt:WorkbenchRemotePdfController$target = workspaceService.resolveForWriteInside(root, "Downloads/${baseName.removeSuffix(".pdf")}-$suffix.pdf")</ID>
+    <ID>MaxLineLength:WorkbenchState.kt:WorkbenchState$Files.getLastModifiedTime(path, LinkOption.NOFOLLOW_LINKS).toMillis() to workspaceService.readText(path)</ID>
+    <ID>MaxLineLength:WorkbenchState.kt:WorkbenchState$activePath</ID>
+    <ID>MaxLineLength:WorkbenchState.kt:WorkbenchState$detachedDocuments += persisted.third.detachedDocuments.filter { path -&gt; documents.any { it.relativePath == path } }</ID>
+    <ID>MaxLineLength:WorkbenchState.kt:WorkbenchState$documentSplit = if (target == DocumentDropTarget.RIGHT) DocumentSplit.VERTICAL else DocumentSplit.HORIZONTAL</ID>
+    <ID>MaxLineLength:WorkbenchState.kt:WorkbenchState$documentSplit = runCatching { DocumentSplit.valueOf(persisted.third.documentSplit) }.getOrDefault(DocumentSplit.NONE)</ID>
+    <ID>MaxLineLength:WorkbenchState.kt:WorkbenchState$documents.filter { it.kind in setOf(DocumentKind.MARKDOWN, DocumentKind.TEXT) }.toList()</ID>
+    <ID>MaxLineLength:WorkbenchState.kt:WorkbenchState$editorBlockIndices = documents.filter { it.kind == DocumentKind.MARKDOWN }.associate { it.relativePath to it.editorBlockIndex }</ID>
+    <ID>MaxLineLength:WorkbenchState.kt:WorkbenchState$fun</ID>
+    <ID>MaxLineLength:WorkbenchState.kt:WorkbenchState$pdfFitModes = documents.filter { it.kind == DocumentKind.PDF }.associate { it.relativePath to it.pdfFitMode }</ID>
+    <ID>MaxLineLength:WorkbenchState.kt:WorkbenchState$pdfRotations = documents.filter { it.kind == DocumentKind.PDF }.associate { it.relativePath to it.pdfRotation }</ID>
+    <ID>MaxLineLength:WorkbenchState.kt:WorkbenchState$pdfSidePanels = documents.filter { it.kind == DocumentKind.PDF }.associate { it.relativePath to it.pdfSidePanel }</ID>
+    <ID>MaxLineLength:WorkbenchState.kt:WorkbenchState$pdfViewModes = documents.filter { it.kind == DocumentKind.PDF }.associate { it.relativePath to it.pdfViewMode }</ID>
+    <ID>MaxLineLength:WorkbenchState.kt:WorkbenchState$persisted.third.activeAgentSession?.takeIf { id -&gt; agentSessions.any { it.id == id } }?.let { activeAgentSessionId = it }</ID>
+    <ID>MaxLineLength:WorkbenchState.kt:WorkbenchState$secondaryPath = persisted.third.secondaryDocument?.takeIf { path -&gt; documents.any { it.relativePath == path } }</ID>
+    <ID>MaxLineLength:WorkbenchState.kt:WorkbenchState$tab.cursor = TextRange(safeOffset, (safeOffset + selectionLength).coerceIn(safeOffset, tab.content.length))</ID>
+    <ID>MaxLineLength:WorkbenchState.kt:WorkbenchState$toolPanelDock = runCatching { ToolPanelDock.valueOf(persisted.third.toolPanelDock) }.getOrDefault(ToolPanelDock.LEFT)</ID>
+    <ID>MaxLineLength:WorkbenchState.kt:WorkbenchState$toolTabs += persisted.third.toolTabs.mapNotNull { name -&gt; runCatching { ToolWindow.valueOf(name) }.getOrNull() }.filter { it != ToolWindow.AGENT }</ID>
+    <ID>MaxLineLength:WorkbenchState.kt:WorkbenchState$val state = if (restore) workspaceService.loadWorkbench(safeRoot) else PersistedWorkbench(workspace = safeRoot.pathString)</ID>
+    <ID>MaxLineLength:WorkbenchSubstates.kt:AgentRuntimeState$is AgentStreamEvent.ToolFinished -&gt; messages += AgentMessage("tool", event.output, error = event.failed, streamId = event.callId)</ID>
+    <ID>MaxLineLength:WorkbenchSubstates.kt:AgentRuntimeState$val content = listOf(event.name, event.target, event.detail).filter(String::isNotBlank).joinToString("\n")</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$"txt", "log", "json", "yaml", "yml", "toml", "kt", "kts", "java", "js", "ts", "css", "html", "xml" -&gt; DocumentKind.TEXT</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$.</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$MarkdownParser.analyze(content).links.any { link -&gt; link.target.substringAfterLast('/').removeSuffix(".md") == oldStem }</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$activityRailRight = properties.getProperty(prefix + "activityRailRight")?.toBooleanStrictOrNull() ?: false</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$activityRailVisible = properties.getProperty(prefix + "activityRailVisible")?.toBooleanStrictOrNull() ?: true</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$agentPanelVisible = properties.getProperty(prefix + "agentPanelVisible")?.toBooleanStrictOrNull() ?: false</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$batch.entries.map { resolveInside(normalizedRoot, it.newRelativePath) to resolveInside(normalizedRoot, it.oldRelativePath) }</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$detachedDocuments = properties.getProperty("detachedDocuments", "").split(',').filter { it.isNotBlank() }.map(::decode)</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$entries.asReversed().forEach { entry -&gt; runCatching { Files.createDirectories(entry.original.parent); Files.move(entry.trashed, entry.original) } }</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$if (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS) || !source.extension.equals("md", true)) return emptyList()</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) return PersistedWorkbench(workspace = safeRoot.pathString)</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$moved.asReversed().forEach { (source, target) -&gt; runCatching { if (Files.exists(target)) Files.move(target, source) } }</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$private fun encode: String</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$recentDocuments = properties.getProperty("recentDocuments", "").split(',').filter { it.isNotBlank() }.mapNotNull { encoded -&gt; runCatching { decode(encoded) }.getOrNull() }</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$require</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$require(!Files.exists(entry.original)) { "Cannot restore ${entry.original.fileName}: the path is occupied." }</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$require(!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) { "${source.fileName} already exists in the target folder." }</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$require(clean.isNotEmpty() &amp;&amp; clean !in setOf(".", "..") &amp;&amp; '/' !in clean &amp;&amp; '\\' !in clean) { "Enter a valid file or folder name." }</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$require(newStems.distinct().size == 1) { "Notes named '$oldStem' must use the same new base name in one batch." }</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$require(path.startsWith(root) &amp;&amp; !Files.isSymbolicLink(path)) { "Symbolic links are not part of the workspace tree." }</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$require(source != safeRoot &amp;&amp; Files.exists(source, LinkOption.NOFOLLOW_LINKS)) { "Entry is no longer available: $relative" }</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$secondaryDocument = properties.getProperty("secondaryDocument", "").takeIf { it.isNotBlank() }?.let(::decode)</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$state.editorBlockIndices.forEach { (path, index) -&gt; setProperty("blockIndex.${encode(path)}", index.toString()) }</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$state.pdfRotations.forEach { (path, rotation) -&gt; setProperty("pdfRotation.${encode(path)}", rotation.toString()) }</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$toolPanelExpanded = properties.getProperty(prefix + "toolPanelExpanded")?.toBooleanStrictOrNull() ?: false</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$updated.forEach { (path, content) -&gt; atomicWrite(normalizedRoot.resolve(finalPaths[path] ?: path), content) }</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$val</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$val modified = runCatching { Files.getLastModifiedTime(path, LinkOption.NOFOLLOW_LINKS).toMillis() }.getOrDefault(0L)</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$val size = runCatching { if (Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) Files.size(path) else 0L }.getOrDefault(0L)</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$val target = resolveInside(normalizedRoot, normalizedRoot.relativize(source.resolveSibling(cleanName)).pathString)</ID>
+    <ID>MaxLineLength:WorkspaceService.kt:WorkspaceService$val target = resolveInside(safeRoot, safeRoot.relativize(targetDirectory.resolve(source.fileName)).pathString)</ID>
+    <ID>NestedBlockDepth:WorkbenchRemotePdfController.kt:WorkbenchRemotePdfController$private suspend fun streamResponse</ID>
+    <ID>NoNameShadowing:WorkbenchFileController.kt:WorkbenchFileController${ RenamedEntry(it.newRelativePath, it.oldRelativePath) }</ID>
+    <ID>ReturnCount:MarkdownCompletion.kt:MarkdownCompletionEngine$fun suggest: List&lt;MarkdownCompletion&gt;</ID>
+    <ID>ReturnCount:MarkdownCompletion.kt:MarkdownCompletionEngine$private fun isInsideFrontmatter: Boolean</ID>
+    <ID>ReturnCount:MarkdownEditing.kt:MarkdownEditing$fun replaceNodeBody: String?</ID>
+    <ID>ReturnCount:ToolWindows.kt:private fun validateBatchRename: String?</ID>
+    <ID>ReturnCount:WorkbenchAgentController.kt:WorkbenchAgentController$fun sendMessage</ID>
+    <ID>ReturnCount:WorkbenchDocumentController.kt:WorkbenchDocumentController$fun saveAs: Job?</ID>
+    <ID>ReturnCount:WorkbenchDocumentController.kt:WorkbenchDocumentController$private suspend fun saveDocumentNow: Boolean</ID>
+    <ID>ReturnCount:WorkbenchFileController.kt:WorkbenchFileController$fun deleteEntries</ID>
+    <ID>ReturnCount:WorkbenchRemotePdfController.kt:WorkbenchRemotePdfController$fun download</ID>
+    <ID>ReturnCount:WorkbenchState.kt:WorkbenchState$fun openRelative</ID>
+    <ID>ReturnCount:WorkbenchSubstates.kt:AgentRuntimeState$fun removeSession: AgentSessionState?</ID>
+    <ID>ReturnCount:WorkbenchSubstates.kt:AgentRuntimeState$fun setDiffDecision: Boolean</ID>
+    <ID>ReturnCount:WorkspaceService.kt:WorkspaceService$fun loadWorkbench: PersistedWorkbench</ID>
+    <ID>SpreadOperator:WorkbenchRemotePdfController.kt:WorkbenchRemotePdfController$(partial, *writeOptions)</ID>
+    <ID>ThrowsCount:PdfDocumentView.kt:@Composable internal fun PdfDocument</ID>
+    <ID>TooGenericExceptionCaught:PdfDocumentView.kt:error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:PdfDocumentView.kt:failure: Throwable</ID>
+    <ID>TooGenericExceptionCaught:WorkbenchRemotePdfController.kt:WorkbenchRemotePdfController$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:WorkspaceService.kt:WorkspaceService$error: Throwable</ID>
+    <ID>TooManyFunctions:DocumentViews.kt:dev.xuexue.ui.DocumentViews.kt</ID>
+    <ID>TooManyFunctions:ToolWindows.kt:dev.xuexue.ui.ToolWindows.kt</ID>
+    <ID>TooManyFunctions:WorkbenchAgentController.kt:WorkbenchAgentController</ID>
+    <ID>TooManyFunctions:WorkbenchApp.kt:dev.xuexue.ui.WorkbenchApp.kt</ID>
+    <ID>TooManyFunctions:WorkbenchPdfController.kt:WorkbenchPdfController</ID>
+    <ID>TooManyFunctions:WorkbenchState.kt:WorkbenchState : WorkbenchLayoutModelAgentRuntimeModel</ID>
+    <ID>TooManyFunctions:WorkbenchSubstates.kt:WorkbenchLayoutState : WorkbenchLayoutModel</ID>
+    <ID>TooManyFunctions:WorkspaceService.kt:WorkspaceService</ID>
+    <ID>UnsafeCallOnNullableType:AgentViews.kt:state.activeDocument!!</ID>
+    <ID>UnsafeCallOnNullableType:AgentViews.kt:state.dragPayload!!</ID>
+    <ID>UnsafeCallOnNullableType:DocumentModel.kt:MarkdownParser$orderedItem.matchEntire(trimmed)!!</ID>
+    <ID>UnsafeCallOnNullableType:DocumentViews.kt:bitmap!!</ID>
+    <ID>UnsafeCallOnNullableType:DocumentViews.kt:error!!</ID>
+    <ID>UnsafeCallOnNullableType:DocumentViews.kt:state.dragPayload!!</ID>
+    <ID>UnsafeCallOnNullableType:PdfDocumentView.kt:bitmap!!</ID>
+    <ID>UnsafeCallOnNullableType:PdfDocumentView.kt:error!!</ID>
+    <ID>UnsafeCallOnNullableType:PdfDocumentView.kt:loadError!!</ID>
+    <ID>UnsafeCallOnNullableType:ToolWindows.kt:dialogEntry!!</ID>
+    <ID>UnusedPrivateFunction:ToolWindows.kt:private fun fileIcon: ImageVector</ID>
+    <ID>UnusedPrivateFunction:ToolWindows.kt:private fun flattenFiles: List&lt;WorkspaceEntry&gt;</ID>
+    <ID>UnusedPrivateFunction:WorkspaceService.kt:WorkspaceService$private fun rewriteWikiTarget: String</ID>
+    <ID>UselessCallOnNotNull:DocumentViews.kt:target.orEmpty()</ID>
+  </CurrentIssues>
+</SmellBaseline>

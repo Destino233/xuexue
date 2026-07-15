@@ -1,0 +1,85 @@
+name: Native Matrix
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unix-native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+            library: libxuexue_mupdf.so
+          - os: macos-13
+            platform: macos-x86_64
+            library: libxuexue_mupdf.dylib
+          - os: macos-14
+            platform: macos-arm64
+            library: libxuexue_mupdf.dylib
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "26"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Cache MuPDF native build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .mupdf
+            ~/.cache/xuexue/mupdf
+          key: mupdf-native-1.27.2-${{ matrix.platform }}
+      - name: Verify detected target
+        run: test "$(./tools/bootstrap-mupdf-native.sh --print-target)" = "${{ matrix.platform }}/${{ matrix.library }}"
+      - name: Build and smoke-test JNI
+        run: >-
+          ./gradlew --no-daemon desktopTest
+          --tests 'dev.xuexue.platform.PdfReaderBackendTest.muPdfImplementsTheUiBackendContract'
+
+  windows-native:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "26"
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            coreutils
+            curl
+            make
+            mingw-w64-x86_64-gcc
+            tar
+      - name: Cache MuPDF native build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .mupdf
+            ~/.cache/xuexue/mupdf
+          key: mupdf-native-1.27.2-windows-x86_64
+      - name: Build Windows JNI library
+        shell: msys2 {0}
+        run: |
+          test "$(./tools/bootstrap-mupdf-native.sh --print-target)" = "windows-x86_64/xuexue_mupdf.dll"
+          ./tools/bootstrap-mupdf-native.sh
+      - name: Compile desktop application
+        shell: pwsh
+        run: |
+          $env:Path = "C:\msys64\mingw64\bin;$env:Path"
+          .\gradlew.bat --no-daemon compileKotlinDesktop

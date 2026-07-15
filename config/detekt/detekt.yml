@@ -1,0 +1,10 @@
+complexity:
+  LongMethod:
+    allowedLines: 80
+  LongParameterList:
+    allowedFunctionParameters: 8
+    allowedConstructorParameters: 10
+
+style:
+  MagicNumber:
+    active: false

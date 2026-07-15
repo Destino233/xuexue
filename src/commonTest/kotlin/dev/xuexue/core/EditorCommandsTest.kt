@@ -17,4 +17,3 @@ class EditorCommandsTest {
         assertEquals("- one\n- two", result.text)
     }
 }
-

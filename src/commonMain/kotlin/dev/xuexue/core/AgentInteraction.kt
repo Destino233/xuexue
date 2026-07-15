@@ -26,13 +26,14 @@ fun agentSendAvailability(
     model: String,
     apiKey: String,
     awaitingApproval: Boolean,
-): AgentSendAvailability = when {
-    offline -> AgentSendAvailability.OFFLINE
-    awaitingApproval -> AgentSendAvailability.AWAITING_APPROVAL
-    model.isBlank() -> AgentSendAvailability.MODEL_REQUIRED
-    apiKey.isBlank() -> AgentSendAvailability.API_KEY_REQUIRED
-    else -> AgentSendAvailability.READY
-}
+): AgentSendAvailability =
+    when {
+        offline -> AgentSendAvailability.OFFLINE
+        awaitingApproval -> AgentSendAvailability.AWAITING_APPROVAL
+        model.isBlank() -> AgentSendAvailability.MODEL_REQUIRED
+        apiKey.isBlank() -> AgentSendAvailability.API_KEY_REQUIRED
+        else -> AgentSendAvailability.READY
+    }
 
 data class AgentApprovalRequest(
     val id: String,
@@ -51,9 +52,10 @@ fun AgentOperationKind.requiresExplicitApproval(
     readOnlyMode: Boolean,
     allowWrite: Boolean,
     allowShell: Boolean,
-): Boolean = when (this) {
-    AgentOperationKind.READ_FILE -> !workspaceTrusted
-    AgentOperationKind.WRITE_FILE -> readOnlyMode || !workspaceTrusted || !allowWrite
-    AgentOperationKind.RUN_SHELL -> !workspaceTrusted || !allowShell
-    AgentOperationKind.OUTSIDE_WORKSPACE -> true
-}
+): Boolean =
+    when (this) {
+        AgentOperationKind.READ_FILE -> !workspaceTrusted
+        AgentOperationKind.WRITE_FILE -> readOnlyMode || !workspaceTrusted || !allowWrite
+        AgentOperationKind.RUN_SHELL -> !workspaceTrusted || !allowShell
+        AgentOperationKind.OUTSIDE_WORKSPACE -> true
+    }

@@ -33,13 +33,14 @@ object MarkdownCompletionEngine {
         val safeCursor = cursor.coerceIn(0, source.length)
         val before = source.substring(0, safeCursor)
         val wikiStart = before.lastIndexOf("[[")
-        if (wikiStart >= 0 && before.lastIndexOf("]]" ) < wikiStart) {
+        if (wikiStart >= 0 && before.lastIndexOf("]]") < wikiStart) {
             val typed = before.substring(wikiStart + 2)
             val blockMarker = typed.lastIndexOf("#^")
             if (blockMarker >= 0) {
                 val document = typed.substring(0, blockMarker)
                 val query = typed.substring(blockMarker + 2)
-                return blockIds.asSequence()
+                return blockIds
+                    .asSequence()
                     .filter { it.contains(query, ignoreCase = true) }
                     .sortedBy(String::lowercase)
                     .take(limit)
@@ -52,19 +53,18 @@ object MarkdownCompletionEngine {
                             wikiStart,
                             safeCursor,
                         )
-                    }
-                    .toList()
+                    }.toList()
             }
             val query = typed.substringBefore('|').trim()
-            return notePaths.asSequence()
+            return notePaths
+                .asSequence()
                 .filter { path -> path.contains(query, ignoreCase = true) || path.substringAfterLast('/').substringBeforeLast('.').contains(query, ignoreCase = true) }
                 .sortedBy(String::lowercase)
                 .take(limit)
                 .map { path ->
                     val target = path.removeSuffix(".md")
                     MarkdownCompletion(MarkdownCompletionKind.WIKI_LINK, target.substringAfterLast('/'), path, "[[$target]]", wikiStart, safeCursor)
-                }
-                .toList()
+                }.toList()
         }
 
         val lineStart = before.lastIndexOf('\n').let { if (it < 0) 0 else it + 1 }
@@ -72,7 +72,8 @@ object MarkdownCompletionEngine {
         tagContext.find(lineBefore)?.let { match ->
             val query = match.groupValues[1]
             val hashOffset = lineStart + match.range.last - query.length
-            return tags.asSequence()
+            return tags
+                .asSequence()
                 .filter { it.contains(query, ignoreCase = true) }
                 .sortedBy(String::lowercase)
                 .take(limit)
@@ -83,7 +84,8 @@ object MarkdownCompletionEngine {
         if (isInsideFrontmatter(source, safeCursor)) {
             propertyContext.matchEntire(lineBefore)?.let { match ->
                 val query = match.groupValues[1]
-                return (defaultProperties + properties).asSequence()
+                return (defaultProperties + properties)
+                    .asSequence()
                     .filter { it.contains(query, ignoreCase = true) }
                     .sortedBy(String::lowercase)
                     .take(limit)
@@ -94,7 +96,10 @@ object MarkdownCompletionEngine {
         return emptyList()
     }
 
-    private fun isInsideFrontmatter(source: String, cursor: Int): Boolean {
+    private fun isInsideFrontmatter(
+        source: String,
+        cursor: Int,
+    ): Boolean {
         if (!source.startsWith("---")) return false
         val firstEnd = source.indexOf('\n')
         if (firstEnd < 0 || cursor <= firstEnd) return false

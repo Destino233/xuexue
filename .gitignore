@@ -1,8 +1,10 @@
 .gradle/
+.kotlin/
 build/
 out/
 .idea/
 *.iml
 .DS_Store
 .xuexue/
+.mupdf/
 参考内容/

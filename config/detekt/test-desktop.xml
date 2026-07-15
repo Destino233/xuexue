@@ -1,0 +1,22 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>InjectDispatcher:PdfReaderBackendTest.kt:PdfReaderBackendTest$Unconfined</ID>
+    <ID>InjectDispatcher:WorkbenchStateTest.kt:WorkbenchStateTest$Unconfined</ID>
+    <ID>MaxLineLength:WorkbenchStateTest.kt:WorkbenchStateTest$assertEquals(byteArrayOf(1, 2, 3).toList(), state.renderPdfPage(tab, 2, 96f, PdfRasterPurpose.VIEWPORT).encodedPng.toList())</ID>
+    <ID>MaxLineLength:WorkbenchStateTest.kt:WorkbenchStateTest$assertTrue(request.any { it.role == "system" &amp;&amp; it.content.contains("Important quote") &amp;&amp; it.content.contains("Reading.pdf") })</ID>
+    <ID>MaxLineLength:WorkbenchStateTest.kt:WorkbenchStateTest$assertTrue(state.agentMessages.any { it.role == "tool" &amp;&amp; it.streamId == "call-1" &amp;&amp; it.content == "File contents" })</ID>
+    <ID>MaxLineLength:WorkbenchStateTest.kt:WorkbenchStateTest$assertTrue(state.agentMessages.any { it.role == "tool_call" &amp;&amp; it.streamId == "call-1" &amp;&amp; it.content.contains("12 lines") })</ID>
+    <ID>MaxLineLength:WorkbenchStateTest.kt:WorkbenchStateTest$val note = DocumentTab("A.md", DocumentKind.MARKDOWN, "alpha", pinned = true).apply { cursor = androidx.compose.ui.text.TextRange(3) }</ID>
+    <ID>MaxLineLength:WorkbenchStateTest.kt:WorkbenchStateTest$val paths = if (Files.exists(root)) Files.walk(root).use { it.sorted(Comparator.reverseOrder()).toList() } else emptyList()</ID>
+    <ID>MaxLineLength:WorkbenchStateTest.kt:WorkbenchStateTest$val readRequest = AgentApprovalRequest("read-1", AgentOperationKind.READ_FILE, "notes/Private.md", "Read note contents")</ID>
+    <ID>MaxLineLength:WorkbenchStateTest.kt:WorkbenchStateTest$val writeRequest = AgentApprovalRequest("write-1", AgentOperationKind.WRITE_FILE, "notes/Plan.md", "Replace selected block")</ID>
+    <ID>MaxLineLength:WorkbenchStateTest.kt:WorkbenchStateTest.&lt;no name provided&gt;$override suspend</ID>
+    <ID>MaxLineLength:WorkbenchUiModelTest.kt:WorkbenchUiModelTest$assertEquals(WorkbenchAuxiliaryPanel.NONE, mediumAuxiliaryPanel(toolWindowVisible = false, agentVisible = false))</ID>
+    <ID>MaxLineLength:WorkbenchUiModelTest.kt:WorkbenchUiModelTest$assertEquals(WorkbenchAuxiliaryPanel.TOOL_WINDOW, mediumAuxiliaryPanel(toolWindowVisible = true, agentVisible = false))</ID>
+    <ID>MaxLineLength:WorkspaceServiceTest.kt:WorkspaceServiceTest$assertEquals("ImportantTerm", hit.preview.substring(hit.previewMatchStart, hit.previewMatchStart + hit.matchLength))</ID>
+    <ID>TooManyFunctions:WorkbenchStateTest.kt:WorkbenchStateTest</ID>
+    <ID>UnsafeCallOnNullableType:WorkbenchStateTest.kt:WorkbenchStateTest$state.activeDocument!!</ID>
+  </CurrentIssues>
+</SmellBaseline>
