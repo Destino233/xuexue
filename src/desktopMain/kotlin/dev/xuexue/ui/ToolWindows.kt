@@ -3,27 +3,15 @@
 
 package dev.xuexue.ui
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.expandHorizontally
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkHorizontally
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -165,7 +153,7 @@ fun ToolPanel(
     ) {
         Column(Modifier.fillMaxSize()) {
             ToolPanelHeader(
-                title = if (state.toolTabs.size > 1) "工具" else toolTitle(state.activeTool),
+                title = toolTitle(state.activeTool),
                 dock = state.toolPanelDock,
                 pinned = state.toolPanelPinned,
                 expanded = state.toolPanelExpanded,
@@ -187,7 +175,6 @@ fun ToolPanel(
                 },
             )
             if (!outerChrome) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            ToolTabStrip(state)
             val secondary = state.secondaryTool
             if (secondary == null) {
                 ToolContent(state, state.activeTool, Modifier.fillMaxSize())
@@ -203,132 +190,13 @@ fun ToolPanel(
 }
 
 @Composable
-private fun ToolTabStrip(state: WorkbenchState) {
-    if (state.toolTabs.size <= 1) return
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .height(34.dp)
-            .horizontalScroll(rememberScrollState())
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-            .padding(start = 3.dp),
-    ) {
-        state.toolTabs.forEach { tool ->
-            ToolTab(
-                state = state,
-                tool = tool,
-                active = tool == state.activeTool,
-                secondary = tool == state.secondaryTool,
-            )
-        }
-    }
-}
-
-@Composable
-private fun ToolTab(
-    state: WorkbenchState,
-    tool: ToolWindow,
-    active: Boolean,
-    secondary: Boolean,
-) {
-    val interactionSource = remember(tool) { MutableInteractionSource() }
-    val hovered by interactionSource.collectIsHoveredAsState()
-    val pressed by interactionSource.collectIsPressedAsState()
-    val containerColor by
-        animateColorAsState(
-            targetValue =
-                when {
-                    active -> MaterialTheme.colorScheme.surface
-                    secondary -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f)
-                    hovered -> MaterialTheme.colorScheme.surface.copy(alpha = 0.54f)
-                    else -> Color.Transparent
-                },
-            animationSpec = WorkbenchMotion.fastTween(),
-            label = "tool tab color",
-        )
-    val scale by
-        animateFloatAsState(
-            targetValue = if (pressed) 0.97f else 1f,
-            animationSpec = WorkbenchMotion.expressiveSpring(),
-            label = "tool tab scale",
-        )
-    Box(
-        Modifier
-            .width(112.dp)
-            .fillMaxHeight()
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }.background(containerColor)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-            ) {
-                state.openToolWindow(tool)
-            },
-    ) {
-        ToolTabContent(state, tool, active)
-        MotionVisibility(
-            visible = active,
-            modifier = Modifier.align(Alignment.BottomCenter),
-            enter = expandHorizontally(animationSpec = WorkbenchMotion.expressiveSpring()) + fadeIn(),
-            exit = shrinkHorizontally(animationSpec = WorkbenchMotion.standardTween()) + fadeOut(),
-        ) {
-            Box(
-                Modifier
-                    .width(112.dp)
-                    .height(2.dp)
-                    .background(MaterialTheme.colorScheme.primary),
-            )
-        }
-    }
-}
-
-@Composable
-private fun ToolTabContent(
-    state: WorkbenchState,
-    tool: ToolWindow,
-    active: Boolean,
-) {
-    Row(
-        Modifier.fillMaxSize().padding(start = 9.dp, end = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            toolTitle(tool),
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        MotionIconButton(onClick = { state.closeToolTab(tool) }, modifier = Modifier.size(24.dp)) {
-            Icon(Icons.Default.Close, "关闭 ${toolTitle(tool)}", Modifier.size(13.dp))
-        }
-    }
-}
-
-@Composable
 private fun ToolContent(
     state: WorkbenchState,
     tool: ToolWindow,
     modifier: Modifier = Modifier,
 ) {
-    AnimatedContent(
-        targetState = tool,
-        modifier = modifier,
-        transitionSpec = {
-            val enter =
-                fadeIn(WorkbenchMotion.standardTween()) +
-                    slideInHorizontally(WorkbenchMotion.standardTween()) { it / 18 }
-            val exit =
-                fadeOut(WorkbenchMotion.exitTween()) +
-                    slideOutHorizontally(WorkbenchMotion.exitTween()) { -it / 24 }
-            enter togetherWith exit
-        },
-        label = "tool content",
-    ) { activeTool ->
-        when (activeTool) {
+    Box(modifier) {
+        when (tool) {
             ToolWindow.FILES -> {
                 FilesTool(state)
             }
@@ -908,18 +776,13 @@ private fun rememberFileTreeMotion(
     expanded: Boolean,
     hovered: Boolean,
 ): FileTreeMotion {
-    val rowColor by
-        animateColorAsState(
-            targetValue =
-                when {
-                    selected -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)
-                    active -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.66f)
-                    hovered -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.052f)
-                    else -> Color.Transparent
-                },
-            animationSpec = WorkbenchMotion.fastTween(),
-            label = "workspace row color",
-        )
+    val rowColor =
+        when {
+            selected -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)
+            active -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.66f)
+            hovered -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.052f)
+            else -> Color.Transparent
+        }
     val chevronRotation by
         animateFloatAsState(
             targetValue = if (expanded) 0f else -90f,

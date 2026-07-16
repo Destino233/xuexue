@@ -4,19 +4,24 @@ import dev.xuexue.core.AgentApprovalDecision
 import dev.xuexue.core.AgentApprovalRequest
 import dev.xuexue.core.AgentSendAvailability
 import dev.xuexue.core.DocumentKind
-import dev.xuexue.core.PiAgentMessage
-import dev.xuexue.core.PiAgentModel
-import dev.xuexue.core.PiAgentRuntime
 import dev.xuexue.core.requiresExplicitApproval
+import dev.xuexue.pi.ai.Model
+import dev.xuexue.pi.ai.ModelCost
+import dev.xuexue.pi.ai.ModelInput
 import dev.xuexue.platform.AgentClient
 import dev.xuexue.platform.AgentMessage
 import dev.xuexue.platform.AgentProviderConfig
 import dev.xuexue.platform.DesktopAgentTools
+import dev.xuexue.platform.DesktopPiAgentAdapter
 import dev.xuexue.platform.WorkspaceService
+import dev.xuexue.platform.adaptDesktopAgentTools
+import dev.xuexue.platform.agentMessagesToLegacyProtocol
+import dev.xuexue.platform.coreUserMessage
+import dev.xuexue.platform.desktopToolAfterCall
+import dev.xuexue.platform.legacyProtocolToAgentMessages
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -47,7 +52,8 @@ class WorkbenchAgentController(
     private var job: Job? = null
     private var runId = 0
     private var lastDeletedSession: AgentSessionState? = null
-    private val piRuntime = PiAgentRuntime()
+    private val piAgent = runtime.piAgent
+    private val streamFunction = DesktopPiAgentAdapter(scope, client)
     private var approvalDeferred: CompletableDeferred<AgentApprovalDecision>? = null
 
     val canRestoreDeletedSession: Boolean get() = lastDeletedSession != null
@@ -60,20 +66,21 @@ class WorkbenchAgentController(
         val prompt = runtime.agentInput.trim()
         if (prompt.isBlank()) return
         runtime.agentInput = ""
-        if (runtime.agentRunning) {
+        if (piAgent.currentState.isStreaming) {
             runtime.agentMessages += AgentMessage("steering_queued", prompt)
+            piAgent.steer(coreUserMessage(prompt))
             onStatus("Steering queued")
             persistTranscript()
             return
         }
         runtime.agentMessages += AgentMessage("user", prompt)
-        runtime.activeAgentSession.protocolMessages += PiAgentMessage("user", prompt)
-        startTurn()
+        startTurn(prompt)
     }
 
     fun stop() {
         runId++
-        job?.cancel()
+        piAgent.abort()
+        piAgent.clearAllQueues()
         runtime.stop()
         approvalDeferred?.complete(AgentApprovalDecision.DENY)
         approvalDeferred = null
@@ -126,7 +133,7 @@ class WorkbenchAgentController(
     }
 
     fun newSession() {
-        if (runtime.agentRunning) stop()
+        if (piAgent.currentState.isStreaming) stop()
         runtime.newSession()
         persistTranscript()
         persistWorkbench()
@@ -165,7 +172,7 @@ class WorkbenchAgentController(
 
     fun selectSession(id: String) {
         if (id == runtime.activeAgentSessionId || runtime.agentSessions.none { it.id == id }) return
-        if (runtime.agentRunning) stop()
+        if (piAgent.currentState.isStreaming) stop()
         if (!runtime.selectSession(id)) return
         persistTranscript()
         persistWorkbench()
@@ -180,7 +187,7 @@ class WorkbenchAgentController(
     }
 
     fun cloneSession(fork: Boolean) {
-        if (runtime.agentRunning) stop()
+        if (piAgent.currentState.isStreaming) stop()
         runtime.cloneSession(fork)
         persistTranscript()
         persistWorkbench()
@@ -188,7 +195,7 @@ class WorkbenchAgentController(
 
     fun deleteSession(id: String) {
         if (runtime.agentSessions.none { it.id == id }) return
-        if (runtime.agentRunning && id == runtime.activeAgentSessionId) stop()
+        if (piAgent.currentState.isStreaming && id == runtime.activeAgentSessionId) stop()
         runtime.removeSession(id)?.let { session ->
             lastDeletedSession = session
             onFileMessage("Agent session deleted")
@@ -293,7 +300,7 @@ class WorkbenchAgentController(
         }
     }
 
-    private fun startTurn() {
+    private fun startTurn(prompt: String) {
         val session = runtime.activeAgentSession
         val sessionMessages = session.messages
         runtime.agentRunning = true
@@ -304,12 +311,11 @@ class WorkbenchAgentController(
             scope.launch {
                 val attachedFiles = loadAttachedFiles()
                 val projectInstructions = loadProjectInstructions()
-                val contextMessages = contextMessages(attachedFiles, projectInstructions)
-                runCatching {
-                    val result = runPiAgent(session, contextMessages, assistantId)
-                    session.protocolMessages.clear()
-                    session.protocolMessages += result.drop(contextMessages.size)
-                }.onFailure { throwable ->
+                val model = agentModel()
+                configureAgent(session, model, contextPrompt(attachedFiles, projectInstructions))
+                val projection = WorkbenchAgentProjection(session, assistantId)
+                val subscription = piAgent.subscribe { event, _ -> projection.apply(event) }
+                runCatching { piAgent.prompt(coreUserMessage(prompt)) }.onFailure { throwable ->
                     if (throwable !is CancellationException) {
                         val index = sessionMessages.indexOfFirst { it.streamId == assistantId }
                         val failure =
@@ -322,79 +328,68 @@ class WorkbenchAgentController(
                         if (index >= 0) sessionMessages[index] = failure else sessionMessages += failure
                     }
                 }
+                subscription.dispose()
+                session.protocolMessages.clear()
+                session.protocolMessages += agentMessagesToLegacyProtocol(piAgent.currentState.messages)
                 if (runId == currentRunId) {
                     runtime.agentRunning = false
-                    val queuedIndex = sessionMessages.indexOfFirst { it.role == "steering_queued" }
-                    if (queuedIndex >= 0) {
-                        sessionMessages[queuedIndex] = sessionMessages[queuedIndex].copy(role = "steering")
-                        onStatus("Queued steering started")
-                        persistTranscript()
-                        startTurn()
-                    } else {
-                        persistTranscript()
-                    }
+                    persistTranscript()
                 }
             }
     }
 
-    private fun contextMessages(
+    private fun contextPrompt(
         attachedFiles: List<Pair<String, String>>,
         projectInstructions: List<Pair<String, String>>,
-    ): List<PiAgentMessage> =
+    ): String =
         buildList {
-            add(PiAgentMessage("system", SYSTEM_PROMPT))
+            add(SYSTEM_PROMPT)
             if (runtime.includeActiveDocument) {
                 activeDocument()?.takeIf { it.content.isNotBlank() }?.let { tab ->
                     val content = "Current document (${tab.relativePath}):\n${tab.content.take(16_000)}"
-                    add(PiAgentMessage("system", content))
+                    add(content)
                 }
             }
             attachedFiles.forEach { (relative, content) ->
-                add(PiAgentMessage("system", "Attached workspace file ($relative):\n$content"))
+                add("Attached workspace file ($relative):\n$content")
             }
             projectInstructions.forEach { (relative, content) ->
-                add(PiAgentMessage("system", "Project instructions ($relative):\n$content"))
+                add("Project instructions ($relative):\n$content")
             }
             runtime.agentContextSnippets.takeLast(8).forEach { snippet ->
-                add(
-                    PiAgentMessage(
-                        "system",
-                        "Attached selected context (${snippet.title}):\n${snippet.content.take(8_000)}",
-                    ),
-                )
+                add("Attached selected context (${snippet.title}):\n${snippet.content.take(8_000)}")
             }
-        }
+        }.joinToString("\n\n")
 
-    private suspend fun runPiAgent(
+    private fun configureAgent(
         session: AgentSessionState,
-        contextMessages: List<PiAgentMessage>,
-        assistantId: String,
-    ): List<PiAgentMessage> =
-        piRuntime.run(
-            initialMessages = contextMessages + session.protocolMessages.takeLast(80),
-            model = agentModel(),
-            tools = DesktopAgentTools(workspaceService, workspaceRoot, ::authorizeTool, Dispatchers.IO).all(),
-            onEvent = { event ->
-                scope.launch(start = CoroutineStart.UNDISPATCHED) {
-                    runtime.applyStreamEvent(session, assistantId, event)
-                }
-            },
-            drainSteering = { drainQueuedSteering(session) },
-        )
+        model: Model,
+        systemPrompt: String,
+    ) {
+        val tools = DesktopAgentTools(workspaceService, workspaceRoot, ::authorizeTool, Dispatchers.IO).all()
+        piAgent.setSystemPrompt(systemPrompt)
+        piAgent.setModel(model)
+        piAgent.setTools(adaptDesktopAgentTools(tools))
+        piAgent.replaceMessages(legacyProtocolToAgentMessages(session.protocolMessages.takeLast(80), model))
+        piAgent.streamFunction = streamFunction
+        piAgent.getApiKey = { runtime.agentApiKey }
+        piAgent.afterToolCall = { context, _ -> desktopToolAfterCall(context) }
+        piAgent.sessionId = session.id
+    }
 
-    private fun agentModel(): PiAgentModel =
-        object : PiAgentModel {
-            override suspend fun complete(
-                messages: List<PiAgentMessage>,
-                tools: List<dev.xuexue.core.PiToolDefinition>,
-                onEvent: (dev.xuexue.core.AgentStreamEvent) -> Unit,
-            ) = client.complete(
-                messages,
-                tools,
-                AgentProviderConfig(runtime.agentEndpoint, runtime.agentModel, runtime.agentApiKey),
-                onEvent,
-            )
-        }
+    private fun agentModel(): Model =
+        Model(
+            id = runtime.agentModel,
+            name = runtime.agentModel,
+            api = "openai-completions",
+            provider = "openai",
+            baseUrl = runtime.agentEndpoint,
+            reasoning = true,
+            input = listOf(ModelInput.TEXT),
+            cost = ModelCost(0.0, 0.0, 0.0, 0.0),
+            contextWindow = 128_000,
+            maxTokens = 16_384,
+        )
 
     private suspend fun authorizeTool(
         operation: dev.xuexue.core.AgentOperationKind,
@@ -406,15 +401,6 @@ class WorkbenchAgentController(
         if (!requestApproval(request)) return true
         approvalDeferred = deferred
         return deferred.await() != AgentApprovalDecision.DENY
-    }
-
-    private fun drainQueuedSteering(session: AgentSessionState): List<PiAgentMessage> {
-        val queued = session.messages.filter { it.role == "steering_queued" }
-        queued.forEach { message ->
-            val index = session.messages.indexOf(message)
-            if (index >= 0) session.messages[index] = message.copy(role = "steering")
-        }
-        return queued.map { message -> PiAgentMessage("user", message.content) }
     }
 
     private suspend fun loadAttachedFiles(): List<Pair<String, String>> =

@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.FileCopy
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
@@ -77,6 +78,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -108,6 +110,7 @@ private enum class AgentSettingsSection(
     val label: String,
     val icon: ImageVector,
 ) {
+    DOCUMENTS("文档", Icons.Default.PictureAsPdf),
     MODEL("模型与 Provider", Icons.Default.SmartToy),
     PERMISSIONS("工具与权限", Icons.Default.Tune),
     RESOURCES("资源", Icons.Default.Description),
@@ -142,13 +145,15 @@ fun AgentPanel(
     modifier: Modifier = Modifier,
     outerChrome: Boolean = false,
 ) {
+    val piState by state.piAgentState.collectAsState()
+    val isAgentRunning = piState.isStreaming
     var panelMenuOpen by remember { mutableStateOf(false) }
     var sessionMenuOpen by remember { mutableStateOf(false) }
     var renameDialog by remember { mutableStateOf(false) }
     var renameInput by remember { mutableStateOf("") }
     val messageListState = rememberLazyListState()
     val messages = state.agentMessages
-    LaunchedEffect(state.activeAgentSessionId, messages.size, messages.lastOrNull()?.content, state.agentRunning) {
+    LaunchedEffect(state.activeAgentSessionId, messages.size, messages.lastOrNull()?.content, isAgentRunning) {
         if (messages.isNotEmpty()) {
             messageListState.scrollToItem(messages.lastIndex)
         }
@@ -245,8 +250,20 @@ fun AgentPanel(
                                     Modifier.fillMaxSize().padding(horizontal = 9.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Text(session.name, style = MaterialTheme.typography.labelMedium, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                    if (active && state.agentRunning) CircularProgressIndicator(Modifier.size(11.dp), strokeWidth = 1.5.dp)
+                                    Text(
+                                        text = session.name,
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    if (active && isAgentRunning) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(11.dp),
+                                            strokeWidth = 1.5.dp,
+                                        )
+                                    }
                                 }
                                 MotionVisibility(
                                     visible = active,
@@ -422,7 +439,7 @@ fun AgentPanel(
                             }
                             item {
                                 MotionVisibility(
-                                    visible = state.agentRunning,
+                                    visible = isAgentRunning,
                                     enter =
                                         expandVertically(animationSpec = WorkbenchMotion.expressiveSpring()) +
                                             fadeIn(WorkbenchMotion.fastTween()),
@@ -523,10 +540,10 @@ fun AgentPanel(
                         selected = canSend,
                         modifier = Modifier.size(42.dp),
                     ) {
-                        Icon(Icons.AutoMirrored.Filled.Send, if (state.agentRunning) "发送 Steering" else "发送")
+                        Icon(Icons.AutoMirrored.Filled.Send, if (isAgentRunning) "发送 Steering" else "发送")
                     }
                     AnimatedVisibility(
-                        visible = state.agentRunning,
+                        visible = isAgentRunning,
                         enter = expandHorizontally(animationSpec = WorkbenchMotion.expressiveSpring()) + fadeIn(),
                         exit = shrinkHorizontally(animationSpec = WorkbenchMotion.standardTween()) + fadeOut(),
                     ) {
@@ -759,6 +776,10 @@ fun AgentSettingsDialog(
                     Text(section.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(14.dp))
                     when (section) {
+                        AgentSettingsSection.DOCUMENTS -> {
+                            DocumentSettingsPane(state)
+                        }
+
                         AgentSettingsSection.MODEL -> {
                             Text("OpenAI 兼容接口", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(Modifier.height(8.dp))
@@ -824,6 +845,7 @@ fun AgentSettingsDialog(
         confirmButton = {
             Button(onClick = {
                 state.persistLayout()
+                state.persistDocumentPreferences()
                 onDismiss()
             }) { Text("完成") }
         },

@@ -117,9 +117,25 @@ data class PersistedWorkbench(
     val pdfColorModes: Map<String, String> = emptyMap(),
 )
 
+data class AppPreferences(
+    val documentWheelZoomMultiplier: Float = DEFAULT_DOCUMENT_WHEEL_ZOOM_MULTIPLIER,
+)
+
+const val DEFAULT_DOCUMENT_WHEEL_ZOOM_MULTIPLIER = 1f
+const val MIN_DOCUMENT_WHEEL_ZOOM_MULTIPLIER = 0.5f
+const val MAX_DOCUMENT_WHEEL_ZOOM_MULTIPLIER = 2f
+
+fun normalizedDocumentWheelZoomMultiplier(value: Float): Float =
+    value
+        .takeIf(Float::isFinite)
+        ?.coerceIn(MIN_DOCUMENT_WHEEL_ZOOM_MULTIPLIER, MAX_DOCUMENT_WHEEL_ZOOM_MULTIPLIER)
+        ?: DEFAULT_DOCUMENT_WHEEL_ZOOM_MULTIPLIER
+
 // Function-count debt is already tracked in the static-analysis baseline; formatting alone should not duplicate it.
 @Suppress("LargeClass")
-class WorkspaceService {
+class WorkspaceService(
+    private val appStateDirectory: Path = Path.of(System.getProperty("user.home"), ".xuexue"),
+) {
     fun canonicalRoot(root: Path): Path {
         require(Files.isDirectory(root)) { "Workspace root is not a readable directory." }
         return root.toRealPath()
@@ -788,13 +804,50 @@ class WorkspaceService {
             ?.takeIf { Files.isDirectory(it) }
     }
 
+    fun loadAppPreferences(): AppPreferences {
+        val file = appPreferencesFile()
+        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) return AppPreferences()
+        return runCatching {
+            val properties = Properties()
+            Files.newInputStream(file).use(properties::load)
+            AppPreferences(
+                documentWheelZoomMultiplier =
+                    normalizedDocumentWheelZoomMultiplier(
+                        properties.getProperty("documentWheelZoomMultiplier")?.toFloatOrNull()
+                            ?: DEFAULT_DOCUMENT_WHEEL_ZOOM_MULTIPLIER,
+                    ),
+            )
+        }.getOrDefault(AppPreferences())
+    }
+
+    fun saveAppPreferences(preferences: AppPreferences) {
+        Files.createDirectories(appStateDirectory)
+        val target = appPreferencesFile()
+        val temp = Files.createTempFile(appStateDirectory, "preferences.", ".tmp")
+        try {
+            val properties =
+                Properties().apply {
+                    setProperty(
+                        "documentWheelZoomMultiplier",
+                        normalizedDocumentWheelZoomMultiplier(preferences.documentWheelZoomMultiplier).toString(),
+                    )
+                }
+            Files.newOutputStream(temp).use { properties.store(it, "XueXue application preferences") }
+            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING)
+        } finally {
+            Files.deleteIfExists(temp)
+        }
+    }
+
     private fun saveLastWorkspace(root: Path) {
         val file = appStateFile()
         Files.createDirectories(file.parent)
         Files.writeString(file, root.toAbsolutePath().normalize().pathString)
     }
 
-    private fun appStateFile(): Path = Path.of(System.getProperty("user.home"), ".xuexue", "last-workspace")
+    private fun appStateFile(): Path = appStateDirectory.resolve("last-workspace")
+
+    private fun appPreferencesFile(): Path = appStateDirectory.resolve("preferences.properties")
 
     private fun resolveInside(
         root: Path,

@@ -3,8 +3,9 @@
 ## 1. 目标与参考基线
 
 本计划的目标是用 Kotlin 复刻 Pi 的 Headless Runtime，并将其接入 XueXue。
-这里的“复刻”指行为、协议、事件顺序、会话语义和扩展点与 Pi 对齐，
-不是只提供一个带工具调用的聊天面板，也不是逐行翻译 TypeScript。
+这里的“复刻”指除明确排除项外，行为、协议、事件顺序、会话语义、资源优先级
+和扩展点均与 Pi 0.80.6 对齐。实现不是只提供一个带工具调用的聊天面板，也不是
+逐行翻译源码；语言和平台适配不得改变外部可观察行为。
 
 参考实现固定为：
 
@@ -13,23 +14,35 @@
   `pi-coding-agent` 0.80.6
 - 架构要求：`Agent实现路径建议.md`
 
-TUI 不在复刻范围内。Pi 的 TUI 交互请求要转换为与界面无关的协议，
-由 Compose、RPC 或测试宿主分别处理。除这个平台适配外，不主动重新设计
-Pi 的运行规则、消息角色、事件名称、资源优先级或会话格式。
+### 1.1 唯一排除范围
+
+仅排除以下内容：
+
+- Pi 的 TUI 实现、终端组件、主题、键位和纯终端渲染行为；
+- 网络遥测的采集、排队、上传和远端开关；本地诊断、用量与成本统计不属于遥测；
+- 依赖 Node 运行时的入口、适配器和进程宿主；相应 Headless 能力如果仍属复刻范围，
+  必须用 Kotlin/JVM 平台能力实现；
+- TypeScript 扩展加载、执行和兼容层。
+
+排除项不得扩大解释。例如，原实现使用 Node 文件 API 不代表文件工具可以省略，
+而是要使用 JVM 文件 API 保持同一行为。除语言差异、平台实现所必需的调整，或在
+不改变外部语义前提下有明确证据支持的更好实现外，不新增流程、规则和产品能力。
+所有必要差异必须记录在 parity matrix 中并有测试证明边界。
 
 ## 2. 当前实现定位
 
-当前代码已经验证了最小闭环，但它是后续复刻的迁移起点，不是最终架构。
+当前代码已经建立三层 Kotlin 模块和可验证的 Headless 核心，但仍处于迁移阶段，
+不是最终完整 Runtime。
 
 | 领域 | 当前状态 | 与 Pi 的主要差距 |
 | --- | --- | --- |
-| 模型调用 | OpenAI 兼容 SSE、文本、推理、工具调用 | 缺统一内容块、Provider 目录、图片、OAuth、重试和缓存用量 |
-| Agent Loop | 顺序工具循环、取消、简单 steering | 缺完整事件序列、并行工具、队列模式、钩子和错误分类 |
+| 模型调用 | `:pi-ai` 已有消息/内容/模型协议、事件流、取消、估算和基础错误工具 | 缺 Provider 目录、图片生成、OAuth、各 Provider adapter 和完整兼容 facade |
+| Agent Loop | `:pi-agent-core` 已复刻双层 Loop、完整事件、并行/顺序工具、两类队列和钩子 | 原 Agent 核心测试已映射；仍依赖上层补齐 retry、compaction 和资源刷新 |
 | 工具 | `read/write/edit/bash/grep/find/ls` 可运行 | 参数和输出语义尚未逐项对齐 Pi，缺文件修改队列 |
-| 会话 | 多会话和 JSONL 快照 | 不是 Pi 的 append-only entry tree，分叉、树导航和 compaction 不完整 |
-| 上下文 | 当前文档、附件、片段、根目录指令文件 | 缺父目录扫描、系统提示组合、资源来源信息和 token 管理 |
-| UI | 能显示消息、工具、差异、审批和用量 | UI 仍直接依赖 Desktop/Compose 状态，不是 Headless Runtime 消费者 |
-| 扩展与包 | 只有设置页占位 | 未实现 |
+| 会话 | `:pi-coding-agent` 已有 Pi v3 append-only tree/JSONL、`AgentSession`、retry 与手动/阈值/overflow compaction | 缺 branch summary、Runtime/services、导入导出和原测试逐文件映射 |
+| 上下文 | 已有 Pi 系统提示构建器、ResourceLoader、父目录 AGENTS/CLAUDE 继承、SYSTEM/APPEND_SYSTEM、Skills 与模板发现 | 缺完整 YAML/ignore 规则、package/extension metadata、AgentSession prompt 重建和 token 管理 |
+| UI | Compose 已订阅新 Agent 状态和事件并调用 prompt/steer/abort | 仍使用旧会话 DTO、临时 Provider/工具桥和消息投影，尚未切换到正式 AgentSession Runtime |
+| 设置、扩展与包 | SettingsManager 已有全局/项目深合并、迁移、信任隔离和外部编辑保留；ResourceLoader 已消费受信任设置资源 | 扩展 ABI/runner/loader、包安装、跨进程锁和 package 资源 reload 未实现 |
 | SDK/RPC | 未实现 | 未实现 |
 
 当前的 `PiAgentRuntime`、`AgentClient`、`WorkbenchAgentController` 和会话文件
@@ -46,8 +59,8 @@ Pi 的运行规则、消息角色、事件名称、资源优先级或会话格�
 | `:pi-ai` | `packages/ai` | 模型、内容块、Provider API、流式事件、认证和用量 |
 | `:pi-agent-core` | `packages/agent` | Agent 状态、Loop、队列、工具执行、事件和稳定错误类型 |
 | `:pi-coding-agent` | `packages/coding-agent/core` | 会话、compaction、资源、工具、扩展、包管理和 SDK |
-| `:pi-platform-desktop` | Node/Desktop 能力 | HTTP、文件系统、Shell、凭据库、插件宿主和 RPC 进程 |
-| `:app` | Pi interactive mode 的替代者 | Compose 状态投影、用户交互请求和工作台接线 |
+| `:pi-platform-desktop` | Desktop 平台能力 | HTTP、文件系统、Shell、凭据库、JVM/Process 插件宿主和 RPC 进程 |
+| `:app` | Headless Runtime 宿主 | Compose 状态投影、用户交互请求和工作台接线 |
 
 依赖方向必须固定为：
 
@@ -66,16 +79,17 @@ Compose UI -> pi-coding-agent -> pi-agent-core -> pi-ai
 
 ### 3.1 明确的宿主差异
 
-以下差异必须记录在 parity matrix 中，不能伪装成 Pi 原行为：
+以下平台差异必须记录在 parity matrix 中，不能伪装成 Pi 原行为：
 
-- 删除 TUI，并把可表达的交互转换为 Headless `InteractionRequest`。
+- 被排除的终端界面不进入 Runtime；仍被 Headless 扩展使用的用户交互转换为
+  与界面无关的 `InteractionRequest`。
 - Pi 默认不提供工具权限弹窗；XueXue 架构要求 workspace trust、写入、Shell
-  和外部路径策略。这些限制由宿主 policy layer 叠加，Agent Loop 本身仍保持
-  Pi 语义。
+  和外部路径策略时，这些限制只能由宿主 policy layer 叠加，并在 parity 测试中
+  关闭；Agent Loop 和扩展事件本身仍保持 Pi 语义。
 - XueXue 使用自己的应用数据目录和工作区 `.xuexue` 目录，但资源合并、
   启用状态和信任时序要与 Pi 对齐。
-- 原版 TypeScript 扩展需要可选 Node compatibility host；纯 Kotlin Runtime
-  在没有 Node 时仍完整工作，但不能声称支持这些扩展。
+- 被排除源码必须在 matrix 中标为 `excluded` 并写明排除依据，不能以此掩盖其
+  相邻模块中的非终端、非遥测 Headless 行为。
 
 ## 4. 必须先冻结的协议
 
@@ -134,8 +148,10 @@ confirm、select、input、editor、权限确认和凭据登录。Compose 只负
 
 - `docs/PI_PARITY_MATRIX.md`，逐项记录 Pi 源文件、Kotlin 对应物、状态和测试。
 - 固定 Pi 0.80.6 的消息、事件、会话和 RPC JSON fixture。
-- 把 Pi 核心测试按行为分组：Loop、队列、工具、会话、compaction、资源、
-  extensions、Provider 和 RPC。
+- 把 Pi 核心测试按行为分组：AI/Provider、Loop、队列、工具、会话、compaction、
+  资源、extensions、packages、SDK 和 RPC。
+- 对四类排除内容建立逐文件排除表；其余源文件和测试必须有 Kotlin 对应项或
+  明确的迁移任务，不能以模块级描述代替逐项审计。
 
 验收：每一个“已完成”状态都必须指向自动化测试，不能以 UI 可见为依据。
 
@@ -148,6 +164,7 @@ confirm、select、input、editor、权限确认和凭据登录。Compose 只负
 - 将当前 OpenAI Chat Completions 实现迁入 Provider 接口。
 - 添加 OpenAI Responses、Anthropic Messages 和 Google Generative AI；其他
   Provider 在相同接口上逐个补齐。
+- 复刻图片生成协议、模型目录、Provider 转换、认证与凭据解析等非排除行为。
 - 实现请求超时、取消、重试、Retry-After、上下文溢出识别和 Unicode 清理。
 
 验收：同一段标准消息可无损经过 Provider 转换；取消和错误只通过协议返回，
@@ -202,6 +219,10 @@ compaction 后可以继续对话并回看原始历史。
 - 按 Pi 路径加载 `AGENTS.md`/`CLAUDE.md`、`SYSTEM.md`、
   `APPEND_SYSTEM.md`、Skills 和 Prompt Templates。
 - 保留每项资源的 source info、diagnostic、启用状态和冲突信息。
+- 工具定义必须贡献 Pi 对应的 `promptSnippet` 和 `promptGuidelines`；Runtime 根据
+  活跃工具、Skills、项目上下文和 system/append system 资源统一重建提示词。
+- 复刻 `before_agent_start` 的消息注入和单轮 system prompt 替换，以及 `context`
+  事件在每次模型调用前按扩展顺序改写消息的行为。
 - 实现 reload，并保证失败资源不会破坏已经可用的 Runtime。
 - 项目资源仅在信任后加载；非交互模式遵守默认信任策略。
 
@@ -215,19 +236,20 @@ compaction 后可以继续对话并回看原始历史。
 验收：工具、命令、Provider、资源路径和关键生命周期钩子可以由插件注册；
 插件异常被隔离并生成诊断；reload 后旧监听器和资源全部释放。
 
-### 阶段 7：Pi Packages 和原版扩展兼容
+### 阶段 7：能力包与安装管理
 
 工作项：
 
-- 实现 path、npm 和 git source 的解析、安装、删除、更新、启停和固定版本。
-- 支持 package manifest 的 extensions/skills/prompts/themes 贡献及传统目录发现。
+- 实现本地 path、git、JVM JAR/Maven 和 Process 包 source 的解析、安装、删除、
+  更新、启停和固定版本。
+- 支持 capability manifest 的 extensions、skills、prompts 和 resources 贡献。
 - 全局缓存放在应用数据目录，项目包放在 `.xuexue/pi/`；安装采用 staging、
   校验、原子替换和失败回滚。
-- 引入可选 Node 扩展宿主，运行原版 Pi TypeScript/npm extensions。
-- 包脚本默认禁用；安装和运行前显示来源、版本、权限及信任状态。
+- 安装和运行前显示来源、解析版本、内容 hash、权限及信任状态；安装过程不得执行
+  任意包脚本。
 
-验收：至少选取 Pi 官方示例中的工具、命令、权限门、动态资源、自定义
-Provider 和 compaction 扩展作为兼容测试集。
+验收：将 Pi 官方示例中的工具、命令、权限门、动态资源、自定义 Provider 和
+compaction 扩展等非排除行为移植为 Kotlin/Process fixture，并通过相同语义测试。
 
 ### 阶段 8：SDK、JSONL RPC 和 Compose 接线
 
@@ -249,10 +271,10 @@ Runtime 状态与会话文件。
 工作项：
 
 - 会话/设置/插件 API schema version 与迁移策略。
-- Provider 请求诊断、缓存统计、成本、日志、更新检查和可选遥测。
+- Provider 请求诊断、缓存统计、成本、日志和更新检查；不得包含遥测上传路径。
 - 插件 API 兼容测试套件和示例项目。
-- Desktop 打包包含所需宿主；没有 Node 时清楚标记 TS 插件不可用，
-  Kotlin Runtime 和 JVM 插件仍可工作。
+- Desktop 打包包含 Kotlin Runtime、JVM 插件宿主、Process 插件宿主和 RPC 所需
+  平台实现。
 
 验收：干净安装、旧数据升级、离线启动、插件故障和异常退出恢复全部通过。
 
@@ -264,20 +286,22 @@ Runtime 状态与会话文件。
 
 - `on(event, handler)`：生命周期、session、context、provider、agent、turn、
   message、tool、model、input 和 user bash 事件；
-- `registerTool`：schema、执行模式、进度、details 和可选 UI 展示元数据；
+- `registerTool`：schema、执行模式、进度、details、`promptSnippet`、
+  `promptGuidelines` 和与宿主无关的展示元数据；
 - `registerCommand`：名称、描述、参数补全和 suspend handler；
 - `registerProvider`/`unregisterProvider`；
-- `sendMessage`、`sendUserMessage`、`setActiveTools` 和 system prompt 操作；
-- `resources_discover`：动态添加 skill/prompt/theme 路径；
-- `InteractionPort`：select、confirm、input、editor、notify、status 和 widget。
+- `sendMessage`、`sendUserMessage`、`setActiveTools` 和 Pi 对应的会话操作；
+- `resources_discover`：动态添加 extension、skill、prompt 和资源路径；
+- `before_agent_start`：注入自定义消息并可按 Pi 合并规则替换单轮 system prompt；
+- `context`：在每次 Provider 调用前按加载顺序替换模型上下文消息；
+- `InteractionPort`：select、confirm、input、editor 和 notify。
 
-所有注册返回 `Disposable`。插件 reload/unload 时按逆序 dispose，防止重复事件、
-残留工具和 classloader 泄漏。事件 handler 默认按加载顺序执行；能够修改或阻止
-流程的事件采用 Pi 的合并规则，并设置单 handler 超时。
+注册方法的返回类型、事件 handler 顺序、修改/阻止流程时的合并方式和异常传播
+均按 Pi 对应 API 复刻。宿主在 reload/unload 时按扩展归属清理监听器、工具、
+Provider 和资源，防止重复注册及 classloader 泄漏；不得为方便实现而改变事件语义。
 
-TUI 专属能力不进入 Headless ABI，例如 raw terminal input、自定义终端 editor、
-ANSI theme component 和 overlay component。可以表达为通用 InteractionRequest 的
-能力映射到 Compose；不能映射的原版扩展在加载诊断中标为 `tui-only`。
+纯终端能力不进入 Headless ABI。仍属于 Headless 流程的选择、确认、输入、编辑和
+通知请求映射为通用 `InteractionRequest`，由 Compose、RPC 或测试宿主处理。
 
 ### 6.2 插件宿主
 
@@ -286,11 +310,10 @@ ANSI theme component 和 overlay component。可以表达为通用 InteractionRe
 | Built-in | Kotlin object | 内置工具和官方能力 | 与 Runtime 同进程 |
 | JVM | JAR + manifest | Kotlin/Java 原生插件 | 独立 classloader、权限门、可卸载 |
 | Process | 可执行文件 + JSONL | 不可信或跨语言插件 | 独立进程、最小环境、超时和终止 |
-| Pi TS compatibility | npm/git + Node host | 运行原版 Pi TypeScript 扩展 | 专用 Node 进程，通过 JSONL bridge |
 
-不使用 GraalJS 直接加载 Pi npm 包。Pi 扩展依赖 Node 模块、动态 import、npm
-依赖和进程 API，GraalJS 很难获得可靠兼容。Node 兼容宿主只承担扩展执行，
-Agent 状态机、会话、权限判定和工具调度仍由 Kotlin Runtime 掌控。
+JVM 和 Process 宿主只承载插件代码。Agent 状态机、会话、资源优先级、事件合并、
+权限判定和工具调度始终由 Kotlin Runtime 掌控，两个宿主必须通过同一套扩展
+conformance 测试。
 
 ### 6.3 JVM 插件清单
 
@@ -312,26 +335,7 @@ JVM JAR 在 `META-INF/xuexue-pi-plugin.json` 中提供独立清单，例如：
 插件只编译依赖一个小型 `pi-extension-api` 模块。API 使用稳定 DTO、sealed event
 和 suspend 接口；不暴露 WorkbenchState、Compose 类型或平台实现类。
 
-### 6.4 TypeScript 兼容桥
-
-Node host 加载 Pi extension factory，并在进程内提供与 Pi 同名的 API facade。
-注册信息和事件通过 JSONL bridge 往返：
-
-```text
-Kotlin Runtime                    Node extension host
-register request <------------- extension factory
-event envelope  ----------------> handler
-hook result     <---------------- handler result
-tool execute    ----------------> extension tool
-tool progress   <---------------- partial result
-UI request      <---------------- ctx.ui.*
-UI response     ----------------> extension promise
-```
-
-桥协议必须带 request id、session id、extension id、deadline 和 schema version。
-Node host 崩溃时，相关调用返回结构化错误，其他插件和 Agent 会话继续运行。
-
-### 6.5 信任与权限
+### 6.4 信任与权限
 
 加载顺序遵循 Pi 的安全边界：先加载内置和全局插件以参与 `project_trust`，
 得到信任结果后才读取项目设置、项目插件和项目 packages。
@@ -347,32 +351,37 @@ Node host 崩溃时，相关调用返回结构化错误，其他插件和 Agent 
 - session mutation。
 
 JVM classloader 不是安全沙箱，获得同进程执行权的插件理论上可以绕过权限。
-因此第三方插件默认走 Process/Node host；只有内置或用户明确标记可信的 JVM
-插件才允许进程内加载。UI 必须明确展示这个边界，不能宣称 JVM 插件已被沙箱化。
+因此第三方插件默认走 Process host；只有内置或用户明确标记可信的 JVM 插件才
+允许进程内加载。UI 必须明确展示这个边界，不能宣称 JVM 插件已被沙箱化。
 
-### 6.6 包管理
+### 6.5 包管理
 
 包管理器保存 source、resolved version/ref、内容 hash、安装时间、scope、启用资源
 和权限批准记录。支持：
 
-- `npm:name[@version]`；
 - `git:url[@ref]`；
 - 本地 path；
-- JVM JAR/Maven 坐标作为 Kotlin 扩展来源。
+- `maven:group:artifact:version` 或本地 JVM JAR；
+- 带 manifest 的 Process 插件目录或归档。
 
 固定版本和 git ref 默认不自动升级。所有下载先进入临时目录，校验 manifest 和
 hash 后原子替换；更新失败保留旧版本。项目包需要 workspace trust，offline 模式
 禁止解析或更新远程 source。
 
-## 7. UI 工作
+## 7. Compose 宿主接线
 
-Compose UI 不复刻 Pi TUI 的外观，但必须完整承载 Headless 行为：
+Compose UI 必须完整承载 Headless 行为：
+
+UI 接线不是复刻完成后的附加层，而是 Runtime 协议的验收宿主。阶段 2 起就必须
+让 Agent Core 的事件可被 StateFlow/Flow 订阅；阶段 3-6 的会话、资源、工具和扩展
+状态必须通过同一 Runtime 投影；阶段 8 只允许把现有 `WorkbenchAgentController`
+降为命令/状态适配器，不得保留第二套 Agent Loop 或直接修改会话。
 
 - 会话树、分叉、克隆、命名、compaction 和恢复；
 - 模型/Provider/thinking level、上下文用量和成本；
 - structured message、thinking、工具参数、进度、结果和错误；
 - steering/follow-up 队列及当前运行阶段；
-- extension UI request、widget、status 和通知；
+- extension interaction request 和通知；
 - resources/packages/extensions 的来源、冲突、信任、启停、更新和诊断；
 - RPC/SDK 状态与 Compose 状态一致。
 
@@ -395,20 +404,24 @@ UI 只发送命令和呈现状态。任何会话写入、工具执行、Provider
 - 会话故障注入：截断 JSONL、重复 entry、崩溃恢复和迁移回滚。
 - 工具边界：symlink、路径穿越、超大输出、并发写和子进程取消。
 - 插件 conformance：注册、事件、超时、reload、崩溃、UI request 和权限。
-- package fixture：path/npm/git、固定版本、更新失败、offline 和 trust。
+- package fixture：path/git/Maven/JAR/Process、固定版本、更新失败、offline 和 trust。
 - SDK/RPC/Compose adapter 三宿主一致性测试。
+- 排除项测试：构建产物不包含遥测上传、终端实现或被排除的运行时兼容宿主；
+  排除审计不能替代其相邻 Headless 行为的 parity 测试。
 
 ## 9. 实施顺序与完成定义
 
 严格按阶段 0 到 9 推进。插件 ABI 依赖消息、事件、会话、Provider、资源和信任
-协议，不能提前用 WorkbenchState 回调拼装；原版 TypeScript 兼容宿主则在 JVM
-插件 ABI 稳定后实现。
+协议，不能提前用 WorkbenchState 回调拼装。实现顺序可以为解除依赖而细分，但
+不得以较小的兼容层替代目标 Runtime。
 
 整个 Pi 复刻只有在以下条件同时成立时才算完成：
 
-1. `PI_PARITY_MATRIX.md` 中 Headless 项目全部为完成或有明确、经确认的
-   TUI-only 排除理由。
+1. `PI_PARITY_MATRIX.md` 覆盖 Pi 0.80.6 的相关源文件和测试；所有非排除行为均为
+   完成，排除项均有与第 1.1 节完全一致的逐项依据。
 2. SDK、RPC 和 Compose 使用同一个 Runtime，不存在三套行为实现。
 3. 原版 Pi 核心行为 fixture、会话迁移、插件 conformance 和项目质量链全部通过。
 4. 设置页不再展示未接线的占位功能；所有可见状态来自真实 Runtime。
-5. 文档准确列出不能直接兼容的 Pi TUI 扩展和缺少 Node 时的限制。
+5. 完成审计能逐项证明消息、Provider、Agent Loop、工具、会话、compaction、资源、
+   系统提示、扩展、能力包、SDK 和 RPC 均达到 Pi 对应语义，且构建中不存在被排除
+   内容的实现路径。

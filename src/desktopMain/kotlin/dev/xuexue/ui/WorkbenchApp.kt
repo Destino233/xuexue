@@ -528,7 +528,11 @@ private fun DesktopWorkbench(
                                     .weight(1f)
                                     .fillMaxHeight()
                                     .padding(4.dp)
-                                    .focusRequester(documentFocus)
+                                    .border(
+                                        1.dp,
+                                        MaterialTheme.colorScheme.outlineVariant,
+                                        RoundedCornerShape(7.dp),
+                                    ).focusRequester(documentFocus)
                                     .focusable(),
                             color = MaterialTheme.colorScheme.surface,
                             shape = RoundedCornerShape(7.dp),
@@ -1225,28 +1229,18 @@ private fun rememberRailMotion(
     hovered: Boolean,
     pressed: Boolean,
 ): RailMotion {
-    val containerColor by
-        animateColorAsState(
-            targetValue =
-                when {
-                    selected -> MaterialTheme.colorScheme.primaryContainer
-                    hovered -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
-                    else -> Color.Transparent
-                },
-            animationSpec = WorkbenchMotion.fastTween(),
-            label = "rail item color",
-        )
-    val contentColor by
-        animateColorAsState(
-            targetValue =
-                if (selected) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            animationSpec = WorkbenchMotion.fastTween(),
-            label = "rail icon color",
-        )
+    val containerColor =
+        when {
+            selected -> MaterialTheme.colorScheme.primaryContainer
+            hovered -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
+            else -> Color.Transparent
+        }
+    val contentColor =
+        if (selected) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
     val scale by
         animateFloatAsState(
             targetValue =
@@ -1270,17 +1264,12 @@ private fun CompactNavItem(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
-    val contentColor by
-        animateColorAsState(
-            targetValue =
-                if (selected) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            animationSpec = WorkbenchMotion.fastTween(),
-            label = "compact navigation color",
-        )
+    val contentColor =
+        if (selected) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
     val scale by
         animateFloatAsState(
             targetValue =

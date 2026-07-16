@@ -1,0 +1,1249 @@
+@file:OptIn(kotlin.concurrent.atomics.ExperimentalAtomicApi::class)
+
+package dev.xuexue.pi.coding
+
+import dev.xuexue.pi.agent.Agent
+import dev.xuexue.pi.agent.AgentEvent
+import dev.xuexue.pi.agent.AgentSubscription
+import dev.xuexue.pi.agent.QueueMode
+import dev.xuexue.pi.agent.UNKNOWN_AGENT_MODEL
+import dev.xuexue.pi.ai.AbortController
+import dev.xuexue.pi.ai.AbortSignal
+import dev.xuexue.pi.ai.AgentMessage
+import dev.xuexue.pi.ai.AssistantMessage
+import dev.xuexue.pi.ai.ImageContent
+import dev.xuexue.pi.ai.Model
+import dev.xuexue.pi.ai.ModelThinkingLevel
+import dev.xuexue.pi.ai.StopReason
+import dev.xuexue.pi.ai.TextContent
+import dev.xuexue.pi.ai.ToolCall
+import dev.xuexue.pi.ai.ToolResultMessage
+import dev.xuexue.pi.ai.UserBlocks
+import dev.xuexue.pi.ai.UserContentBlock
+import dev.xuexue.pi.ai.UserMessage
+import dev.xuexue.pi.ai.UserText
+import dev.xuexue.pi.ai.calculateContextTokens
+import dev.xuexue.pi.ai.clampThinkingLevel
+import dev.xuexue.pi.ai.getSupportedThinkingLevels
+import dev.xuexue.pi.ai.isContextOverflow
+import dev.xuexue.pi.ai.isRetryableAssistantError
+import dev.xuexue.pi.coding.compaction.CompactionDetails
+import dev.xuexue.pi.coding.compaction.CompactionPreparation
+import dev.xuexue.pi.coding.compaction.CompactionRequest
+import dev.xuexue.pi.coding.compaction.CompactionResult
+import dev.xuexue.pi.coding.compaction.estimateContextTokens
+import dev.xuexue.pi.coding.compaction.estimateTokens
+import dev.xuexue.pi.coding.compaction.prepareCompaction
+import dev.xuexue.pi.coding.compaction.shouldCompact
+import dev.xuexue.pi.coding.resources.SystemPromptOptions
+import dev.xuexue.pi.coding.resources.buildSystemPrompt
+import dev.xuexue.pi.coding.resources.expandPromptTemplate
+import dev.xuexue.pi.coding.resources.stripFrontmatter
+import dev.xuexue.pi.coding.session.BashExecutionMessage
+import dev.xuexue.pi.coding.session.CompactionEntry
+import dev.xuexue.pi.coding.session.CustomMessage
+import dev.xuexue.pi.coding.session.SessionEntry
+import dev.xuexue.pi.coding.session.SessionManager
+import dev.xuexue.pi.coding.session.SessionMessageEntry
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlin.concurrent.atomics.AtomicBoolean
+import kotlin.concurrent.atomics.AtomicInt
+import kotlin.concurrent.atomics.AtomicReference
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlin.math.pow
+import kotlin.time.Clock
+import kotlin.time.Instant
+import dev.xuexue.pi.coding.compaction.compact as compactContext
+
+private data class ActiveSessionRun(
+    val completion: CompletableDeferred<Unit>,
+)
+
+/** Headless Pi coding-agent session facade. */
+@Suppress("TooManyFunctions", "LargeClass")
+class AgentSession(
+    config: AgentSessionConfig,
+) {
+    val agent: Agent = config.agent
+    val sessionManager: SessionManager = config.sessionManager
+    val settingsManager: AgentSessionSettings = config.settingsManager
+    private val resourceLoader = config.resourceLoader
+    private val systemPromptDocumentation = config.systemPromptDocumentation
+    private val currentDate = config.currentDate
+
+    private val listeners = AtomicReference<List<AgentSessionEventListener>>(emptyList())
+    private val steeringMessages = AtomicReference<List<String>>(emptyList())
+    private val followUpMessages = AtomicReference<List<String>>(emptyList())
+    private val pendingNextTurnMessages = AtomicReference<List<CustomMessage>>(emptyList())
+    private val pendingBashMessages = AtomicReference<List<BashExecutionMessage>>(emptyList())
+    private val lastAssistantMessage = AtomicReference<AssistantMessage?>(null)
+    private val retryAbortController = AtomicReference<AbortController?>(null)
+    private val compactionAbortController = AtomicReference<AbortController?>(null)
+    private val autoCompactionAbortController = AtomicReference<AbortController?>(null)
+    private val overflowRecoveryAttempted = AtomicBoolean(false)
+    private val retryAttemptState = AtomicInt(0)
+    private val activeRun = AtomicReference<ActiveSessionRun?>(null)
+    private val disposed = AtomicBoolean(false)
+    private val mutableEvents = MutableSharedFlow<AgentSessionEvent>(extraBufferCapacity = EVENT_BUFFER_CAPACITY)
+    private val mutableState = MutableStateFlow(config.initialState())
+    private val agentSubscription = AtomicReference<AgentSubscription?>(null)
+
+    val events: SharedFlow<AgentSessionEvent> = mutableEvents.asSharedFlow()
+    val state: StateFlow<AgentSessionState> = mutableState.asStateFlow()
+
+    init {
+        resourceLoader?.reload()
+        rebuildSystemPrompt()
+        reconnectToAgent()
+    }
+
+    val currentState: AgentSessionState
+        get() = state.value
+
+    val model: Model
+        get() = agent.currentState.model
+
+    val thinkingLevel: ModelThinkingLevel
+        get() = agent.currentState.thinkingLevel
+
+    val isStreaming: Boolean
+        get() = activeRun.load() != null
+
+    val isIdle: Boolean
+        get() = !isStreaming
+
+    val systemPrompt: String
+        get() = agent.currentState.systemPrompt
+
+    val messages: List<AgentMessage>
+        get() = agent.currentState.messages
+
+    val steeringMode: QueueMode
+        get() = agent.steeringMode
+
+    val followUpMode: QueueMode
+        get() = agent.followUpMode
+
+    val sessionFile: String?
+        get() = sessionManager.getSessionFile()
+
+    val sessionId: String
+        get() = sessionManager.getSessionId()
+
+    val sessionName: String?
+        get() = sessionManager.getSessionName()
+
+    val pendingMessageCount: Int
+        get() = steeringMessages.load().size + followUpMessages.load().size
+
+    val hasPendingBashMessages: Boolean
+        get() = pendingBashMessages.load().isNotEmpty()
+
+    val retryAttempt: Int
+        get() = retryAttemptState.load()
+
+    val isRetrying: Boolean
+        get() = retryAbortController.load() != null
+
+    val autoRetryEnabled: Boolean
+        get() = settingsManager.getRetrySettings().enabled
+
+    val isCompacting: Boolean
+        get() = compactionAbortController.load() != null || autoCompactionAbortController.load() != null
+
+    val autoCompactionEnabled: Boolean
+        get() = settingsManager.getCompactionSettings().enabled
+
+    fun subscribe(listener: AgentSessionEventListener): AgentSessionSubscription {
+        addListener(listener)
+        return AgentSessionSubscription { removeListener(listener) }
+    }
+
+    suspend fun prompt(
+        text: String,
+        options: PromptOptions = PromptOptions(),
+    ) {
+        val expandedText = if (options.expandPromptTemplates) expandPromptText(text) else text
+        if (isStreaming) {
+            val behavior = options.streamingBehavior
+            if (behavior == null) {
+                options.preflightResult?.invoke(false)
+                error(STREAMING_PROMPT_ERROR)
+            }
+            when (behavior) {
+                StreamingBehavior.STEER -> queueSteering(expandedText, options.images)
+                StreamingBehavior.FOLLOW_UP -> queueFollowUp(expandedText, options.images)
+            }
+            options.preflightResult?.invoke(true)
+            return
+        }
+
+        flushPendingBashMessages()
+        if (model == UNKNOWN_AGENT_MODEL) {
+            options.preflightResult?.invoke(false)
+            error("No model selected.")
+        }
+        findLastAssistantMessage()?.let { checkCompaction(it, skipAbortedCheck = false) }
+        val messages =
+            buildList<AgentMessage> {
+                add(userMessage(expandedText, options.images))
+                addAll(drainPendingNextTurnMessages())
+            }
+
+        options.preflightResult?.invoke(true)
+        runAgentPrompt(messages)
+    }
+
+    fun steer(
+        text: String,
+        images: List<ImageContent> = emptyList(),
+    ) {
+        queueSteering(expandPromptText(text), images)
+    }
+
+    fun followUp(
+        text: String,
+        images: List<ImageContent> = emptyList(),
+    ) {
+        queueFollowUp(expandPromptText(text), images)
+    }
+
+    private fun queueSteering(
+        text: String,
+        images: List<ImageContent>,
+    ) {
+        appendAtomic(steeringMessages, text)
+        emitQueueUpdate()
+        agent.steer(userMessage(text, images))
+    }
+
+    private fun queueFollowUp(
+        text: String,
+        images: List<ImageContent>,
+    ) {
+        appendAtomic(followUpMessages, text)
+        emitQueueUpdate()
+        agent.followUp(userMessage(text, images))
+    }
+
+    suspend fun sendUserMessage(
+        content: String,
+        deliverAs: StreamingBehavior? = null,
+    ) {
+        prompt(
+            content,
+            PromptOptions(streamingBehavior = deliverAs),
+        )
+    }
+
+    suspend fun sendUserMessage(
+        content: List<UserContentBlock>,
+        deliverAs: StreamingBehavior? = null,
+    ) {
+        val text = content.filterIsInstance<TextContent>().joinToString("\n", transform = TextContent::text)
+        val images = content.filterIsInstance<ImageContent>()
+        prompt(
+            text,
+            PromptOptions(
+                images = images,
+                streamingBehavior = deliverAs,
+            ),
+        )
+    }
+
+    suspend fun sendCustomMessage(
+        message: CustomMessageInput,
+        options: CustomMessageOptions = CustomMessageOptions(),
+    ) {
+        val appMessage =
+            CustomMessage(
+                customType = message.customType,
+                content = message.content,
+                display = message.display,
+                details = message.details,
+                timestamp = Clock.System.now().toEpochMilliseconds(),
+            )
+        when {
+            options.deliverAs == CustomMessageDelivery.NEXT_TURN -> {
+                appendAtomic(pendingNextTurnMessages, appMessage)
+            }
+
+            isStreaming -> {
+                if (options.deliverAs == CustomMessageDelivery.FOLLOW_UP) {
+                    agent.followUp(appMessage)
+                } else {
+                    agent.steer(appMessage)
+                }
+            }
+
+            options.triggerTurn -> {
+                runAgentPrompt(listOf(appMessage))
+            }
+
+            else -> {
+                agent.appendMessage(appMessage)
+                sessionManager.appendCustomMessageEntry(
+                    message.customType,
+                    message.content,
+                    message.display,
+                    message.details,
+                )
+                refreshState()
+                emitEvent(AgentSessionEvent.MessageStart(appMessage))
+                emitEvent(AgentSessionEvent.MessageEnd(appMessage))
+            }
+        }
+    }
+
+    fun clearQueue(): ClearedAgentQueue {
+        val cleared =
+            ClearedAgentQueue(
+                steering = steeringMessages.exchange(emptyList()),
+                followUp = followUpMessages.exchange(emptyList()),
+            )
+        agent.clearAllQueues()
+        emitQueueUpdate()
+        return cleared
+    }
+
+    fun getSteeringMessages(): List<String> = steeringMessages.load().toList()
+
+    fun getFollowUpMessages(): List<String> = followUpMessages.load().toList()
+
+    suspend fun abort() {
+        abortRetry()
+        agent.abort()
+        waitForIdle()
+    }
+
+    fun abortRetry() {
+        retryAbortController.load()?.abort()
+    }
+
+    fun setAutoRetryEnabled(enabled: Boolean) {
+        settingsManager.setRetryEnabled(enabled)
+        refreshState()
+    }
+
+    fun abortCompaction() {
+        compactionAbortController.load()?.abort()
+        autoCompactionAbortController.load()?.abort()
+    }
+
+    fun setAutoCompactionEnabled(enabled: Boolean) {
+        settingsManager.setCompactionEnabled(enabled)
+        refreshState()
+    }
+
+    fun reloadResources(): List<dev.xuexue.pi.coding.resources.ResourceDiagnostic> {
+        val loader = resourceLoader ?: return emptyList()
+        loader.reload()
+        rebuildSystemPrompt()
+        refreshState()
+        return loader.getDiagnostics()
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    suspend fun compact(customInstructions: String? = null): CompactionResult {
+        disconnectFromAgent()
+        abort()
+        val controller = AbortController()
+        compactionAbortController.store(controller)
+        refreshState()
+        emitEvent(AgentSessionEvent.CompactionStart(CompactionReason.MANUAL))
+        try {
+            requireCompactionModel()
+            val pathEntries = sessionManager.getBranch()
+            val preparation = requireManualCompactionPreparation(pathEntries)
+            val generated =
+                compactContext(
+                    preparation = preparation,
+                    request =
+                        CompactionRequest(
+                            model = model,
+                            apiKey = agent.getApiKey?.invoke(model.provider),
+                            customInstructions = customInstructions,
+                            signal = controller.signal,
+                            thinkingLevel = thinkingLevel,
+                            streamFunction = agent.streamFunction,
+                        ),
+                )
+            throwIfCompactionCancelled(controller.signal)
+
+            sessionManager.appendCompaction(
+                summary = generated.summary,
+                firstKeptEntryId = generated.firstKeptEntryId,
+                tokensBefore = generated.tokensBefore,
+                details = generated.details?.toJson(),
+                fromHook = false,
+            )
+            val sessionContext = sessionManager.buildSessionContext()
+            agent.replaceMessages(sessionContext.messages)
+            val result =
+                generated.copy(
+                    estimatedTokensAfter = sessionContext.messages.sumOf(::estimateTokens),
+                )
+            refreshState()
+            emitEvent(
+                AgentSessionEvent.CompactionEnd(
+                    reason = CompactionReason.MANUAL,
+                    result = result,
+                    aborted = false,
+                    willRetry = false,
+                ),
+            )
+            return result
+        } catch (error: CompactionCancelledException) {
+            emitEvent(
+                AgentSessionEvent.CompactionEnd(
+                    reason = CompactionReason.MANUAL,
+                    result = null,
+                    aborted = true,
+                    willRetry = false,
+                    errorMessage = null,
+                ),
+            )
+            throw error
+        } catch (error: Exception) {
+            emitEvent(
+                AgentSessionEvent.CompactionEnd(
+                    reason = CompactionReason.MANUAL,
+                    result = null,
+                    aborted = false,
+                    willRetry = false,
+                    errorMessage = "Compaction failed: ${error.message ?: error}",
+                ),
+            )
+            throw error
+        } finally {
+            compactionAbortController.compareAndSet(controller, null)
+            reconnectToAgent()
+            refreshState()
+        }
+    }
+
+    suspend fun waitForIdle() {
+        while (true) {
+            val run = activeRun.load() ?: return
+            run.completion.await()
+            if (activeRun.load() == null) return
+        }
+    }
+
+    fun setModel(model: Model) {
+        val previousThinkingLevel = thinkingLevel
+        agent.setModel(model)
+        sessionManager.appendModelChange(model.provider, model.id)
+        setThinkingLevel(previousThinkingLevel)
+        refreshState()
+    }
+
+    fun setThinkingLevel(level: ModelThinkingLevel) {
+        val effectiveLevel = clampThinkingLevel(model, level)
+        if (effectiveLevel == thinkingLevel) return
+        agent.setThinkingLevel(effectiveLevel)
+        sessionManager.appendThinkingLevelChange(effectiveLevel.sessionValue())
+        refreshState()
+        emitEvent(AgentSessionEvent.ThinkingLevelChanged(effectiveLevel))
+    }
+
+    fun cycleThinkingLevel(): ModelThinkingLevel? {
+        if (!supportsThinking()) return null
+        val levels = getAvailableThinkingLevels()
+        val currentIndex = levels.indexOf(thinkingLevel)
+        val nextLevel = levels[(currentIndex + 1).mod(levels.size)]
+        setThinkingLevel(nextLevel)
+        return nextLevel
+    }
+
+    fun getAvailableThinkingLevels(): List<ModelThinkingLevel> = getSupportedThinkingLevels(model)
+
+    fun supportsThinking(): Boolean = model.reasoning
+
+    fun setSteeringMode(mode: QueueMode) {
+        agent.steeringMode = mode
+        refreshState()
+    }
+
+    fun setFollowUpMode(mode: QueueMode) {
+        agent.followUpMode = mode
+        refreshState()
+    }
+
+    fun setSessionName(name: String) {
+        sessionManager.appendSessionInfo(name)
+        refreshState()
+        emitEvent(AgentSessionEvent.SessionInfoChanged(sessionName))
+    }
+
+    fun appendCustomEntry(
+        customType: String,
+        data: kotlinx.serialization.json.JsonElement? = null,
+    ): String {
+        val entryId = sessionManager.appendCustomEntry(customType, data)
+        sessionManager.getEntry(entryId)?.let { emitEvent(AgentSessionEvent.EntryAppended(it)) }
+        refreshState()
+        return entryId
+    }
+
+    fun recordBashResult(
+        command: String,
+        result: BashResult,
+        excludeFromContext: Boolean? = null,
+    ) {
+        val message =
+            BashExecutionMessage(
+                command = command,
+                output = result.output,
+                exitCode = result.exitCode,
+                cancelled = result.cancelled,
+                truncated = result.truncated,
+                fullOutputPath = result.fullOutputPath,
+                timestamp = Clock.System.now().toEpochMilliseconds(),
+                excludeFromContext = excludeFromContext,
+            )
+        if (isStreaming) {
+            appendAtomic(pendingBashMessages, message)
+            if (!isStreaming) flushPendingBashMessages()
+        } else {
+            appendBashMessage(message)
+        }
+    }
+
+    fun getUserMessagesForForking(): List<ForkableUserMessage> =
+        sessionManager.getEntries().mapNotNull { entry ->
+            val message = (entry as? SessionMessageEntry)?.message as? UserMessage ?: return@mapNotNull null
+            val text = userMessageText(message)
+            text.takeIf(String::isNotEmpty)?.let { ForkableUserMessage(entry.id, it) }
+        }
+
+    fun getSessionStats(): SessionStats {
+        var userMessages = 0
+        var assistantMessages = 0
+        var toolCalls = 0
+        var toolResults = 0
+        var totalMessages = 0
+        var input = 0L
+        var output = 0L
+        var cacheRead = 0L
+        var cacheWrite = 0L
+        var cost = 0.0
+
+        sessionManager.getEntries().forEach { entry ->
+            val message = (entry as? SessionMessageEntry)?.message ?: return@forEach
+            totalMessages++
+            when (message) {
+                is UserMessage -> {
+                    userMessages++
+                }
+
+                is ToolResultMessage -> {
+                    toolResults++
+                }
+
+                is AssistantMessage -> {
+                    assistantMessages++
+                    toolCalls += message.content.count { it is ToolCall }
+                    input += message.usage.input
+                    output += message.usage.output
+                    cacheRead += message.usage.cacheRead
+                    cacheWrite += message.usage.cacheWrite
+                    cost += message.usage.cost.total
+                }
+            }
+        }
+        val total = input + output + cacheRead + cacheWrite
+        return SessionStats(
+            sessionFile = sessionFile,
+            sessionId = sessionId,
+            userMessages = userMessages,
+            assistantMessages = assistantMessages,
+            toolCalls = toolCalls,
+            toolResults = toolResults,
+            totalMessages = totalMessages,
+            tokens = SessionTokenStats(input, output, cacheRead, cacheWrite, total),
+            cost = cost,
+            contextUsage = getContextUsage(),
+        )
+    }
+
+    fun getContextUsage(): ContextUsage? {
+        val contextWindow = model.contextWindow
+        if (contextWindow <= 0) return null
+
+        val branch = sessionManager.getBranch()
+        val latestCompaction = branch.asReversed().firstNotNullOfOrNull { it as? CompactionEntry }
+        val missingPostCompactionUsage =
+            latestCompaction != null && !hasAssistantUsageAfter(branch, latestCompaction)
+        return if (missingPostCompactionUsage) {
+            ContextUsage(null, contextWindow, null)
+        } else {
+            val estimate = estimateContextTokens(messages)
+            ContextUsage(
+                tokens = estimate.tokens,
+                contextWindow = contextWindow,
+                percent = estimate.tokens.toDouble() / contextWindow.toDouble() * PERCENT_MULTIPLIER,
+            )
+        }
+    }
+
+    fun getLastAssistantText(): String? {
+        val message =
+            messages.asReversed().firstOrNull { candidate ->
+                candidate is AssistantMessage &&
+                    !(candidate.stopReason == StopReason.ABORTED && candidate.content.isEmpty())
+            } as? AssistantMessage ?: return null
+        return message.content
+            .filterIsInstance<TextContent>()
+            .joinToString("", transform = TextContent::text)
+            .trim()
+            .ifEmpty { null }
+    }
+
+    fun dispose() {
+        if (!disposed.compareAndSet(false, true)) return
+        abortRetry()
+        abortCompaction()
+        runCatching { agent.abort() }
+        disconnectFromAgent()
+        listeners.store(emptyList())
+    }
+
+    private suspend fun runAgentPrompt(messages: List<AgentMessage>) {
+        val run = ActiveSessionRun(CompletableDeferred())
+        check(activeRun.compareAndSet(null, run)) { STREAMING_PROMPT_ERROR }
+        refreshState()
+        try {
+            agent.prompt(messages)
+            while (handlePostAgentRun()) {
+                agent.continueConversation()
+            }
+        } finally {
+            flushPendingBashMessages()
+            activeRun.compareAndSet(run, null)
+            refreshState()
+            try {
+                emitEvent(AgentSessionEvent.AgentSettled)
+            } finally {
+                run.completion.complete(Unit)
+            }
+        }
+    }
+
+    private fun handleAgentEvent(event: AgentEvent) {
+        if (event is AgentEvent.MessageStart) {
+            val message = event.message
+            if (message is UserMessage) {
+                overflowRecoveryAttempted.store(false)
+                removeDeliveredQueueMessage(userMessageText(message))
+            }
+        }
+        refreshState()
+        emitEvent(event.toSessionEvent())
+        if (event is AgentEvent.MessageEnd) {
+            persistMessage(event.message)
+            val assistant = event.message as? AssistantMessage
+            if (assistant != null) handleAssistantMessageEnd(assistant)
+        }
+    }
+
+    private suspend fun handlePostAgentRun(): Boolean {
+        val message = lastAssistantMessage.exchange(null)
+        return if (message == null) {
+            false
+        } else if (isRetryableError(message) && prepareRetry(message)) {
+            true
+        } else {
+            finishRetryIfNeeded(message)
+            checkCompaction(message) || agent.hasQueuedMessages()
+        }
+    }
+
+    private fun finishRetryIfNeeded(message: AssistantMessage) {
+        if (message.stopReason != StopReason.ERROR || retryAttempt == 0) return
+        emitEvent(
+            AgentSessionEvent.AutoRetryEnd(
+                success = false,
+                attempt = retryAttempt,
+                finalError = message.errorMessage,
+            ),
+        )
+        retryAttemptState.store(0)
+        refreshState()
+    }
+
+    private fun handleAssistantMessageEnd(message: AssistantMessage) {
+        lastAssistantMessage.store(message)
+        if (message.stopReason != StopReason.ERROR) overflowRecoveryAttempted.store(false)
+        if (message.stopReason != StopReason.ERROR && retryAttempt > 0) {
+            emitEvent(
+                AgentSessionEvent.AutoRetryEnd(
+                    success = true,
+                    attempt = retryAttempt,
+                ),
+            )
+            retryAttemptState.store(0)
+            refreshState()
+        }
+    }
+
+    private fun isRetryableError(message: AssistantMessage): Boolean {
+        val isOverflow = isContextOverflow(message, model.contextWindow)
+        return !isOverflow && isRetryableAssistantError(message)
+    }
+
+    private suspend fun prepareRetry(message: AssistantMessage): Boolean {
+        val settings = settingsManager.getRetrySettings()
+        if (!settings.enabled) return false
+
+        val attempt = retryAttemptState.addAndFetch(1)
+        return if (attempt > settings.maxRetries) {
+            retryAttemptState.addAndFetch(-1)
+            false
+        } else {
+            waitForRetry(message, settings, attempt)
+        }
+    }
+
+    private suspend fun waitForRetry(
+        message: AssistantMessage,
+        settings: RetrySettings,
+        attempt: Int,
+    ): Boolean {
+        val delayMs = settings.baseDelayMs * RETRY_MULTIPLIER.pow(attempt - 1).toLong()
+        emitEvent(
+            AgentSessionEvent.AutoRetryStart(
+                attempt = attempt,
+                maxAttempts = settings.maxRetries,
+                delayMs = delayMs,
+                errorMessage = message.errorMessage ?: "Unknown error",
+            ),
+        )
+        removeLastAssistantFromContext()
+
+        val controller = AbortController()
+        retryAbortController.store(controller)
+        refreshState()
+        return try {
+            sleep(delayMs, controller.signal)
+            true
+        } catch (_: RetrySleepAbortedException) {
+            retryAttemptState.store(0)
+            emitEvent(
+                AgentSessionEvent.AutoRetryEnd(
+                    success = false,
+                    attempt = attempt,
+                    finalError = "Retry cancelled",
+                ),
+            )
+            false
+        } finally {
+            retryAbortController.compareAndSet(controller, null)
+            refreshState()
+        }
+    }
+
+    private fun removeLastAssistantFromContext() {
+        val messages = agent.currentState.messages
+        if (messages.lastOrNull() is AssistantMessage) {
+            agent.replaceMessages(messages.dropLast(1))
+            refreshState()
+        }
+    }
+
+    @Suppress("ReturnCount")
+    private suspend fun checkCompaction(
+        assistantMessage: AssistantMessage,
+        skipAbortedCheck: Boolean = true,
+    ): Boolean {
+        val settings = settingsManager.getCompactionSettings()
+        if (!settings.enabled) return false
+        if (skipAbortedCheck && assistantMessage.stopReason == StopReason.ABORTED) return false
+
+        val contextWindow = model.contextWindow
+        val sameModel = assistantMessage.provider == model.provider && assistantMessage.model == model.id
+        val latestCompaction = sessionManager.getBranch().asReversed().firstNotNullOfOrNull { it as? CompactionEntry }
+        if (latestCompaction != null && assistantMessage.timestamp <= latestCompaction.timestampMillis()) return false
+
+        return if (sameModel && isContextOverflow(assistantMessage, contextWindow)) {
+            handleOverflowCompaction(assistantMessage)
+        } else {
+            val contextTokens = estimateThresholdContextTokens(assistantMessage, latestCompaction) ?: return false
+            shouldCompact(contextTokens, contextWindow, settings) &&
+                runAutoCompaction(CompactionReason.THRESHOLD, willRetry = false)
+        }
+    }
+
+    private suspend fun handleOverflowCompaction(assistantMessage: AssistantMessage): Boolean {
+        val willRetry = assistantMessage.stopReason != StopReason.STOP
+        return when {
+            !willRetry -> {
+                runAutoCompaction(CompactionReason.OVERFLOW, willRetry = false)
+            }
+
+            overflowRecoveryAttempted.load() -> {
+                emitEvent(
+                    AgentSessionEvent.CompactionEnd(
+                        reason = CompactionReason.OVERFLOW,
+                        result = null,
+                        aborted = false,
+                        willRetry = false,
+                        errorMessage = OVERFLOW_RECOVERY_EXHAUSTED,
+                    ),
+                )
+                false
+            }
+
+            else -> {
+                overflowRecoveryAttempted.store(true)
+                removeLastAssistantFromContext()
+                runAutoCompaction(CompactionReason.OVERFLOW, willRetry = true)
+            }
+        }
+    }
+
+    private fun estimateThresholdContextTokens(
+        assistantMessage: AssistantMessage,
+        latestCompaction: CompactionEntry?,
+    ): Long? {
+        val directTokens = calculateContextTokens(assistantMessage.usage)
+        val hasDirectUsage = assistantMessage.stopReason != StopReason.ERROR && directTokens != 0L
+        if (hasDirectUsage) return directTokens
+        return estimateContextTokensAfterLatestCompaction(latestCompaction)
+    }
+
+    private fun estimateContextTokensAfterLatestCompaction(
+        latestCompaction: CompactionEntry?,
+    ): Long? {
+        val estimate = estimateContextTokens(messages)
+        val usageMessage = estimate.lastUsageIndex?.let(messages::get)?.let { it as? AssistantMessage }
+        val predatesLatestCompaction =
+            latestCompaction != null &&
+                usageMessage != null &&
+                usageMessage.timestamp <= latestCompaction.timestampMillis()
+        return estimate.tokens.takeUnless { estimate.lastUsageIndex == null || predatesLatestCompaction }
+    }
+
+    private suspend fun runAutoCompaction(
+        reason: CompactionReason,
+        willRetry: Boolean,
+    ): Boolean =
+        prepareCompaction(
+            sessionManager.getBranch(),
+            settingsManager.getCompactionSettings(),
+        )?.let { preparation ->
+            runPreparedAutoCompaction(reason, willRetry, preparation)
+        } ?: false
+
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun runPreparedAutoCompaction(
+        reason: CompactionReason,
+        willRetry: Boolean,
+        preparation: CompactionPreparation,
+    ): Boolean {
+        val controller = AbortController()
+        emitEvent(AgentSessionEvent.CompactionStart(reason))
+        autoCompactionAbortController.store(controller)
+        refreshState()
+        return try {
+            completeAutoCompaction(reason, willRetry, preparation, controller)
+        } catch (error: Exception) {
+            emitAutoCompactionFailure(reason, error)
+            false
+        } finally {
+            autoCompactionAbortController.compareAndSet(controller, null)
+            refreshState()
+        }
+    }
+
+    private suspend fun completeAutoCompaction(
+        reason: CompactionReason,
+        willRetry: Boolean,
+        preparation: CompactionPreparation,
+        controller: AbortController,
+    ): Boolean {
+        val generated =
+            compactContext(
+                preparation = preparation,
+                request =
+                    CompactionRequest(
+                        model = model,
+                        apiKey = agent.getApiKey?.invoke(model.provider),
+                        signal = controller.signal,
+                        thinkingLevel = thinkingLevel,
+                        streamFunction = agent.streamFunction,
+                    ),
+            )
+        if (controller.signal.isAborted) {
+            emitEvent(
+                AgentSessionEvent.CompactionEnd(
+                    reason = reason,
+                    result = null,
+                    aborted = true,
+                    willRetry = false,
+                ),
+            )
+            return false
+        }
+
+        sessionManager.appendCompaction(
+            summary = generated.summary,
+            firstKeptEntryId = generated.firstKeptEntryId,
+            tokensBefore = generated.tokensBefore,
+            details = generated.details?.toJson(),
+            fromHook = false,
+        )
+        val context = sessionManager.buildSessionContext()
+        agent.replaceMessages(context.messages)
+        val result = generated.copy(estimatedTokensAfter = context.messages.sumOf(::estimateTokens))
+        refreshState()
+        emitEvent(
+            AgentSessionEvent.CompactionEnd(
+                reason = reason,
+                result = result,
+                aborted = false,
+                willRetry = willRetry,
+            ),
+        )
+        if (willRetry) removeTrailingErrorFromContext()
+        return willRetry || agent.hasQueuedMessages()
+    }
+
+    private fun emitAutoCompactionFailure(
+        reason: CompactionReason,
+        error: Exception,
+    ) {
+        val prefix = if (reason == CompactionReason.OVERFLOW) "Context overflow recovery" else "Auto-compaction"
+        emitEvent(
+            AgentSessionEvent.CompactionEnd(
+                reason = reason,
+                result = null,
+                aborted = false,
+                willRetry = false,
+                errorMessage = "$prefix failed: ${error.message ?: "compaction failed"}",
+            ),
+        )
+    }
+
+    private fun requireCompactionModel() {
+        check(model != UNKNOWN_AGENT_MODEL) { "No model selected." }
+    }
+
+    private fun requireManualCompactionPreparation(
+        pathEntries: List<SessionEntry>,
+    ): CompactionPreparation {
+        val preparation = prepareCompaction(pathEntries, settingsManager.getCompactionSettings())
+        if (preparation != null) return preparation
+        check(pathEntries.lastOrNull() !is CompactionEntry) { "Already compacted" }
+        error("Nothing to compact (session too small)")
+    }
+
+    private fun throwIfCompactionCancelled(signal: AbortSignal) {
+        if (signal.isAborted) throw CompactionCancelledException()
+    }
+
+    private fun removeTrailingErrorFromContext() {
+        val lastMessage = agent.currentState.messages.lastOrNull() as? AssistantMessage
+        if (lastMessage?.stopReason == StopReason.ERROR) {
+            agent.replaceMessages(agent.currentState.messages.dropLast(1))
+            refreshState()
+        }
+    }
+
+    private fun findLastAssistantMessage(): AssistantMessage? {
+        val reversedMessages = messages.asReversed()
+        return reversedMessages.firstNotNullOfOrNull { it as? AssistantMessage }
+    }
+
+    private fun persistMessage(message: AgentMessage) {
+        when (message) {
+            is CustomMessage -> {
+                sessionManager.appendCustomMessageEntry(
+                    message.customType,
+                    message.content,
+                    message.display,
+                    message.details,
+                )
+            }
+
+            is UserMessage,
+            is AssistantMessage,
+            is ToolResultMessage,
+            -> {
+                sessionManager.appendMessage(message)
+            }
+        }
+    }
+
+    private fun hasAssistantUsageAfter(
+        branch: List<SessionEntry>,
+        compaction: CompactionEntry,
+    ): Boolean {
+        val compactionIndex = branch.indexOfFirst { it.id == compaction.id }
+        return branch.drop(compactionIndex + 1).any { entry ->
+            val assistant = (entry as? SessionMessageEntry)?.message as? AssistantMessage
+            assistant != null &&
+                assistant.stopReason != StopReason.ABORTED &&
+                assistant.stopReason != StopReason.ERROR &&
+                calculateContextTokens(assistant.usage) > 0
+        }
+    }
+
+    private fun removeDeliveredQueueMessage(text: String) {
+        if (text.isEmpty()) return
+        val removedSteering = removeFirstAtomic(steeringMessages, text)
+        val removedFollowUp = !removedSteering && removeFirstAtomic(followUpMessages, text)
+        if (removedSteering || removedFollowUp) emitQueueUpdate()
+    }
+
+    private fun drainPendingNextTurnMessages(): List<CustomMessage> = pendingNextTurnMessages.exchange(emptyList())
+
+    private fun flushPendingBashMessages() {
+        pendingBashMessages.exchange(emptyList()).forEach(::appendBashMessage)
+    }
+
+    private fun appendBashMessage(message: BashExecutionMessage) {
+        agent.appendMessage(message)
+        sessionManager.appendMessage(message)
+        refreshState()
+    }
+
+    private fun emitQueueUpdate() {
+        refreshState()
+        emitEvent(
+            AgentSessionEvent.QueueUpdate(
+                steering = steeringMessages.load().toList(),
+                followUp = followUpMessages.load().toList(),
+            ),
+        )
+    }
+
+    private fun emitEvent(event: AgentSessionEvent) {
+        listeners.load().forEach { listener -> listener.onEvent(event) }
+        mutableEvents.tryEmit(event)
+    }
+
+    private fun refreshState() {
+        mutableState.value =
+            AgentSessionState(
+                agent = agent.currentState,
+                isStreaming = isStreaming,
+                steeringMessages = steeringMessages.load().toList(),
+                followUpMessages = followUpMessages.load().toList(),
+                sessionFile = sessionFile,
+                sessionId = sessionId,
+                sessionName = sessionName,
+                retryAttempt = retryAttempt,
+                isRetrying = isRetrying,
+                isCompacting = isCompacting,
+            )
+    }
+
+    private fun disconnectFromAgent() {
+        agentSubscription.exchange(null)?.dispose()
+    }
+
+    private fun reconnectToAgent() {
+        if (disposed.load()) return
+        if (agentSubscription.load() != null) return
+        val subscription = agent.subscribe { event, _ -> handleAgentEvent(event) }
+        if (!agentSubscription.compareAndSet(null, subscription)) subscription.dispose()
+    }
+
+    private fun addListener(listener: AgentSessionEventListener) {
+        while (true) {
+            val current = listeners.load()
+            if (listener in current) return
+            if (listeners.compareAndSet(current, current + listener)) return
+        }
+    }
+
+    private fun removeListener(listener: AgentSessionEventListener) {
+        while (true) {
+            val current = listeners.load()
+            if (listener !in current) return
+            if (listeners.compareAndSet(current, current - listener)) return
+        }
+    }
+
+    private fun AgentEvent.toSessionEvent(): AgentSessionEvent =
+        when (this) {
+            AgentEvent.AgentStart -> {
+                AgentSessionEvent.AgentStart
+            }
+
+            is AgentEvent.AgentEnd -> {
+                AgentSessionEvent.AgentEnd(messages, willRetry = willRetryAfterAgentEnd(messages))
+            }
+
+            AgentEvent.TurnStart -> {
+                AgentSessionEvent.TurnStart
+            }
+
+            is AgentEvent.TurnEnd -> {
+                AgentSessionEvent.TurnEnd(message, toolResults)
+            }
+
+            is AgentEvent.MessageStart -> {
+                AgentSessionEvent.MessageStart(message)
+            }
+
+            is AgentEvent.MessageUpdate -> {
+                AgentSessionEvent.MessageUpdate(message, assistantMessageEvent)
+            }
+
+            is AgentEvent.MessageEnd -> {
+                AgentSessionEvent.MessageEnd(message)
+            }
+
+            is AgentEvent.ToolExecutionStart -> {
+                AgentSessionEvent.ToolExecutionStart(toolCallId, toolName, args)
+            }
+
+            is AgentEvent.ToolExecutionUpdate -> {
+                AgentSessionEvent.ToolExecutionUpdate(toolCallId, toolName, args, partialResult)
+            }
+
+            is AgentEvent.ToolExecutionEnd -> {
+                AgentSessionEvent.ToolExecutionEnd(toolCallId, toolName, result, isError)
+            }
+        }
+
+    private fun willRetryAfterAgentEnd(messages: List<AgentMessage>): Boolean {
+        val settings = settingsManager.getRetrySettings()
+        if (!settings.enabled || retryAttempt >= settings.maxRetries) return false
+        val assistant = messages.asReversed().firstNotNullOfOrNull { it as? AssistantMessage }
+        return assistant?.let(::isRetryableError) == true
+    }
+
+    private companion object {
+        const val EVENT_BUFFER_CAPACITY = 1_024
+        const val PERCENT_MULTIPLIER = 100.0
+        const val RETRY_MULTIPLIER = 2.0
+        const val OVERFLOW_RECOVERY_EXHAUSTED =
+            "Context overflow recovery failed after one compact-and-retry attempt. " +
+                "Try reducing context or switching to a larger-context model."
+        const val STREAMING_PROMPT_ERROR =
+            "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message."
+    }
+}
+
+private class RetrySleepAbortedException : Exception()
+
+private class CompactionCancelledException : Exception("Compaction cancelled")
+
+private fun CompactionDetails.toJson() =
+    buildJsonObject {
+        put("readFiles", JsonArray(readFiles.map(::JsonPrimitive)))
+        put("modifiedFiles", JsonArray(modifiedFiles.map(::JsonPrimitive)))
+    }
+
+private fun CompactionEntry.timestampMillis(): Long =
+    runCatching { Instant.parse(timestamp).toEpochMilliseconds() }
+        .getOrDefault(Long.MIN_VALUE)
+
+private suspend fun sleep(
+    delayMs: Long,
+    signal: AbortSignal,
+) {
+    if (signal.isAborted) throw RetrySleepAbortedException()
+    suspendCancellableCoroutine { continuation ->
+        val scope = CoroutineScope(continuation.context)
+        val completed = AtomicBoolean(false)
+        val resumeDelay = {
+            if (completed.compareAndSet(false, true)) continuation.resume(Unit)
+        }
+        val resumeAbort = {
+            if (completed.compareAndSet(false, true)) {
+                continuation.resumeWithException(RetrySleepAbortedException())
+            }
+        }
+        val delayJob =
+            scope.launch(start = CoroutineStart.LAZY) {
+                delay(delayMs)
+                resumeDelay()
+            }
+        val abortSubscription =
+            signal.onAbort {
+                delayJob.cancel()
+                resumeAbort()
+            }
+        continuation.invokeOnCancellation {
+            completed.store(true)
+            delayJob.cancel()
+            abortSubscription.dispose()
+        }
+        delayJob.invokeOnCompletion { abortSubscription.dispose() }
+        if (signal.isAborted) {
+            delayJob.cancel()
+            resumeAbort()
+        } else {
+            delayJob.start()
+        }
+    }
+}
+
+private fun userMessage(
+    text: String,
+    images: List<ImageContent>,
+): UserMessage =
+    UserMessage(
+        content = UserBlocks(listOf(TextContent(text)) + images),
+        timestamp = Clock.System.now().toEpochMilliseconds(),
+    )
+
+private fun userMessageText(message: UserMessage): String =
+    when (val content = message.content) {
+        is UserText -> content.value
+        is UserBlocks -> content.value.filterIsInstance<TextContent>().joinToString("", transform = TextContent::text)
+    }
+
+private fun ModelThinkingLevel.sessionValue(): String =
+    when (this) {
+        ModelThinkingLevel.OFF -> "off"
+        ModelThinkingLevel.MINIMAL -> "minimal"
+        ModelThinkingLevel.LOW -> "low"
+        ModelThinkingLevel.MEDIUM -> "medium"
+        ModelThinkingLevel.HIGH -> "high"
+        ModelThinkingLevel.XHIGH -> "xhigh"
+        ModelThinkingLevel.MAX -> "max"
+    }
+
+private fun <T> appendAtomic(
+    target: AtomicReference<List<T>>,
+    value: T,
+) {
+    while (true) {
+        val current = target.load()
+        if (target.compareAndSet(current, current + value)) return
+    }
+}
+
+private fun <T> removeFirstAtomic(
+    target: AtomicReference<List<T>>,
+    value: T,
+): Boolean {
+    while (true) {
+        val current = target.load()
+        val index = current.indexOf(value)
+        if (index == -1) return false
+        val updated = current.toMutableList().also { it.removeAt(index) }
+        if (target.compareAndSet(current, updated)) return true
+    }
+}

@@ -5,15 +5,21 @@ package dev.xuexue.ui
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
-import dev.xuexue.platform.PdfNormalizedRect
 import dev.xuexue.platform.PdfPageDimensions
 import dev.xuexue.platform.PdfPagePoint
+import kotlin.math.abs
+
+internal data class PdfTextSelectionInteraction(
+    val onStart: () -> Unit,
+    val onChange: (PdfPagePoint, PdfPagePoint, isFinal: Boolean) -> Unit,
+    val onCancel: () -> Unit,
+)
 
 @Composable
 internal fun rememberPdfSelectionGesture(
@@ -21,47 +27,67 @@ internal fun rememberPdfSelectionGesture(
     pageDimensions: PdfPageDimensions,
     pageWidthPixels: Float,
     pageHeightPixels: Float,
-    onTextSelection: ((PdfPagePoint, PdfPagePoint) -> Unit)?,
-): PdfTextSelectionInteraction {
-    var dragStart by remember(page) { mutableStateOf<Offset?>(null) }
-    var dragEnd by remember(page) { mutableStateOf<Offset?>(null) }
-    val modifier =
-        if (onTextSelection == null) {
-            Modifier
-        } else {
-            Modifier.pointerInput(page, pageWidthPixels, pageHeightPixels) {
-                detectDragGestures(
-                    onDragStart = { position ->
-                        dragStart = position
-                        dragEnd = position
-                    },
-                    onDragCancel = {
-                        dragStart = null
-                        dragEnd = null
-                    },
-                    onDragEnd = {
+    interaction: PdfTextSelectionInteraction?,
+): Modifier {
+    val currentInteraction by rememberUpdatedState(interaction)
+    if (interaction == null) return Modifier
+    return Modifier
+        .pointerHoverIcon(PointerIcon.Text)
+        .pointerInput(page, pageWidthPixels, pageHeightPixels) {
+            var dragStart: Offset? = null
+            var dragEnd: Offset? = null
+            var lastPreviewUptimeMillis = Long.MIN_VALUE
+            detectDragGestures(
+                onDragStart = { position ->
+                    dragStart = position
+                    dragEnd = position
+                    lastPreviewUptimeMillis = Long.MIN_VALUE
+                    currentInteraction?.onStart?.invoke()
+                },
+                onDragCancel = {
+                    currentInteraction?.onCancel?.invoke()
+                    dragStart = null
+                    dragEnd = null
+                },
+                onDragEnd = {
+                    val dispatched =
                         dispatchSelection(
                             start = dragStart,
                             end = dragEnd,
                             pageWidthPixels = pageWidthPixels,
                             pageHeightPixels = pageHeightPixels,
                             pageDimensions = pageDimensions,
-                            onTextSelection = onTextSelection,
+                        ) { start, end -> currentInteraction?.onChange?.invoke(start, end, true) }
+                    if (!dispatched) currentInteraction?.onCancel?.invoke()
+                    dragStart = null
+                    dragEnd = null
+                },
+                onDrag = { change, _ ->
+                    val start = dragStart
+                    dragEnd = change.position
+                    if (
+                        start != null &&
+                        shouldDispatchPdfSelectionPreview(
+                            dragDistance = (change.position - start).getDistance(),
+                            eventUptimeMillis = change.uptimeMillis,
+                            lastDispatchUptimeMillis = lastPreviewUptimeMillis,
                         )
-                        dragStart = null
-                        dragEnd = null
-                    },
-                    onDrag = { change, _ ->
-                        dragEnd = change.position
-                        change.consume()
-                    },
-                )
-            }
+                    ) {
+                        dispatchSelection(
+                            start = start,
+                            end = change.position,
+                            pageWidthPixels = pageWidthPixels,
+                            pageHeightPixels = pageHeightPixels,
+                            pageDimensions = pageDimensions,
+                        ) { selectionStart, selectionEnd ->
+                            currentInteraction?.onChange?.invoke(selectionStart, selectionEnd, false)
+                        }
+                        lastPreviewUptimeMillis = change.uptimeMillis
+                    }
+                    change.consume()
+                },
+            )
         }
-    return PdfTextSelectionInteraction(
-        modifier = modifier,
-        region = normalizedDragRegion(dragStart, dragEnd, pageWidthPixels, pageHeightPixels),
-    )
 }
 
 private fun dispatchSelection(
@@ -70,13 +96,14 @@ private fun dispatchSelection(
     pageWidthPixels: Float,
     pageHeightPixels: Float,
     pageDimensions: PdfPageDimensions,
-    onTextSelection: (PdfPagePoint, PdfPagePoint) -> Unit,
-) {
-    if (start == null || end == null || (end - start).getDistance() < MIN_SELECTION_DRAG_PIXELS) return
-    onTextSelection(
+    onSelection: (PdfPagePoint, PdfPagePoint) -> Unit,
+): Boolean {
+    if (start == null || end == null || (end - start).getDistance() < MIN_SELECTION_DRAG_PIXELS) return false
+    onSelection(
         start.toPdfPagePoint(pageWidthPixels, pageHeightPixels, pageDimensions),
         end.toPdfPagePoint(pageWidthPixels, pageHeightPixels, pageDimensions),
     )
+    return true
 }
 
 private fun Offset.toPdfPagePoint(
@@ -89,32 +116,16 @@ private fun Offset.toPdfPagePoint(
         y = (y / pageHeightPixels).coerceIn(0f, 1f) * pageDimensions.heightPoints,
     )
 
-private fun normalizedDragRegion(
-    start: Offset?,
-    end: Offset?,
-    pageWidthPixels: Float,
-    pageHeightPixels: Float,
-): PdfNormalizedRect? =
-    if (start == null || end == null) {
-        null
-    } else if (!hasDrawableArea(pageWidthPixels, pageHeightPixels)) {
-        null
-    } else {
-        val left = minOf(start.x, end.x).coerceIn(0f, pageWidthPixels) / pageWidthPixels
-        val top = minOf(start.y, end.y).coerceIn(0f, pageHeightPixels) / pageHeightPixels
-        val right = maxOf(start.x, end.x).coerceIn(0f, pageWidthPixels) / pageWidthPixels
-        val bottom = maxOf(start.y, end.y).coerceIn(0f, pageHeightPixels) / pageHeightPixels
-        if (left < right && top < bottom) PdfNormalizedRect(left, top, right, bottom) else null
+internal fun shouldDispatchPdfSelectionPreview(
+    dragDistance: Float,
+    eventUptimeMillis: Long,
+    lastDispatchUptimeMillis: Long,
+): Boolean =
+    when {
+        dragDistance < MIN_SELECTION_DRAG_PIXELS -> false
+        lastDispatchUptimeMillis == Long.MIN_VALUE -> true
+        else -> abs(eventUptimeMillis - lastDispatchUptimeMillis) >= LIVE_SELECTION_INTERVAL_MILLIS
     }
 
-private fun hasDrawableArea(
-    pageWidthPixels: Float,
-    pageHeightPixels: Float,
-): Boolean = pageWidthPixels > 0f && pageHeightPixels > 0f
-
-internal data class PdfTextSelectionInteraction(
-    val modifier: Modifier,
-    val region: PdfNormalizedRect?,
-)
-
 private const val MIN_SELECTION_DRAG_PIXELS = 4f
+private const val LIVE_SELECTION_INTERVAL_MILLIS = 24L

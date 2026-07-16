@@ -164,37 +164,76 @@ class WorkbenchStateTest {
     @Test
     fun structuredAgentEventsAreProjectedIntoInspectableUiMessages() =
         runBlocking {
+            val root = Files.createTempDirectory("xuexue-agent-projection")
+            Files.writeString(root.resolve("Note.md"), "File contents")
+            var calls = 0
             val client =
                 object : AgentClient {
                     override suspend fun stream(
                         messages: List<AgentMessage>,
                         config: AgentProviderConfig,
                         onEvent: (AgentStreamEvent) -> Unit,
-                    ) {
-                        onEvent(AgentStreamEvent.ReasoningDelta("Checking the workspace"))
-                        onEvent(AgentStreamEvent.ToolStarted("call-1", "read", "Note.md"))
-                        onEvent(AgentStreamEvent.ToolProgress("call-1", "Reading 12 lines"))
-                        onEvent(AgentStreamEvent.ToolFinished("call-1", "File contents"))
-                        onEvent(AgentStreamEvent.FileDiff("Note.md", "@@ -1 +1 @@\n-old\n+new"))
-                        onEvent(AgentStreamEvent.TextDelta("Finished"))
-                        onEvent(AgentStreamEvent.Usage(inputTokens = 120, outputTokens = 30, costUsd = 0.0012))
+                    ) = Unit
+
+                    override suspend fun complete(
+                        messages: List<PiAgentMessage>,
+                        tools: List<PiToolDefinition>,
+                        config: AgentProviderConfig,
+                        onEvent: (AgentStreamEvent) -> Unit,
+                    ): PiModelResponse {
+                        calls++
+                        return if (calls == 1) {
+                            PiModelResponse(
+                                toolCalls =
+                                    listOf(
+                                        PiToolCall(
+                                            "call-1",
+                                            "read",
+                                            buildJsonObject { put("path", "Note.md") },
+                                        ),
+                                    ),
+                            )
+                        } else {
+                            onEvent(AgentStreamEvent.ReasoningDelta("Checking the workspace"))
+                            onEvent(AgentStreamEvent.TextDelta("Finished"))
+                            PiModelResponse(
+                                content = "Finished",
+                                inputTokens = 120,
+                                outputTokens = 30,
+                                costUsd = 0.0012,
+                            )
+                        }
                     }
                 }
             val state = WorkbenchState(this, agentClient = client)
-            state.agentModel = "test-model"
-            state.agentApiKey = "test-key"
-            state.agentInput = "update the note"
+            try {
+                state.openWorkspace(root)
+                state.agentModel = "test-model"
+                state.agentApiKey = "test-key"
+                state.agentInput = "read the note"
 
-            state.sendAgentMessage()
-            withTimeout(2_000) { while (state.agentRunning) yield() }
+                state.sendAgentMessage()
+                withTimeout(2_000) { while (state.agentRunning) yield() }
 
-            assertTrue(state.agentMessages.any { it.role == "reasoning" && it.content.contains("Checking") })
-            assertTrue(state.agentMessages.any { it.role == "tool_call" && it.streamId == "call-1" && it.content.contains("12 lines") })
-            assertTrue(state.agentMessages.any { it.role == "tool" && it.streamId == "call-1" && it.content == "File contents" })
-            assertTrue(state.agentMessages.any { it.role == "diff" && it.content.contains("+++ b/Note.md") })
-            assertTrue(state.agentMessages.any { it.role == "assistant" && it.content == "Finished" })
-            assertEquals(150, state.activeAgentSession.inputTokens + state.activeAgentSession.outputTokens)
-            assertEquals(0.0012, state.activeAgentSession.costUsd)
+                assertEquals(2, calls)
+                assertTrue(state.agentMessages.any { it.role == "reasoning" && it.content.contains("Checking") })
+                assertTrue(
+                    state.agentMessages.any {
+                        it.role == "tool_call" && it.streamId == "call-1" && it.content.contains("Reading Note.md")
+                    },
+                )
+                assertTrue(
+                    state.agentMessages.any {
+                        it.role == "tool" && it.streamId == "call-1" && it.content.contains("File contents")
+                    },
+                )
+                assertTrue(state.agentMessages.any { it.role == "assistant" && it.content == "Finished" })
+                assertEquals(150, state.activeAgentSession.inputTokens + state.activeAgentSession.outputTokens)
+                assertEquals(0.0012, state.activeAgentSession.costUsd)
+            } finally {
+                state.closeWorkspace().join()
+                Files.walk(root).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists) }
+            }
         }
 
     @Test
@@ -446,6 +485,29 @@ class WorkbenchStateTest {
         assertEquals(listOf("Note.md"), state.agentContextPaths)
         assertTrue(state.agentPanelVisible)
     }
+
+    @Test
+    fun workspaceEntryCommandLoadsAnUnopenedFile() =
+        runBlocking {
+            val root = Files.createTempDirectory("xuexue-open-workspace-entry")
+            val stateJob = SupervisorJob()
+            val state = WorkbenchState(CoroutineScope(stateJob + Dispatchers.Unconfined))
+            try {
+                Files.writeString(root.resolve("Note.md"), "loaded from the workspace")
+                state.openWorkspace(root)
+
+                state.execute(WorkbenchCommand.OpenWorkspaceEntry("Note.md"))
+
+                withTimeout(2_000) {
+                    while (state.activePath != "Note.md") yield()
+                }
+                assertEquals("loaded from the workspace", state.activeDocument?.content)
+            } finally {
+                state.closeWorkspace().join()
+                stateJob.cancelAndJoin()
+                Files.walk(root).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists) }
+            }
+        }
 
     @Test
     fun customLayoutPresetCanBeSavedAppliedAndDeleted() {

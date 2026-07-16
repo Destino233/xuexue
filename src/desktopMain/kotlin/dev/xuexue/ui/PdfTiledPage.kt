@@ -47,7 +47,6 @@ import dev.xuexue.WorkbenchState
 import dev.xuexue.platform.PdfLink
 import dev.xuexue.platform.PdfNormalizedRect
 import dev.xuexue.platform.PdfPageDimensions
-import dev.xuexue.platform.PdfPagePoint
 import dev.xuexue.platform.PdfRasterLayer
 import dev.xuexue.platform.PdfRasterPriority
 import dev.xuexue.platform.PdfRasterPurpose
@@ -57,7 +56,8 @@ import kotlin.math.ceil
 internal data class PdfPageInteraction(
     val searchRegions: List<PdfNormalizedRect> = emptyList(),
     val selectionRegions: List<PdfNormalizedRect> = emptyList(),
-    val onTextSelection: ((PdfPagePoint, PdfPagePoint) -> Unit)? = null,
+    val selectionActions: PdfSelectionActions? = null,
+    val textSelectionInteraction: PdfTextSelectionInteraction? = null,
     val onLink: (PdfLink) -> Unit = {},
 )
 
@@ -148,15 +148,15 @@ private fun PdfPageSurface(
             val density = LocalDensity.current
             val pageWidthPixels = with(density) { maxWidth.toPx() }
             val pageHeightPixels = with(density) { maxHeight.toPx() }
-            val selection =
+            val selectionModifier =
                 rememberPdfSelectionGesture(
                     page = page,
                     pageDimensions = pageDimensions,
                     pageWidthPixels = pageWidthPixels,
                     pageHeightPixels = pageHeightPixels,
-                    onTextSelection = interaction.onTextSelection,
+                    interaction = interaction.textSelectionInteraction,
                 )
-            Box(Modifier.fillMaxSize().then(selection.modifier)) {
+            Box(Modifier.fillMaxSize().then(selectionModifier)) {
                 presentation.previewBitmap?.let { preview ->
                     Image(
                         preview,
@@ -184,7 +184,7 @@ private fun PdfPageSurface(
                     tab = tab,
                     page = page,
                     searchRegions = interaction.searchRegions,
-                    selectionRegions = interaction.selectionRegions + listOfNotNull(selection.region),
+                    selectionRegions = interaction.selectionRegions,
                     links = links,
                     pageWidth = pageWidth,
                     pageHeight = pageHeight,
@@ -192,6 +192,11 @@ private fun PdfPageSurface(
                 )
             }
         }
+        PdfPageAnnotationControls(
+            annotations = tab.pdfAnnotations.filter { annotation -> annotation.page == page },
+            selectionActions = interaction.selectionActions,
+            geometry = PdfPageOverlayGeometry(maxWidth, maxHeight, decoration.rotation),
+        )
     }
 }
 
@@ -268,6 +273,18 @@ private fun PdfPageOverlays(
                 pageWidth,
                 pageHeight,
                 MaterialTheme.colorScheme.secondary.copy(alpha = 0.28f),
+            )
+        }
+    tab.pdfAnnotations
+        .asSequence()
+        .filter { annotation -> annotation.page == page && annotation.kind == "comment" }
+        .flatMap { annotation -> annotation.regions.asSequence() }
+        .forEach { region ->
+            PdfRegionOverlay(
+                PdfNormalizedRect(region.left, region.top, region.right, region.bottom),
+                pageWidth,
+                pageHeight,
+                MaterialTheme.colorScheme.tertiary.copy(alpha = 0.14f),
             )
         }
     searchRegions.forEach { region ->

@@ -631,28 +631,18 @@ private fun DocumentTabs(
                 var menuOpen by remember(tab.relativePath) { mutableStateOf(false) }
                 val interactionSource = remember(tab.relativePath) { MutableInteractionSource() }
                 val hovered by interactionSource.collectIsHoveredAsState()
-                val tabColor by
-                    animateColorAsState(
-                        targetValue =
-                            when {
-                                selected -> MaterialTheme.colorScheme.surface
-                                hovered -> MaterialTheme.colorScheme.surface.copy(alpha = 0.58f)
-                                else -> Color.Transparent
-                            },
-                        animationSpec = WorkbenchMotion.fastTween(),
-                        label = "document tab color",
-                    )
-                val iconColor by
-                    animateColorAsState(
-                        targetValue =
-                            if (selected) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        animationSpec = WorkbenchMotion.fastTween(),
-                        label = "document tab icon color",
-                    )
+                val tabColor =
+                    when {
+                        selected -> MaterialTheme.colorScheme.surface
+                        hovered -> MaterialTheme.colorScheme.surface.copy(alpha = 0.58f)
+                        else -> Color.Transparent
+                    }
+                val iconColor =
+                    if (selected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
                 Box {
                     Row(
                         Modifier
@@ -1051,28 +1041,18 @@ private fun ModeSelector(
                 val interactionSource = remember(mode) { MutableInteractionSource() }
                 val hovered by interactionSource.collectIsHoveredAsState()
                 val pressed by interactionSource.collectIsPressedAsState()
-                val containerColor by
-                    animateColorAsState(
-                        targetValue =
-                            when {
-                                selected -> MaterialTheme.colorScheme.surface
-                                hovered -> MaterialTheme.colorScheme.surface.copy(alpha = 0.52f)
-                                else -> Color.Transparent
-                            },
-                        animationSpec = WorkbenchMotion.fastTween(),
-                        label = "editor mode background",
-                    )
-                val contentColor by
-                    animateColorAsState(
-                        targetValue =
-                            if (selected) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        animationSpec = WorkbenchMotion.fastTween(),
-                        label = "editor mode color",
-                    )
+                val containerColor =
+                    when {
+                        selected -> MaterialTheme.colorScheme.surface
+                        hovered -> MaterialTheme.colorScheme.surface.copy(alpha = 0.52f)
+                        else -> Color.Transparent
+                    }
+                val contentColor =
+                    if (selected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
                 val scale by
                     animateFloatAsState(
                         targetValue =

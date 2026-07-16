@@ -34,7 +34,9 @@ import dev.xuexue.core.requiresExplicitApproval
 import dev.xuexue.platform.AgentClient
 import dev.xuexue.platform.AgentMessage
 import dev.xuexue.platform.AgentProviderConfig
+import dev.xuexue.platform.AppPreferences
 import dev.xuexue.platform.CachingPdfReaderBackend
+import dev.xuexue.platform.DEFAULT_DOCUMENT_WHEEL_ZOOM_MULTIPLIER
 import dev.xuexue.platform.MuPdfReaderBackend
 import dev.xuexue.platform.OpenAiCompatibleAgentClient
 import dev.xuexue.platform.PdfDocumentMetadata
@@ -58,6 +60,7 @@ import dev.xuexue.platform.ProgressivePdfRegistry
 import dev.xuexue.platform.RenamedEntry
 import dev.xuexue.platform.SearchHit
 import dev.xuexue.platform.WorkspaceService
+import dev.xuexue.platform.normalizedDocumentWheelZoomMultiplier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -75,6 +78,17 @@ private data class NavigationLocation(
     val cursor: TextRange,
     val editorBlockIndex: Int,
     val pdfPage: Int,
+)
+
+private data class WorkspaceEntryLoad(
+    val kind: DocumentKind,
+    val content: String,
+    val modifiedAt: Long,
+)
+
+private data class PendingWorkspaceEntryOpen(
+    val requestSerial: Long,
+    val pinned: Boolean,
 )
 
 class WorkbenchState(
@@ -106,6 +120,8 @@ class WorkbenchState(
     var isLoading by mutableStateOf(false)
         private set
     var status by mutableStateOf("Ready")
+        private set
+    var documentWheelZoomMultiplier by mutableStateOf(DEFAULT_DOCUMENT_WHEEL_ZOOM_MULTIPLIER)
         private set
     var errorMessage by mutableStateOf<String?>(null)
         private set
@@ -139,6 +155,8 @@ class WorkbenchState(
     val activeDocument: DocumentTab? get() = documents.firstOrNull { it.relativePath == activePath }
     private val backNavigation = ArrayDeque<NavigationLocation>()
     private val forwardNavigation = ArrayDeque<NavigationLocation>()
+    private var latestWorkspaceEntryOpenRequest = 0L
+    private val pendingWorkspaceEntryOpens = mutableMapOf<String, PendingWorkspaceEntryOpen>()
     val canNavigateBack: Boolean get() = backNavigation.isNotEmpty()
     val canNavigateForward: Boolean get() = forwardNavigation.isNotEmpty()
 
@@ -233,13 +251,21 @@ class WorkbenchState(
         get() = remotePdfController.downloadStates
 
     suspend fun restoreLastWorkspace() {
-        val root = withContext(Dispatchers.IO) { workspaceService.loadLastWorkspace() } ?: return
+        val restored =
+            withContext(Dispatchers.IO) {
+                workspaceService.loadAppPreferences() to workspaceService.loadLastWorkspace()
+            }
+        documentWheelZoomMultiplier = restored.first.documentWheelZoomMultiplier
+        val root = restored.second ?: return
         openWorkspace(root, restore = true)
     }
 
     fun shutdown() {
         if (shutdown) return
         shutdown = true
+        runCatching {
+            workspaceService.saveAppPreferences(AppPreferences(documentWheelZoomMultiplier))
+        }
         pdfTextureCache.close()
         resolvedPdfReaderBackend.close()
         progressivePdfSources.close()
@@ -264,6 +290,7 @@ class WorkbenchState(
                     val state = if (restore) workspaceService.loadWorkbench(safeRoot) else PersistedWorkbench(workspace = safeRoot.pathString)
                     Triple(tree, workspaceService.buildIndex(safeRoot), state)
                 }
+            discardWorkspaceEntryOpenRequests()
             workspaceRoot = safeRoot
             val restoredRemotePdfUrls = remotePdfController.restoreRangeDownloads(safeRoot)
             workspaceTree = persisted.first
@@ -356,6 +383,7 @@ class WorkbenchState(
     fun closeWorkspace(): Job =
         scope.launch {
             watcherJob?.cancel()
+            discardWorkspaceEntryOpenRequests()
             saveAllDirty()
             documentController.cancelAll()
             fileController.reset()
@@ -507,6 +535,7 @@ class WorkbenchState(
         pinned: Boolean = false,
         persist: Boolean = true,
     ) {
+        nextWorkspaceEntryOpenRequest()
         val normalized = relativePath.replace('\\', '/')
         if (normalized == AGENT_DOCUMENT_PATH) {
             openAgentDocument(persist)
@@ -517,6 +546,7 @@ class WorkbenchState(
             activePath = normalized
             recentDocuments.remove(normalized)
             recentDocuments.add(0, normalized)
+            status = normalized
             if (persist) persistWorkbench()
             return
         }
@@ -547,12 +577,158 @@ class WorkbenchState(
         }.onFailure { errorMessage = it.message ?: "Could not open $normalized" }
     }
 
+    private fun openWorkspaceEntry(
+        relativePath: String,
+        pinned: Boolean,
+    ) {
+        val normalized = relativePath.replace('\\', '/')
+        val requestSerial = nextWorkspaceEntryOpenRequest()
+        when {
+            normalized == AGENT_DOCUMENT_PATH -> openAgentDocument()
+            activateExistingWorkspaceEntry(normalized, pinned) -> Unit
+            else -> queueWorkspaceEntryOpen(normalized, pinned, requestSerial)
+        }
+    }
+
+    private fun activateExistingWorkspaceEntry(
+        normalized: String,
+        pinned: Boolean,
+    ): Boolean {
+        val existing = documents.firstOrNull { it.relativePath == normalized } ?: return false
+        if (pinned) existing.pinned = true
+        activateWorkspaceEntry(normalized)
+        persistWorkbench()
+        return true
+    }
+
+    private fun queueWorkspaceEntryOpen(
+        normalized: String,
+        pinned: Boolean,
+        requestSerial: Long,
+    ) {
+        val root = workspaceRoot ?: return
+        val pending = pendingWorkspaceEntryOpens[normalized]
+        if (pending != null) {
+            pendingWorkspaceEntryOpens[normalized] =
+                PendingWorkspaceEntryOpen(
+                    requestSerial = requestSerial,
+                    pinned = pending.pinned || pinned,
+                )
+        } else {
+            pendingWorkspaceEntryOpens[normalized] = PendingWorkspaceEntryOpen(requestSerial, pinned)
+            status = "Opening $normalized..."
+            scope.launch {
+                val result = runCatching { withContext(Dispatchers.IO) { loadWorkspaceEntry(root, normalized) } }
+                completeWorkspaceEntryOpen(root, normalized, result)
+            }
+        }
+    }
+
+    private fun loadWorkspaceEntry(
+        root: Path,
+        normalized: String,
+    ): WorkspaceEntryLoad {
+        val path = workspaceService.resolveExistingInside(root, normalized)
+        require(Files.isRegularFile(path)) { "File is no longer available: $normalized" }
+        val kind = workspaceService.kindOf(path)
+        val content =
+            if (kind in setOf(DocumentKind.MARKDOWN, DocumentKind.TEXT)) {
+                workspaceService.readText(path)
+            } else {
+                ""
+            }
+        return WorkspaceEntryLoad(
+            kind = kind,
+            content = content,
+            modifiedAt = runCatching { Files.getLastModifiedTime(path).toMillis() }.getOrDefault(0L),
+        )
+    }
+
+    private fun completeWorkspaceEntryOpen(
+        root: Path,
+        normalized: String,
+        result: Result<WorkspaceEntryLoad>,
+    ) {
+        val request = pendingWorkspaceEntryOpens.remove(normalized)
+        if (request != null && workspaceRoot == root) {
+            result.fold(
+                onSuccess = { loaded -> completeLoadedWorkspaceEntry(normalized, request, loaded) },
+                onFailure = { error -> reportWorkspaceEntryOpenFailure(normalized, request, error) },
+            )
+        }
+    }
+
+    private fun completeLoadedWorkspaceEntry(
+        normalized: String,
+        request: PendingWorkspaceEntryOpen,
+        loaded: WorkspaceEntryLoad,
+    ) {
+        val currentRequest = request.requestSerial == latestWorkspaceEntryOpenRequest
+        if (currentRequest || request.pinned) {
+            val document = ensureWorkspaceEntryDocument(normalized, request.pinned, loaded)
+            if (request.pinned) document.pinned = true
+            if (currentRequest) activateWorkspaceEntry(normalized)
+            persistWorkbench()
+        }
+    }
+
+    private fun ensureWorkspaceEntryDocument(
+        normalized: String,
+        pinned: Boolean,
+        loaded: WorkspaceEntryLoad,
+    ): DocumentTab =
+        documents.firstOrNull { it.relativePath == normalized }
+            ?: run {
+                if (!pinned) documents.firstOrNull { !it.pinned && !it.dirty }?.let(documents::remove)
+                DocumentTab(
+                    relativePath = normalized,
+                    kind = loaded.kind,
+                    content = loaded.content,
+                    pinned = pinned,
+                    modifiedAt = loaded.modifiedAt,
+                ).also { created ->
+                    documents += created
+                    if (created.kind == DocumentKind.PDF) pdfController.loadAnnotations(created)
+                }
+            }
+
+    private fun activateWorkspaceEntry(normalized: String) {
+        activePath = normalized
+        recentDocuments.remove(normalized)
+        recentDocuments.add(0, normalized)
+        while (recentDocuments.size > 12) recentDocuments.removeLast()
+        status = normalized
+    }
+
+    private fun reportWorkspaceEntryOpenFailure(
+        normalized: String,
+        request: PendingWorkspaceEntryOpen,
+        error: Throwable,
+    ) {
+        if (request.requestSerial == latestWorkspaceEntryOpenRequest) {
+            errorMessage = error.message ?: "Could not open $normalized"
+            status = "Open failed"
+        }
+    }
+
+    private fun nextWorkspaceEntryOpenRequest(): Long {
+        latestWorkspaceEntryOpenRequest += 1
+        return latestWorkspaceEntryOpenRequest
+    }
+
+    private fun discardWorkspaceEntryOpenRequests() {
+        nextWorkspaceEntryOpenRequest()
+        pendingWorkspaceEntryOpens.clear()
+    }
+
     fun pin(relativePath: String) {
         documents.firstOrNull { it.relativePath == relativePath }?.pinned = true
         persistWorkbench()
     }
 
     fun openAgentDocument(persist: Boolean = true) {
+        nextWorkspaceEntryOpenRequest()
+        status = "Agent"
         documents.firstOrNull { it.kind == DocumentKind.AGENT }?.let { existing ->
             activePath = existing.relativePath
             agentPanelVisible = false
@@ -566,20 +742,23 @@ class WorkbenchState(
         agentPanelVisible = false
         agentFloating = false
         requestFocus(WorkbenchFocusTarget.DOCUMENT)
-        status = "Agent"
         if (persist) persistWorkbench()
     }
 
     fun selectTab(relativePath: String) {
+        nextWorkspaceEntryOpenRequest()
         activePath = relativePath
+        status = relativePath
         persistWorkbench()
     }
 
     fun selectNextDocument(reverse: Boolean = false) {
         if (documents.size < 2) return
+        nextWorkspaceEntryOpenRequest()
         val current = documents.indexOfFirst { it.relativePath == activePath }.coerceAtLeast(0)
         val next = if (reverse) (current - 1 + documents.size) % documents.size else (current + 1) % documents.size
         activePath = documents[next].relativePath
+        status = documents[next].relativePath
         persistWorkbench()
     }
 
@@ -715,7 +894,7 @@ class WorkbenchState(
             is WorkbenchCommand.SplitDocument -> splitDocument(command.relativePath, command.direction)
             is WorkbenchCommand.DetachDocument -> detachDocument(command.relativePath)
             WorkbenchCommand.ClearDocumentSplit -> updateDocumentSplit(DocumentSplit.NONE)
-            is WorkbenchCommand.OpenWorkspaceEntry -> openRelative(command.relativePath, command.pinned)
+            is WorkbenchCommand.OpenWorkspaceEntry -> openWorkspaceEntry(command.relativePath, command.pinned)
             is WorkbenchCommand.CreateWorkspaceEntry -> createEntry(command.parentPath, command.name, command.directory)
             is WorkbenchCommand.RenameWorkspaceEntry -> renameEntry(command.relativePath, command.newName)
             is WorkbenchCommand.BatchRenameWorkspaceEntries -> renameEntries(command.renames)
@@ -1314,6 +1493,19 @@ class WorkbenchState(
     }
 
     fun persistLayout() = persistWorkbench()
+
+    fun setDocumentWheelZoomMultiplier(
+        value: Float,
+        persist: Boolean = true,
+    ) {
+        documentWheelZoomMultiplier = normalizedDocumentWheelZoomMultiplier(value)
+        if (persist) persistDocumentPreferences()
+    }
+
+    fun persistDocumentPreferences() {
+        val preferences = AppPreferences(documentWheelZoomMultiplier)
+        scope.launch(Dispatchers.IO) { runCatching { workspaceService.saveAppPreferences(preferences) } }
+    }
 
     private suspend fun reloadWorkspaceNow() {
         val root = workspaceRoot ?: return

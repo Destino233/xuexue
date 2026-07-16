@@ -13,8 +13,11 @@ import dev.xuexue.core.AgentStreamEvent
 import dev.xuexue.core.DocumentSplitDirection
 import dev.xuexue.core.ToolWindow
 import dev.xuexue.core.WorkbenchFocusTarget
+import dev.xuexue.pi.agent.Agent
+import dev.xuexue.pi.agent.AgentState
 import dev.xuexue.platform.AgentMessage
 import dev.xuexue.platform.PersistedLayoutPreset
+import kotlinx.coroutines.flow.StateFlow
 
 interface WorkbenchLayoutModel {
     var activeTool: ToolWindow
@@ -269,6 +272,7 @@ class WorkbenchLayoutState : WorkbenchLayoutModel {
 }
 
 interface AgentRuntimeModel {
+    val piAgentState: StateFlow<AgentState>
     val agentSessions: SnapshotStateList<AgentSessionState>
     var activeAgentSessionId: String
     val activeAgentSession: AgentSessionState
@@ -292,6 +296,8 @@ interface AgentRuntimeModel {
 }
 
 class AgentRuntimeState : AgentRuntimeModel {
+    val piAgent = Agent()
+    override val piAgentState: StateFlow<AgentState> = piAgent.state
     override val agentSessions = mutableStateListOf(AgentSessionState("default", "默认会话"))
     override var activeAgentSessionId by mutableStateOf("default")
     override val activeAgentSession: AgentSessionState

@@ -39,22 +39,16 @@ import androidx.compose.material.icons.automirrored.filled.NavigateBefore
 import androidx.compose.material.icons.automirrored.filled.NavigateNext
 import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.automirrored.filled.ViewSidebar
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.Height
 import androidx.compose.material.icons.filled.Highlight
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.WidthFull
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -87,7 +81,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.xuexue.DocumentTab
-import dev.xuexue.PdfHighlightRegion
 import dev.xuexue.WorkbenchState
 import dev.xuexue.platform.PdfDocumentMetadata
 import dev.xuexue.platform.PdfLink
@@ -100,10 +93,12 @@ import dev.xuexue.platform.PdfSearchMatch
 import dev.xuexue.platform.PdfTextSelection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.receiveAsFlow
 import java.awt.Desktop
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
@@ -142,11 +137,12 @@ internal fun PdfDocument(
     val colorMode = runCatching { PdfColorMode.valueOf(tab.pdfColorMode) }.getOrDefault(PdfColorMode.NORMAL)
     val remoteDownload = state.remotePdfDownloadStates[tab.relativePath]
     var selectedPage by remember(tab.relativePath) { mutableStateOf<Int?>(null) }
-    var annotationDialog by remember(tab.relativePath) { mutableStateOf(false) }
-    var annotationText by remember(tab.relativePath) { mutableStateOf("") }
     var selectedTextPage by remember(tab.relativePath) { mutableStateOf<Int?>(null) }
     var textSelection by remember(tab.relativePath) { mutableStateOf<PdfTextSelection?>(null) }
     var selectionRequest by remember(tab.relativePath) { mutableStateOf<PdfSelectionRequest?>(null) }
+    var selectionCommitted by remember(tab.relativePath) { mutableStateOf(false) }
+    var selectionGestureId by remember(tab.relativePath) { mutableStateOf(0) }
+    val selectionRequests = remember(tab.relativePath) { Channel<PdfSelectionRequest>(Channel.CONFLATED) }
     var currentPageDimensions by remember(tab.relativePath, tab.pdfPage) { mutableStateOf(DEFAULT_PAGE_DIMENSIONS) }
     val listState =
         rememberLazyListState(
@@ -161,11 +157,73 @@ internal fun PdfDocument(
     var zoomPersistenceSerial by remember(tab.relativePath) { mutableStateOf(0) }
     var scrollPersistenceSerial by remember(tab.relativePath) { mutableStateOf(0) }
     val singlePageRenderDpi = rememberPdfRenderDpi("${tab.relativePath}:single", 110f * tab.pdfZoom)
-    val requestTextSelection: (Int, PdfPagePoint, PdfPagePoint) -> Unit = { page, start, end ->
+    val beginTextSelection: (Int) -> Unit = { page ->
+        selectionGestureId++
         selectedPage = page
         selectedTextPage = page
         textSelection = null
-        selectionRequest = PdfSelectionRequest(page, start, end)
+        selectionRequest = null
+        selectionCommitted = false
+    }
+    val requestTextSelection: (Int, PdfPagePoint, PdfPagePoint, Boolean) -> Unit = { page, start, end, isFinal ->
+        selectedPage = page
+        selectedTextPage = page
+        val request = PdfSelectionRequest(page, start, end, isFinal, selectionGestureId)
+        selectionRequest = request
+        selectionCommitted = false
+        selectionRequests.trySend(request)
+    }
+    val clearTextSelection: () -> Unit = {
+        selectionGestureId++
+        selectedPage = null
+        selectedTextPage = null
+        textSelection = null
+        selectionRequest = null
+        selectionCommitted = false
+    }
+    val textSelectionInteractionForPage: (Int) -> PdfTextSelectionInteraction = { page ->
+        PdfTextSelectionInteraction(
+            onStart = { beginTextSelection(page) },
+            onChange = { start, end, isFinal -> requestTextSelection(page, start, end, isFinal) },
+            onCancel = clearTextSelection,
+        )
+    }
+    val selectionActionsForPage: (Int) -> PdfSelectionActions? = { page ->
+        textSelection
+            ?.takeIf { selectedTextPage == page && selectionCommitted }
+            ?.let { selected ->
+                val reference = "[[${tab.relativePath}#page=${page + 1}]]"
+                val annotationRegions = selected.regions.toPdfHighlightRegions()
+                PdfSelectionActions(
+                    text = selected.text,
+                    regions = selected.regions,
+                    onCopy = {
+                        Toolkit
+                            .getDefaultToolkit()
+                            .systemClipboard
+                            .setContents(StringSelection(selected.text), null)
+                    },
+                    onCopyReference = {
+                        Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(reference), null)
+                    },
+                    onHighlight = {
+                        state.addPdfAnnotation(tab, page, "highlight", selected.text, annotationRegions)
+                        clearTextSelection()
+                    },
+                    onComment = { comment ->
+                        state.addPdfAnnotation(tab, page, "comment", comment, annotationRegions)
+                        clearTextSelection()
+                    },
+                    onQuote = { state.createPdfReferenceNote(tab, page, selected.text) },
+                    onAgent = {
+                        state.addAgentSnippetContext(
+                            "${tab.displayName} · 第 ${page + 1} 页",
+                            "Source: $reference\n\n${selected.text}",
+                        )
+                    },
+                    onDismiss = clearTextSelection,
+                )
+            }
     }
     val openPdfLink: (PdfLink) -> Unit = { link ->
         when {
@@ -228,17 +286,25 @@ internal fun PdfDocument(
             loading = false
         }
     }
-    LaunchedEffect(selectionRequest) {
-        val request = selectionRequest ?: return@LaunchedEffect
-        try {
-            val selected = state.selectPdfText(tab, request.page, request.start, request.end)
-            if (selectionRequest == request) {
-                textSelection = selected.takeIf { it.text.isNotBlank() && it.regions.isNotEmpty() }
+    LaunchedEffect(selectionRequests) {
+        selectionRequests.receiveAsFlow().collect { request ->
+            if (request.gestureId != selectionGestureId) return@collect
+            try {
+                val selected = state.selectPdfText(tab, request.page, request.start, request.end)
+                if (request.gestureId == selectionGestureId && selectedTextPage == request.page) {
+                    textSelection = selected.takeIf { it.text.isNotBlank() && it.regions.isNotEmpty() }
+                    if (selectionRequest == request) {
+                        selectionCommitted = request.isFinal && textSelection != null
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                if (selectionRequest == request) {
+                    textSelection = null
+                    selectionCommitted = false
+                }
             }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Throwable) {
-            if (selectionRequest == request) textSelection = null
         }
     }
     LaunchedEffect(tab.relativePath, tab.pdfPage, pageCount) {
@@ -593,126 +659,6 @@ internal fun PdfDocument(
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
-        selectedPage?.let { page ->
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .height(39.dp)
-                    .horizontalScroll(rememberScrollState())
-                    .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f))
-                    .padding(horizontal = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("第 ${page + 1} 页", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
-                textSelection
-                    ?.takeIf { selectedTextPage == page }
-                    ?.let { selected ->
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            selected.text.replace(Regex("\\s+"), " "),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 220.dp),
-                        )
-                    }
-                Spacer(Modifier.width(8.dp))
-                TextButton(onClick = {
-                    val reference = "[[${tab.relativePath}#page=${page + 1}]]"
-                    Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(reference), null)
-                }) {
-                    Icon(Icons.Default.ContentCopy, null, Modifier.size(15.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("复制引用")
-                }
-                textSelection
-                    ?.takeIf { selectedTextPage == page }
-                    ?.let { selected ->
-                        TextButton(
-                            onClick = {
-                                Toolkit
-                                    .getDefaultToolkit()
-                                    .systemClipboard
-                                    .setContents(StringSelection(selected.text), null)
-                            },
-                        ) {
-                            Icon(Icons.Default.ContentCopy, null, Modifier.size(15.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("复制")
-                        }
-                    }
-                TextButton(
-                    onClick = {
-                        val regions =
-                            textSelection
-                                ?.takeIf { selectedTextPage == page }
-                                ?.regions
-                                .orEmpty()
-                                .ifEmpty {
-                                    searchMatches
-                                        .asSequence()
-                                        .filter { match -> match.pageIndex == page }
-                                        .flatMap { match -> match.regions.asSequence() }
-                                        .toList()
-                                }.map { region ->
-                                    PdfHighlightRegion(region.left, region.top, region.right, region.bottom)
-                                }
-                        val label = textSelection?.takeIf { selectedTextPage == page }?.text ?: "Page highlight"
-                        state.addPdfAnnotation(tab, page, "highlight", label, regions)
-                    },
-                ) {
-                    Icon(Icons.Default.Highlight, null, Modifier.size(15.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("高亮")
-                }
-                TextButton(onClick = {
-                    annotationText = ""
-                    annotationDialog = true
-                }) {
-                    Icon(Icons.AutoMirrored.Filled.Comment, null, Modifier.size(15.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("批注")
-                }
-                TextButton(
-                    onClick = {
-                        state.createPdfReferenceNote(
-                            tab,
-                            page,
-                            textSelection?.takeIf { selectedTextPage == page }?.text.orEmpty(),
-                        )
-                    },
-                ) {
-                    Icon(Icons.Default.FormatQuote, null, Modifier.size(15.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("引用到笔记")
-                }
-                TextButton(onClick = {
-                    val selectedText = textSelection?.takeIf { selectedTextPage == page }?.text.orEmpty()
-                    state.addAgentSnippetContext(
-                        "${tab.displayName} · 第 ${page + 1} 页",
-                        buildString {
-                            append("Source: [[${tab.relativePath}#page=${page + 1}]]")
-                            if (selectedText.isNotBlank()) append("\n\n$selectedText")
-                        },
-                    )
-                }) {
-                    Icon(Icons.Default.SmartToy, null, Modifier.size(15.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("交给 Agent")
-                }
-                Spacer(Modifier.width(8.dp))
-                IconButton(
-                    onClick = {
-                        selectedPage = null
-                        selectedTextPage = null
-                        textSelection = null
-                        selectionRequest = null
-                    },
-                    modifier = Modifier.size(28.dp),
-                ) { Icon(Icons.Default.Close, "关闭上下文栏", Modifier.size(15.dp)) }
-            }
-        }
         Row(Modifier.fillMaxSize()) {
             if (sidePanel != PdfSidePanel.NONE) {
                 PdfSidePanelView(state, tab, pageCount, sidePanel, onPage = { page ->
@@ -727,7 +673,14 @@ internal fun PdfDocument(
                     .fillMaxHeight()
                     .background(Color(0xFFE4E7E5))
                     .pdfCtrlWheelZoom { scrollDelta, position ->
-                        applyInteractiveZoom(pdfZoomForScroll(tab.pdfZoom, scrollDelta), position)
+                        applyInteractiveZoom(
+                            pdfZoomForScroll(
+                                currentZoom = tab.pdfZoom,
+                                verticalScroll = scrollDelta,
+                                wheelZoomMultiplier = state.documentWheelZoomMultiplier,
+                            ),
+                            position,
+                        )
                     }.then(
                         if (compact) {
                             Modifier.pointerInput(tab.relativePath, viewMode) {
@@ -788,7 +741,8 @@ internal fun PdfDocument(
                                             ?.takeIf { selectedTextPage == page }
                                             ?.regions
                                             .orEmpty(),
-                                    onTextSelection = { start, end -> requestTextSelection(page, start, end) },
+                                    selectionActions = selectionActionsForPage(page),
+                                    textSelectionInteraction = textSelectionInteractionForPage(page),
                                     onLink = openPdfLink,
                                     modifier = Modifier.fillMaxWidth(),
                                 ) { selectedPage = page }
@@ -832,7 +786,8 @@ internal fun PdfDocument(
                                         ?.takeIf { selectedTextPage == firstPage }
                                         ?.regions
                                         .orEmpty(),
-                                onTextSelection = { start, end -> requestTextSelection(firstPage, start, end) },
+                                selectionActions = selectionActionsForPage(firstPage),
+                                textSelectionInteraction = textSelectionInteractionForPage(firstPage),
                                 onLink = openPdfLink,
                                 modifier =
                                     if (fitWidth) {
@@ -861,7 +816,8 @@ internal fun PdfDocument(
                                             ?.takeIf { selectedTextPage == firstPage + 1 }
                                             ?.regions
                                             .orEmpty(),
-                                    onTextSelection = { start, end -> requestTextSelection(firstPage + 1, start, end) },
+                                    selectionActions = selectionActionsForPage(firstPage + 1),
+                                    textSelectionInteraction = textSelectionInteractionForPage(firstPage + 1),
                                     onLink = openPdfLink,
                                     modifier =
                                         if (fitWidth) {
@@ -915,9 +871,8 @@ internal fun PdfDocument(
                                                     ?.takeIf { selectedTextPage == tab.pdfPage }
                                                     ?.regions
                                                     .orEmpty(),
-                                            onTextSelection = { start, end ->
-                                                requestTextSelection(tab.pdfPage, start, end)
-                                            },
+                                            selectionActions = selectionActionsForPage(tab.pdfPage),
+                                            textSelectionInteraction = textSelectionInteractionForPage(tab.pdfPage),
                                             onLink = openPdfLink,
                                         ),
                                 )
@@ -958,9 +913,8 @@ internal fun PdfDocument(
                                                     ?.takeIf { selectedTextPage == tab.pdfPage }
                                                     ?.regions
                                                     .orEmpty(),
-                                            onTextSelection = { start, end ->
-                                                requestTextSelection(tab.pdfPage, start, end)
-                                            },
+                                            selectionActions = selectionActionsForPage(tab.pdfPage),
+                                            textSelectionInteraction = textSelectionInteractionForPage(tab.pdfPage),
                                             onLink = openPdfLink,
                                         ),
                                 )
@@ -970,22 +924,6 @@ internal fun PdfDocument(
                 }
             }
         }
-    }
-    if (annotationDialog) {
-        AlertDialog(
-            onDismissRequest = { annotationDialog = false },
-            title = { Text("添加 PDF 批注") },
-            text = { OutlinedTextField(annotationText, { annotationText = it }, label = { Text("批注内容") }, minLines = 3, maxLines = 6, modifier = Modifier.fillMaxWidth()) },
-            confirmButton = {
-                Button(onClick = {
-                    selectedPage?.let { state.addPdfAnnotation(tab, it, "comment", annotationText) }
-                    tab.pdfSidePanel = PdfSidePanel.ANNOTATIONS.name
-                    state.persistLayout()
-                    annotationDialog = false
-                }) { Text("添加") }
-            },
-            dismissButton = { TextButton(onClick = { annotationDialog = false }) { Text("取消") } },
-        )
     }
 }
 
@@ -1132,7 +1070,8 @@ private fun PdfPageItem(
     searchMatch: Boolean,
     searchRegions: List<PdfNormalizedRect> = emptyList(),
     selectionRegions: List<PdfNormalizedRect> = emptyList(),
-    onTextSelection: (PdfPagePoint, PdfPagePoint) -> Unit,
+    selectionActions: PdfSelectionActions? = null,
+    textSelectionInteraction: PdfTextSelectionInteraction,
     onLink: (PdfLink) -> Unit,
     modifier: Modifier = Modifier.fillMaxWidth(),
     onSelect: () -> Unit,
@@ -1187,7 +1126,8 @@ private fun PdfPageItem(
                     PdfPageInteraction(
                         searchRegions = searchRegions,
                         selectionRegions = selectionRegions,
-                        onTextSelection = onTextSelection,
+                        selectionActions = selectionActions,
+                        textSelectionInteraction = textSelectionInteraction,
                         onLink = onLink,
                     ),
             )
@@ -1211,6 +1151,8 @@ private data class PdfSelectionRequest(
     val page: Int,
     val start: PdfPagePoint,
     val end: PdfPagePoint,
+    val isFinal: Boolean,
+    val gestureId: Int,
 )
 
 private val DEFAULT_PAGE_DIMENSIONS = PdfPageDimensions(widthPoints = 595f, heightPoints = 842f)
