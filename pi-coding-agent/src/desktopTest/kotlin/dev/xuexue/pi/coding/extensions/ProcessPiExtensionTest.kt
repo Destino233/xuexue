@@ -403,6 +403,7 @@ class ProcessPiExtensionTest {
                     *initialize*)
                       echo '{"type":"subscribe","event":"CONTEXT"}'
                       echo '{"type":"subscribe","event":"TOOL_RESULT"}'
+                      echo '{"type":"subscribe","event":"RESOURCES_DISCOVER"}'
                       echo '{"type":"ready"}'
                       ;;
                     *'"event":"context"'*)
@@ -417,6 +418,9 @@ class ProcessPiExtensionTest {
                       ;;
                     *'"event":"tool_result"'*)
                       echo '{"type":"event_result","result":"tool_result","content":[{"type":"image","data":"BBBB","mimeType":"image/png"}],"details":{"source":"process"},"isError":true}'
+                      ;;
+                    *'"event":"resources_discover"'*)
+                      echo '{"type":"event_result","result":"resources","skillPaths":["process-skills"],"promptPaths":["process-prompts"]}'
                       ;;
                     *shutdown*)
                       exit 0
@@ -464,6 +468,9 @@ class ProcessPiExtensionTest {
                         ?.contentOrNull,
                 )
                 assertTrue(toolResult.isError)
+                val resources = runner.emitResourcesDiscover(ResourceDiscoverReason.STARTUP)
+                assertEquals("process-skills", resources.skillPaths.single().path)
+                assertEquals("process-prompts", resources.promptPaths.single().path)
                 runner.dispose()
             } finally {
                 directory.deleteRecursively()
