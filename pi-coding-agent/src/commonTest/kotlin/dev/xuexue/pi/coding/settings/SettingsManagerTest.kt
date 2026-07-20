@@ -18,11 +18,19 @@ class SettingsManagerTest {
             manager(
                 global =
                     """
-                    {"compaction":{"reserveTokens":4096,"keepRecentTokens":8000},"retry":{"maxRetries":6}}
+                    {
+                      "compaction":{"reserveTokens":4096,"keepRecentTokens":8000},
+                      "branchSummary":{"reserveTokens":12000},
+                      "retry":{"maxRetries":6}
+                    }
                     """.trimIndent(),
                 project =
                     """
-                    {"compaction":{"enabled":false},"retry":{"baseDelayMs":3000}}
+                    {
+                      "compaction":{"enabled":false},
+                      "branchSummary":{"skipPrompt":true},
+                      "retry":{"baseDelayMs":3000}
+                    }
                     """.trimIndent(),
             )
 
@@ -31,6 +39,16 @@ class SettingsManagerTest {
         assertEquals(8_000, manager.getCompactionSettings().keepRecentTokens)
         assertEquals(6, manager.getRetrySettings().maxRetries)
         assertEquals(3_000, manager.getRetrySettings().baseDelayMs)
+        assertEquals(12_000, manager.getBranchSummarySettings().reserveTokens)
+        assertTrue(manager.getBranchSummarySettings().skipPrompt)
+    }
+
+    @Test
+    fun branchSummarySettingsMatchPiDefaults() {
+        val settings = manager(global = "{}").getBranchSummarySettings()
+
+        assertEquals(16_384, settings.reserveTokens)
+        assertFalse(settings.skipPrompt)
     }
 
     @Test

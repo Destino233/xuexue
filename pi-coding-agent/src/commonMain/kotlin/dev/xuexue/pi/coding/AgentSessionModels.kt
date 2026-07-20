@@ -12,6 +12,7 @@ import dev.xuexue.pi.coding.extensions.PiExtensionRunner
 import dev.xuexue.pi.coding.packages.PiPackageManager
 import dev.xuexue.pi.coding.resources.DefaultResourceLoader
 import dev.xuexue.pi.coding.resources.SystemPromptDocumentation
+import dev.xuexue.pi.coding.session.BranchSummaryEntry
 import dev.xuexue.pi.coding.session.SessionManager
 import kotlinx.serialization.json.JsonElement
 import kotlin.time.Clock
@@ -80,6 +81,11 @@ data class RetrySettings(
     val baseDelayMs: Long = 2_000,
 )
 
+data class BranchSummarySettings(
+    val reserveTokens: Long = 16_384,
+    val skipPrompt: Boolean = false,
+)
+
 interface AgentSessionSettings {
     fun getRetrySettings(): RetrySettings
 
@@ -88,14 +94,18 @@ interface AgentSessionSettings {
     fun getCompactionSettings(): CompactionSettings
 
     fun setCompactionEnabled(enabled: Boolean)
+
+    fun getBranchSummarySettings(): BranchSummarySettings = BranchSummarySettings()
 }
 
 class InMemoryAgentSessionSettings(
     retrySettings: RetrySettings = RetrySettings(),
     compactionSettings: CompactionSettings = CompactionSettings(),
+    branchSummarySettings: BranchSummarySettings = BranchSummarySettings(),
 ) : AgentSessionSettings {
     private var retrySettings = retrySettings
     private var compactionSettings = compactionSettings
+    private val branchSummarySettings = branchSummarySettings
 
     override fun getRetrySettings(): RetrySettings = retrySettings
 
@@ -108,6 +118,8 @@ class InMemoryAgentSessionSettings(
     override fun setCompactionEnabled(enabled: Boolean) {
         compactionSettings = compactionSettings.copy(enabled = enabled)
     }
+
+    override fun getBranchSummarySettings(): BranchSummarySettings = branchSummarySettings
 }
 
 enum class StreamingBehavior {
@@ -202,6 +214,20 @@ data class SessionStats(
 data class ForkableUserMessage(
     val entryId: String,
     val text: String,
+)
+
+data class NavigateTreeOptions(
+    val summarize: Boolean = false,
+    val customInstructions: String? = null,
+    val replaceInstructions: Boolean? = null,
+    val label: String? = null,
+)
+
+data class NavigateTreeResult(
+    val editorText: String? = null,
+    val cancelled: Boolean,
+    val aborted: Boolean? = null,
+    val summaryEntry: BranchSummaryEntry? = null,
 )
 
 data class ParsedSkillBlock(

@@ -3,6 +3,7 @@
 package dev.xuexue.pi.coding.settings
 
 import dev.xuexue.pi.coding.AgentSessionSettings
+import dev.xuexue.pi.coding.BranchSummarySettings
 import dev.xuexue.pi.coding.RetrySettings
 import dev.xuexue.pi.coding.compaction.CompactionSettings
 import kotlinx.serialization.json.Json
@@ -377,6 +378,16 @@ class SettingsManager private constructor(
             keepRecentTokens = compaction.long("keepRecentTokens") ?: 20_000,
         )
     }
+
+    override fun getBranchSummarySettings(): BranchSummarySettings {
+        val branchSummary = effectiveSettings["branchSummary"] as? JsonObject
+        return BranchSummarySettings(
+            reserveTokens = branchSummary.long("reserveTokens") ?: 16_384,
+            skipPrompt = branchSummary.boolean("skipPrompt") ?: false,
+        )
+    }
+
+    fun getBranchSummarySkipPrompt(): Boolean = getBranchSummarySettings().skipPrompt
 
     override fun setCompactionEnabled(enabled: Boolean) {
         setGlobalNestedSetting("compaction", "enabled", JsonPrimitive(enabled))

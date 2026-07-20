@@ -2,6 +2,7 @@ package dev.xuexue.pi.coding.extensions
 
 import dev.xuexue.pi.agent.AgentTool
 import dev.xuexue.pi.agent.AgentToolResult
+import dev.xuexue.pi.ai.AbortSignal
 import dev.xuexue.pi.ai.AgentMessage
 import dev.xuexue.pi.ai.PiImageProvider
 import dev.xuexue.pi.ai.PiProvider
@@ -13,6 +14,8 @@ import dev.xuexue.pi.coding.exec.PiCommandExecutor
 import dev.xuexue.pi.coding.resources.ResourceExtensionPaths
 import dev.xuexue.pi.coding.resources.ResourceSourceInfo
 import dev.xuexue.pi.coding.resources.syntheticResourceSourceInfo
+import dev.xuexue.pi.coding.session.BranchSummaryEntry
+import dev.xuexue.pi.coding.session.SessionEntry
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
@@ -30,6 +33,8 @@ enum class PiExtensionEventType {
     SESSION_SHUTDOWN,
     SESSION_BEFORE_SWITCH,
     SESSION_BEFORE_FORK,
+    SESSION_BEFORE_TREE,
+    SESSION_TREE,
     CONTEXT,
     BEFORE_AGENT_START,
     AGENT_START,
@@ -90,6 +95,22 @@ sealed interface PiExtensionEvent {
         val position: String,
     ) : PiExtensionEvent {
         override val type = PiExtensionEventType.SESSION_BEFORE_FORK
+    }
+
+    data class SessionBeforeTree(
+        val preparation: TreePreparation,
+        val signal: AbortSignal,
+    ) : PiExtensionEvent {
+        override val type = PiExtensionEventType.SESSION_BEFORE_TREE
+    }
+
+    data class SessionTree(
+        val newLeafId: String?,
+        val oldLeafId: String?,
+        val summaryEntry: BranchSummaryEntry? = null,
+        val fromExtension: Boolean? = null,
+    ) : PiExtensionEvent {
+        override val type = PiExtensionEventType.SESSION_TREE
     }
 
     data class Context(
@@ -227,6 +248,14 @@ sealed interface PiExtensionEventResult {
         val cancel: Boolean = false,
     ) : PiExtensionEventResult
 
+    data class SessionBeforeTree(
+        val cancel: Boolean = false,
+        val summary: ExtensionBranchSummary? = null,
+        val customInstructions: String? = null,
+        val replaceInstructions: Boolean? = null,
+        val label: String? = null,
+    ) : PiExtensionEventResult
+
     data class Resources(
         val paths: ResourceExtensionPaths,
     ) : PiExtensionEventResult
@@ -251,6 +280,22 @@ sealed interface PiExtensionEventResult {
         val isError: Boolean? = null,
     ) : PiExtensionEventResult
 }
+
+data class TreePreparation(
+    val targetId: String,
+    val oldLeafId: String?,
+    val commonAncestorId: String?,
+    val entriesToSummarize: List<SessionEntry>,
+    val userWantsSummary: Boolean,
+    val customInstructions: String? = null,
+    val replaceInstructions: Boolean? = null,
+    val label: String? = null,
+)
+
+data class ExtensionBranchSummary(
+    val summary: String,
+    val details: JsonElement? = null,
+)
 
 enum class ProjectTrustDecision {
     YES,

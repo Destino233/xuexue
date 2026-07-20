@@ -290,6 +290,27 @@ class PiExtensionRunner(
             context,
         ).any { result -> result is PiExtensionEventResult.SessionBeforeFork && result.cancel }
 
+    suspend fun emitBeforeTree(
+        event: PiExtensionEvent.SessionBeforeTree,
+        context: PiExtensionContext = defaultContext(),
+    ): PiExtensionEventResult.SessionBeforeTree? {
+        var result: PiExtensionEventResult.SessionBeforeTree? = null
+        extensions.forEach { loaded ->
+            loaded.handlers[PiExtensionEventType.SESSION_BEFORE_TREE].orEmpty().forEach { handler ->
+                try {
+                    val value = handler.handle(event, context)
+                    if (value is PiExtensionEventResult.SessionBeforeTree) {
+                        result = value
+                        if (value.cancel) return value
+                    }
+                } catch (error: Throwable) {
+                    recordError(loaded, PiExtensionEventType.SESSION_BEFORE_TREE, error)
+                }
+            }
+        }
+        return result
+    }
+
     suspend fun emitToolCall(
         event: PiExtensionEvent.ToolCall,
         context: PiExtensionContext = defaultContext(),

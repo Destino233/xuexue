@@ -194,6 +194,14 @@ class AgentSessionRuntime(
         return SessionForkResult(cancelled = false, selectedText = selectedText)
     }
 
+    suspend fun navigateTree(
+        targetId: String,
+        options: NavigateTreeOptions = NavigateTreeOptions(),
+    ): NavigateTreeResult {
+        checkStarted()
+        return session.navigateTree(targetId, options)
+    }
+
     suspend fun dispose() {
         if (disposed) return
         disposed = true

@@ -38,8 +38,11 @@ import dev.xuexue.pi.coding.compaction.CompactionDetails
 import dev.xuexue.pi.coding.compaction.CompactionPreparation
 import dev.xuexue.pi.coding.compaction.CompactionRequest
 import dev.xuexue.pi.coding.compaction.CompactionResult
+import dev.xuexue.pi.coding.compaction.GenerateBranchSummaryOptions
+import dev.xuexue.pi.coding.compaction.collectEntriesForBranchSummary
 import dev.xuexue.pi.coding.compaction.estimateContextTokens
 import dev.xuexue.pi.coding.compaction.estimateTokens
+import dev.xuexue.pi.coding.compaction.generateBranchSummary
 import dev.xuexue.pi.coding.compaction.prepareCompaction
 import dev.xuexue.pi.coding.compaction.shouldCompact
 import dev.xuexue.pi.coding.extensions.PiExtensionContext
@@ -52,6 +55,7 @@ import dev.xuexue.pi.coding.extensions.ProjectTrustDecision
 import dev.xuexue.pi.coding.extensions.ResourceDiscoverReason
 import dev.xuexue.pi.coding.extensions.SessionShutdownReason
 import dev.xuexue.pi.coding.extensions.SessionStartReason
+import dev.xuexue.pi.coding.extensions.TreePreparation
 import dev.xuexue.pi.coding.packages.PiPackageManager
 import dev.xuexue.pi.coding.resources.ResourceDiagnostic
 import dev.xuexue.pi.coding.resources.SystemPromptOptions
@@ -59,6 +63,7 @@ import dev.xuexue.pi.coding.resources.buildSystemPrompt
 import dev.xuexue.pi.coding.resources.expandPromptTemplate
 import dev.xuexue.pi.coding.resources.stripFrontmatter
 import dev.xuexue.pi.coding.session.BashExecutionMessage
+import dev.xuexue.pi.coding.session.BranchSummaryEntry
 import dev.xuexue.pi.coding.session.CompactionEntry
 import dev.xuexue.pi.coding.session.CustomMessage
 import dev.xuexue.pi.coding.session.SessionEntry
@@ -100,6 +105,25 @@ private data class ExtensionStartResult(
     val systemPrompt: String?,
 )
 
+private data class SummaryRequestAuth(
+    val apiKey: String,
+    val headers: Map<String, String>? = null,
+    val environment: Map<String, String>? = null,
+)
+
+private sealed interface TreeSummaryResolution {
+    data object Cancelled : TreeSummaryResolution
+
+    data object Aborted : TreeSummaryResolution
+
+    data class Ready(
+        val summaryText: String?,
+        val summaryDetails: kotlinx.serialization.json.JsonElement?,
+        val fromExtension: Boolean,
+        val label: String?,
+    ) : TreeSummaryResolution
+}
+
 /** Headless Pi coding-agent session facade. */
 @Suppress("TooManyFunctions", "LargeClass")
 class AgentSession(
@@ -131,6 +155,7 @@ class AgentSession(
     private val retryAbortController = AtomicReference<AbortController?>(null)
     private val compactionAbortController = AtomicReference<AbortController?>(null)
     private val autoCompactionAbortController = AtomicReference<AbortController?>(null)
+    private val branchSummaryAbortController = AtomicReference<AbortController?>(null)
     private val overflowRecoveryAttempted = AtomicBoolean(false)
     private val retryAttemptState = AtomicInt(0)
     private val activeRun = AtomicReference<ActiveSessionRun?>(null)
@@ -206,7 +231,10 @@ class AgentSession(
         get() = settingsManager.getRetrySettings().enabled
 
     val isCompacting: Boolean
-        get() = compactionAbortController.load() != null || autoCompactionAbortController.load() != null
+        get() =
+            compactionAbortController.load() != null ||
+                autoCompactionAbortController.load() != null ||
+                branchSummaryAbortController.load() != null
 
     val autoCompactionEnabled: Boolean
         get() = settingsManager.getCompactionSettings().enabled
@@ -415,6 +443,10 @@ class AgentSession(
         autoCompactionAbortController.load()?.abort()
     }
 
+    fun abortBranchSummary() {
+        branchSummaryAbortController.load()?.abort()
+    }
+
     fun setAutoCompactionEnabled(enabled: Boolean) {
         settingsManager.setCompactionEnabled(enabled)
         refreshState()
@@ -450,6 +482,7 @@ class AgentSession(
         targetSessionFile: String? = null,
     ) {
         if (!disposed.compareAndSet(false, true)) return
+        abortBranchSummary()
         extensionRunner?.dispose(reason, targetSessionFile)
         runCatching { agent.abort() }
         disconnectFromAgent()
@@ -676,6 +709,237 @@ class AgentSession(
         emitEvent(AgentSessionEvent.SessionInfoChanged(sessionName))
     }
 
+    suspend fun navigateTree(
+        targetId: String,
+        options: NavigateTreeOptions = NavigateTreeOptions(),
+    ): NavigateTreeResult =
+        when {
+            targetId == sessionManager.getLeafId() -> NavigateTreeResult(cancelled = false)
+            options.summarize && model == UNKNOWN_AGENT_MODEL -> error("No model available for summarization")
+            else -> navigateTreeFromCurrentLeaf(targetId, options)
+        }
+
+    private suspend fun navigateTreeFromCurrentLeaf(
+        targetId: String,
+        options: NavigateTreeOptions,
+    ): NavigateTreeResult {
+        val oldLeafId = sessionManager.getLeafId()
+        val targetEntry = sessionManager.getEntry(targetId) ?: error("Entry $targetId not found")
+        val collection = collectEntriesForBranchSummary(sessionManager, oldLeafId, targetId)
+        val controller = AbortController()
+        branchSummaryAbortController.store(controller)
+        refreshState()
+        try {
+            return when (val summary = resolveTreeSummary(targetId, oldLeafId, collection, options, controller)) {
+                TreeSummaryResolution.Cancelled -> {
+                    NavigateTreeResult(cancelled = true)
+                }
+
+                TreeSummaryResolution.Aborted -> {
+                    NavigateTreeResult(cancelled = true, aborted = true)
+                }
+
+                is TreeSummaryResolution.Ready -> {
+                    completeTreeNavigation(
+                        targetEntry,
+                        targetId,
+                        oldLeafId,
+                        summary,
+                    )
+                }
+            }
+        } finally {
+            branchSummaryAbortController.compareAndSet(controller, null)
+            refreshState()
+        }
+    }
+
+    private suspend fun resolveTreeSummary(
+        targetId: String,
+        oldLeafId: String?,
+        collection: dev.xuexue.pi.coding.compaction.CollectEntriesResult,
+        options: NavigateTreeOptions,
+        controller: AbortController,
+    ): TreeSummaryResolution {
+        val preparation =
+            TreePreparation(
+                targetId = targetId,
+                oldLeafId = oldLeafId,
+                commonAncestorId = collection.commonAncestorId,
+                entriesToSummarize = collection.entries,
+                userWantsSummary = options.summarize,
+                customInstructions = options.customInstructions,
+                replaceInstructions = options.replaceInstructions,
+                label = options.label,
+            )
+        val extensionResult =
+            extensionRunner?.emitBeforeTree(
+                PiExtensionEvent.SessionBeforeTree(preparation, controller.signal),
+                extensionContext(),
+            )
+        val extensionSummary = extensionResult?.summary.takeIf { options.summarize }
+        val generated =
+            if (extensionResult?.cancel == true) {
+                null
+            } else {
+                generateDefaultTreeSummary(
+                    collection.entries,
+                    options,
+                    extensionSummary,
+                    extensionResult?.customInstructions ?: options.customInstructions,
+                    extensionResult?.replaceInstructions ?: options.replaceInstructions,
+                    controller,
+                )
+            }
+        return when {
+            extensionResult?.cancel == true -> {
+                TreeSummaryResolution.Cancelled
+            }
+
+            generated?.aborted == true || controller.signal.isAborted -> {
+                TreeSummaryResolution.Aborted
+            }
+
+            generated?.error != null -> {
+                error(generated.error)
+            }
+
+            else -> {
+                TreeSummaryResolution.Ready(
+                    summaryText = generated?.summary ?: extensionSummary?.summary,
+                    summaryDetails = generated?.detailsJson() ?: extensionSummary?.details,
+                    fromExtension = extensionSummary != null,
+                    label = extensionResult?.label ?: options.label,
+                )
+            }
+        }
+    }
+
+    private suspend fun generateDefaultTreeSummary(
+        entries: List<SessionEntry>,
+        options: NavigateTreeOptions,
+        extensionSummary: dev.xuexue.pi.coding.extensions.ExtensionBranchSummary?,
+        customInstructions: String?,
+        replaceInstructions: Boolean?,
+        controller: AbortController,
+    ) = if (!options.summarize || entries.isEmpty() || extensionSummary != null) {
+        null
+    } else {
+        val auth = requiredSummaryRequestAuth()
+        generateBranchSummary(
+            entries,
+            GenerateBranchSummaryOptions(
+                model = model,
+                apiKey = auth.apiKey,
+                headers = auth.headers,
+                environment = auth.environment,
+                signal = controller.signal,
+                customInstructions = customInstructions,
+                replaceInstructions = replaceInstructions,
+                reserveTokens = settingsManager.getBranchSummarySettings().reserveTokens,
+                streamFunction = agent.streamFunction,
+            ),
+        )
+    }
+
+    private suspend fun completeTreeNavigation(
+        targetEntry: SessionEntry,
+        targetId: String,
+        oldLeafId: String?,
+        summary: TreeSummaryResolution.Ready,
+    ): NavigateTreeResult {
+        val (newLeafId, editorText) = navigationTarget(targetEntry)
+        val summaryEntry =
+            attachTreeNavigation(
+                newLeafId,
+                targetId,
+                summary.summaryText,
+                summary.summaryDetails,
+                summary.fromExtension,
+                summary.label,
+            )
+        agent.replaceMessages(sessionManager.buildSessionContext().messages)
+        refreshState()
+        extensionRunner?.emit(
+            PiExtensionEvent.SessionTree(
+                newLeafId = sessionManager.getLeafId(),
+                oldLeafId = oldLeafId,
+                summaryEntry = summaryEntry,
+                fromExtension = summary.fromExtension.takeIf { summary.summaryText != null },
+            ),
+            extensionContext(),
+        )
+        return NavigateTreeResult(
+            editorText = editorText,
+            cancelled = false,
+            summaryEntry = summaryEntry,
+        )
+    }
+
+    private fun navigationTarget(targetEntry: SessionEntry): Pair<String?, String?> =
+        when {
+            targetEntry is SessionMessageEntry && targetEntry.message is UserMessage -> {
+                targetEntry.parentId to userMessageText(targetEntry.message)
+            }
+
+            targetEntry is dev.xuexue.pi.coding.session.CustomMessageEntry -> {
+                targetEntry.parentId to userContentText(targetEntry.content)
+            }
+
+            else -> {
+                targetEntry.id to null
+            }
+        }
+
+    private fun attachTreeNavigation(
+        newLeafId: String?,
+        targetId: String,
+        summaryText: String?,
+        summaryDetails: kotlinx.serialization.json.JsonElement?,
+        fromExtension: Boolean,
+        label: String?,
+    ): BranchSummaryEntry? {
+        val summaryEntry =
+            if (summaryText != null) {
+                val summaryId =
+                    sessionManager.branchWithSummary(
+                        newLeafId,
+                        summaryText,
+                        summaryDetails,
+                        fromExtension,
+                    )
+                sessionManager.getEntry(summaryId) as BranchSummaryEntry
+            } else {
+                if (newLeafId == null) sessionManager.resetLeaf() else sessionManager.branch(newLeafId)
+                null
+            }
+        if (label != null) {
+            sessionManager.appendLabelChange(summaryEntry?.id ?: targetId, label)
+        }
+        return summaryEntry
+    }
+
+    private suspend fun requiredSummaryRequestAuth(): SummaryRequestAuth {
+        configuredModelRegistry?.let { registry ->
+            val result = registry.getApiKeyAndHeaders(model)
+            if (!result.ok) error(result.error ?: "Authentication failed for ${model.provider}")
+            val apiKey =
+                result.apiKey?.takeIf(String::isNotBlank)
+                    ?: error("No API key found for ${model.provider}")
+            return SummaryRequestAuth(apiKey, result.headers, result.environment)
+        }
+        val apiKey =
+            agent.getApiKey?.invoke(model.provider)?.takeIf(String::isNotBlank)
+                ?: error("No API key found for ${model.provider}")
+        return SummaryRequestAuth(apiKey)
+    }
+
+    private fun dev.xuexue.pi.coding.compaction.BranchSummaryResult.detailsJson(): JsonObject =
+        buildJsonObject {
+            put("readFiles", JsonArray(readFiles.orEmpty().map(::JsonPrimitive)))
+            put("modifiedFiles", JsonArray(modifiedFiles.orEmpty().map(::JsonPrimitive)))
+        }
+
     fun appendCustomEntry(
         customType: String,
         data: kotlinx.serialization.json.JsonElement? = null,
@@ -808,6 +1072,7 @@ class AgentSession(
         if (!disposed.compareAndSet(false, true)) return
         abortRetry()
         abortCompaction()
+        abortBranchSummary()
         abortBash()
         runCatching { agent.abort() }
         disconnectFromAgent()
@@ -1643,6 +1908,12 @@ private fun userMessage(
 
 private fun userMessageText(message: UserMessage): String =
     when (val content = message.content) {
+        is UserText -> content.value
+        is UserBlocks -> content.value.filterIsInstance<TextContent>().joinToString("", transform = TextContent::text)
+    }
+
+private fun userContentText(content: dev.xuexue.pi.ai.UserContent): String =
+    when (content) {
         is UserText -> content.value
         is UserBlocks -> content.value.filterIsInstance<TextContent>().joinToString("", transform = TextContent::text)
     }

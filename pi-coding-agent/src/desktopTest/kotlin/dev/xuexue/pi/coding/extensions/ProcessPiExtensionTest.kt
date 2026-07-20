@@ -20,6 +20,7 @@ import dev.xuexue.pi.ai.UserText
 import dev.xuexue.pi.coding.InteractionRequest
 import dev.xuexue.pi.coding.InteractionRequestBroker
 import dev.xuexue.pi.coding.InteractionResponse
+import dev.xuexue.pi.coding.session.SessionManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -39,6 +40,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
+@Suppress("TooManyFunctions") // The JSONL process bridge scenarios share one lifecycle fixture class.
 class ProcessPiExtensionTest {
     @Test
     fun processPluginRegistersImageProviderAndReturnsGeneratedImagesOverJsonl() =
@@ -399,6 +401,77 @@ class ProcessPiExtensionTest {
 
                 assertEquals(ProjectTrustDecision.YES, result?.trusted)
                 assertEquals(true, result?.remember)
+                runner.dispose()
+            } finally {
+                directory.deleteRecursively()
+            }
+        }
+
+    @Test
+    fun processPluginCanCustomizeAndObserveTreeNavigation() =
+        runTest {
+            val directory = Files.createTempDirectory("xuexue-process-plugin-tree").toFile()
+            val script = directory.resolve("plugin.sh")
+            script.writeText(
+                """
+                #!/bin/sh
+                while IFS= read -r line; do
+                  case "${'$'}line" in
+                    *initialize*)
+                      echo '{"type":"subscribe","event":"SESSION_BEFORE_TREE"}'
+                      echo '{"type":"subscribe","event":"SESSION_TREE"}'
+                      echo '{"type":"ready"}'
+                      ;;
+                    *'"event":"session_before_tree"'*'"entriesToSummarize"'*)
+                      echo '{"type":"event_result","result":"session_before_tree","summary":"process summary","details":{"source":"process"},"label":"process label"}'
+                      ;;
+                    *'"event":"session_tree"'*)
+                      echo '{"type":"event_result","result":"none"}'
+                      ;;
+                    *shutdown*)
+                      exit 0
+                      ;;
+                  esac
+                done
+                """.trimIndent(),
+            )
+            check(script.setExecutable(true))
+            try {
+                val manager = SessionManager.inMemory(directory.path)
+                val target = manager.appendMessage(UserMessage(UserText("first"), 1))
+                val leaf = manager.appendMessage(UserMessage(UserText("second"), 2))
+                val entries = listOf(requireNotNull(manager.getEntry(leaf)))
+                val runner = PiExtensionRunner(directory.path)
+                runner.load(ProcessPiExtension("process", listOf(script.path), directory.path))
+
+                val result =
+                    runner.emitBeforeTree(
+                        PiExtensionEvent.SessionBeforeTree(
+                            preparation =
+                                TreePreparation(
+                                    targetId = target,
+                                    oldLeafId = leaf,
+                                    commonAncestorId = target,
+                                    entriesToSummarize = entries,
+                                    userWantsSummary = true,
+                                ),
+                            signal = AbortController().signal,
+                        ),
+                    )
+
+                assertEquals("process summary", result?.summary?.summary)
+                assertEquals(
+                    "process",
+                    result
+                        ?.summary
+                        ?.details
+                        ?.jsonObject
+                        ?.get("source")
+                        ?.jsonPrimitive
+                        ?.content,
+                )
+                assertEquals("process label", result?.label)
+                runner.emit(PiExtensionEvent.SessionTree(target, leaf))
                 runner.dispose()
             } finally {
                 directory.deleteRecursively()

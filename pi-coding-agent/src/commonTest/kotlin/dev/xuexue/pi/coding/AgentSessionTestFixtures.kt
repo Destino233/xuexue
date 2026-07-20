@@ -41,6 +41,7 @@ internal class AgentSessionHarness(
     resourceLoader: DefaultResourceLoader? = null,
     extensionRunner: PiExtensionRunner? = null,
     modelRegistry: ModelRegistry? = null,
+    apiKey: String? = null,
     scopedModels: List<ScopedModel> = emptyList(),
     bashExecutor: AgentSessionBashExecutor? = null,
     systemPromptDocumentation: SystemPromptDocumentation =
@@ -58,6 +59,7 @@ internal class AgentSessionHarness(
                         tools = tools,
                     ),
                 convertToLlm = { messages -> convertToLlm(messages) },
+                getApiKey = { apiKey },
                 streamFunction =
                     streamFunction
                         ?: StreamFunction { _, context, _ ->

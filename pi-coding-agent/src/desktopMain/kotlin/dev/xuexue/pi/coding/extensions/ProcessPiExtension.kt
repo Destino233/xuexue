@@ -49,6 +49,7 @@ import dev.xuexue.pi.coding.resources.ResourceSourceInfo
 import dev.xuexue.pi.coding.resources.syntheticResourceSourceInfo
 import dev.xuexue.pi.coding.session.decodeAgentMessageFromWire
 import dev.xuexue.pi.coding.session.encodeAgentMessageForWire
+import dev.xuexue.pi.coding.session.encodeSessionEntryForWire
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -859,6 +860,7 @@ private class ProcessPluginBridge(
         }
     }
 
+    @Suppress("CyclomaticComplexMethod") // JSONL result decoding is intentionally exhaustive by event result type.
     private suspend fun requestEvent(
         event: PiExtensionEvent,
         context: PiExtensionContext,
@@ -873,6 +875,7 @@ private class ProcessPluginBridge(
                         put("payload", eventPayload(event))
                     },
                     context,
+                    (event as? PiExtensionEvent.SessionBeforeTree)?.signal,
                 )
             when (response["result"]?.jsonPrimitive?.contentOrNull) {
                 "project_trust", "yes", "no", "undecided" -> {
@@ -912,10 +915,25 @@ private class ProcessPluginBridge(
                     )
                 }
 
+                "tree", "session_before_tree" -> {
+                    val summary =
+                        response["summary"]?.jsonPrimitive?.contentOrNull?.let { text ->
+                            ExtensionBranchSummary(text, response["details"])
+                        }
+                    PiExtensionEventResult.SessionBeforeTree(
+                        cancel = response["cancel"]?.jsonPrimitive?.booleanOrNull ?: false,
+                        summary = summary,
+                        customInstructions = response["customInstructions"]?.jsonPrimitive?.contentOrNull,
+                        replaceInstructions = response["replaceInstructions"]?.jsonPrimitive?.booleanOrNull,
+                        label = response["label"]?.jsonPrimitive?.contentOrNull,
+                    )
+                }
+
                 "cancel" -> {
                     when (event.type) {
                         PiExtensionEventType.SESSION_BEFORE_SWITCH -> PiExtensionEventResult.SessionBeforeSwitch(cancel = true)
                         PiExtensionEventType.SESSION_BEFORE_FORK -> PiExtensionEventResult.SessionBeforeFork(cancel = true)
+                        PiExtensionEventType.SESSION_BEFORE_TREE -> PiExtensionEventResult.SessionBeforeTree(cancel = true)
                         else -> null
                     }
                 }
@@ -974,6 +992,27 @@ private class ProcessPluginBridge(
                 is PiExtensionEvent.SessionBeforeFork -> {
                     put("entryId", event.entryId)
                     put("position", event.position)
+                }
+
+                is PiExtensionEvent.SessionBeforeTree -> {
+                    put("targetId", event.preparation.targetId)
+                    put("oldLeafId", event.preparation.oldLeafId)
+                    put("commonAncestorId", event.preparation.commonAncestorId)
+                    put("userWantsSummary", event.preparation.userWantsSummary)
+                    event.preparation.customInstructions?.let { put("customInstructions", it) }
+                    event.preparation.replaceInstructions?.let { put("replaceInstructions", it) }
+                    event.preparation.label?.let { put("label", it) }
+                    put(
+                        "entriesToSummarize",
+                        JsonArray(event.preparation.entriesToSummarize.map(::encodeSessionEntryForWire)),
+                    )
+                }
+
+                is PiExtensionEvent.SessionTree -> {
+                    event.newLeafId?.let { put("newLeafId", it) }
+                    event.oldLeafId?.let { put("oldLeafId", it) }
+                    event.summaryEntry?.let { put("summaryEntry", encodeSessionEntryForWire(it)) }
+                    event.fromExtension?.let { put("fromExtension", it) }
                 }
 
                 is PiExtensionEvent.Context -> {
