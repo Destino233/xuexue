@@ -129,8 +129,10 @@ class ProjectTrustStoreTest {
             return if (index <= 0) "/" else normalized.substring(0, index)
         }
 
-        override fun exists(path: String): Boolean =
-            canonicalizePath(path) in files || canonicalizePath(path) in directories
+        override fun exists(path: String): Boolean {
+            val normalized = canonicalizePath(path)
+            return normalized in files || normalized in directories
+        }
 
         override fun isFile(path: String): Boolean = canonicalizePath(path) in files
 

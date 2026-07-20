@@ -1,4 +1,5 @@
-@file:Suppress("LongParameterList", "UnusedPrivateProperty")
+// The controller remains a compatibility boundary while the formal Pi runtime replaces the legacy UI state.
+@file:Suppress("LongParameterList", "UnusedPrivateProperty", "LargeClass", "LongMethod", "ReturnCount")
 
 package dev.xuexue
 
@@ -50,6 +51,7 @@ import dev.xuexue.platform.AgentMessage
 import dev.xuexue.platform.AgentProviderConfig
 import dev.xuexue.platform.DesktopAgentTools
 import dev.xuexue.platform.DesktopPiAgentAdapter
+import dev.xuexue.platform.DesktopPiCodingTools
 import dev.xuexue.platform.OpenAiCompatibleAgentClient
 import dev.xuexue.platform.WorkspaceService
 import dev.xuexue.platform.adaptDesktopAgentTools
@@ -436,8 +438,7 @@ class WorkbenchAgentController(
         model: Model,
         systemPrompt: String,
     ): AgentSession {
-        val tools = DesktopAgentTools(workspaceService, workspaceRoot, ::authorizeTool, Dispatchers.IO).all()
-        val adaptedTools = adaptDesktopAgentTools(tools)
+        val adaptedTools = DesktopPiCodingTools(workspaceService, workspaceRoot, ::authorizeTool, Dispatchers.IO).all()
         val current = formalRuntime?.session
         if (current == null || current.sessionId != session.id) {
             resetFormalRuntime()
