@@ -93,7 +93,7 @@
 | `src/types.ts` | `:pi-agent-core` Agent 状态、工具和事件协议 | `AgentLoopTest*`、`AgentStateTest` | `verified` |
 | `src/agent-loop.ts` | Agent Loop、`ToolExecution.kt` | 原 20 项行为映射到 `AgentLoopTest*`，另含并发预检回归；工具执行按 `prepare -> validateToolArguments -> before hook -> execute`，schema/coercion 由 `ToolArgumentValidationTest` 覆盖 | `in-progress` |
 | `src/agent.ts` | Stateful Agent facade | 原 19 项行为映射到 `Agent*Test`，另含 StateFlow/Flow 一致性 | `verified` |
-| `src/proxy.ts` | Agent proxy 语义 | 调用转发和错误传播 | `pending` |
+| `src/proxy.ts` | `Proxy.kt` | `ProxyTest` 覆盖 Pi proxy 请求体（模型、上下文、可序列化 options）、SSE delta 对 partial assistant message 的重建、tool JSON 增量、认证错误和预先取消；JVM `HttpResponse` 不暴露 HTTP status text，因此无 JSON `error` 时保留 Pi 的 status 但呈现为 `HTTP <status>` | `verified` |
 | `src/harness/types.ts` | Harness 公共协议 | 与核心类型边界一致 | `pending` |
 | `src/harness/agent-harness.ts` | Harness orchestration | stream、session、compaction | `pending` |
 | `src/harness/messages.ts` | 自定义消息转换 | Agent message 转 model message | `pending` |
