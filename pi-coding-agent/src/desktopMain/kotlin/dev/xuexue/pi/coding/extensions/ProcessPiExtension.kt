@@ -34,14 +34,8 @@ import dev.xuexue.pi.ai.PiProvider
 import dev.xuexue.pi.ai.SimpleStreamOptions
 import dev.xuexue.pi.ai.StopReason
 import dev.xuexue.pi.ai.TextContent
-import dev.xuexue.pi.ai.ThinkingContent
-import dev.xuexue.pi.ai.ToolCall
-import dev.xuexue.pi.ai.ToolResultMessage
 import dev.xuexue.pi.ai.Usage
 import dev.xuexue.pi.ai.UsageCost
-import dev.xuexue.pi.ai.UserBlocks
-import dev.xuexue.pi.ai.UserMessage
-import dev.xuexue.pi.ai.UserText
 import dev.xuexue.pi.ai.createAssistantMessageEventStream
 import dev.xuexue.pi.coding.InteractionRequest
 import dev.xuexue.pi.coding.InteractionResponse
@@ -53,6 +47,8 @@ import dev.xuexue.pi.coding.resources.ResourcePathMetadata
 import dev.xuexue.pi.coding.resources.ResourceScope
 import dev.xuexue.pi.coding.resources.ResourceSourceInfo
 import dev.xuexue.pi.coding.resources.syntheticResourceSourceInfo
+import dev.xuexue.pi.coding.session.decodeAgentMessageFromWire
+import dev.xuexue.pi.coding.session.encodeAgentMessageForWire
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -815,12 +811,7 @@ private class ProcessPluginBridge(
                     },
                     signal = signal,
                 )
-            val content: List<dev.xuexue.pi.ai.ToolResultContent> =
-                response["content"]
-                    ?.jsonArray
-                    .orEmpty()
-                    .mapNotNull { block -> block.jsonObject["text"]?.jsonPrimitive?.contentOrNull }
-                    .map(::TextContent)
+            val content = parseToolResultContent(response).orEmpty()
             AgentToolResult(
                 content = if (content.isEmpty()) listOf(TextContent("")) else content,
                 details = response["details"] ?: buildJsonObject {},
@@ -860,6 +851,22 @@ private class ProcessPluginBridge(
                     context,
                 )
             when (response["result"]?.jsonPrimitive?.contentOrNull) {
+                "project_trust", "yes", "no", "undecided" -> {
+                    parseProjectTrustResult(response)
+                }
+
+                "resources" -> {
+                    PiExtensionEventResult.Resources(parseResources(response))
+                }
+
+                "context" -> {
+                    val messages =
+                        requireNotNull(response["messages"]) {
+                            "Process context result is missing messages"
+                        }.jsonArray.map(::decodeAgentMessageFromWire)
+                    PiExtensionEventResult.Context(messages)
+                }
+
                 "block" -> {
                     PiExtensionEventResult.ToolCall(
                         block = true,
@@ -870,6 +877,14 @@ private class ProcessPluginBridge(
                 "system_prompt" -> {
                     PiExtensionEventResult.BeforeAgentStart(
                         systemPrompt = response["systemPrompt"]?.jsonPrimitive?.contentOrNull,
+                    )
+                }
+
+                "tool_result" -> {
+                    PiExtensionEventResult.ToolResult(
+                        content = parseToolResultContent(response),
+                        details = response["details"],
+                        isError = response["isError"]?.jsonPrimitive?.booleanOrNull,
                     )
                 }
 
@@ -886,6 +901,22 @@ private class ProcessPluginBridge(
                 }
             }
         }
+
+    private fun parseProjectTrustResult(message: JsonObject): PiExtensionEventResult.ProjectTrust? {
+        val result = message["result"]?.jsonPrimitive?.contentOrNull?.lowercase()
+        val trusted = message["trusted"]?.jsonPrimitive?.contentOrNull?.lowercase() ?: result
+        val decision =
+            when (trusted) {
+                "yes", "true", "trusted" -> ProjectTrustDecision.YES
+                "no", "false", "untrusted" -> ProjectTrustDecision.NO
+                "undecided", "unknown", "project_trust" -> ProjectTrustDecision.UNDECIDED
+                else -> return null
+            }
+        return PiExtensionEventResult.ProjectTrust(
+            trusted = decision,
+            remember = message["remember"]?.jsonPrimitive?.booleanOrNull ?: false,
+        )
+    }
 
     // Keep the wire payload exhaustive so process plugins can observe the same event data as Kotlin plugins.
     @Suppress("CyclomaticComplexMethod")
@@ -993,54 +1024,28 @@ private class ProcessPluginBridge(
             }
         }
 
-    private fun messagesPayload(messages: List<AgentMessage>): JsonArray =
-        buildJsonArray {
-            messages.forEach { add(messagePayload(it)) }
-        }
+    private fun messagesPayload(messages: List<AgentMessage>): JsonArray = JsonArray(messages.map(::encodeAgentMessageForWire))
 
-    private fun messagePayload(message: AgentMessage): JsonObject =
-        buildJsonObject {
-            put("timestamp", message.timestamp)
-            when (message) {
-                is UserMessage -> {
-                    put("role", "user")
-                    put("content", userMessageText(message))
+    private fun messagePayload(message: AgentMessage): JsonObject = encodeAgentMessageForWire(message)
+
+    private fun parseToolResultContent(message: JsonObject): List<dev.xuexue.pi.ai.ToolResultContent>? =
+        message["content"]?.jsonArray?.mapNotNull { element ->
+            val block = element.jsonObject
+            when (block["type"]?.jsonPrimitive?.contentOrNull) {
+                "text" -> {
+                    TextContent(block["text"]?.jsonPrimitive?.contentOrNull.orEmpty())
                 }
 
-                is AssistantMessage -> {
-                    put("role", "assistant")
-                    put("content", assistantMessageText(message))
-                    put("stopReason", message.stopReason.name.lowercase())
-                    message.errorMessage?.let { put("errorMessage", it) }
-                }
-
-                is ToolResultMessage -> {
-                    put("role", "toolResult")
-                    put("toolCallId", message.toolCallId)
-                    put("toolName", message.toolName)
-                    put("content", contentPayload(message.content))
-                    put("isError", message.isError)
+                "image" -> {
+                    ImageContent(
+                        data = block["data"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                        mimeType = block["mimeType"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                    )
                 }
 
                 else -> {
-                    put("role", message::class.simpleName.orEmpty())
+                    null
                 }
-            }
-        }
-
-    private fun userMessageText(message: UserMessage): String =
-        when (val content = message.content) {
-            is UserText -> content.value
-            is UserBlocks -> content.value.filterIsInstance<TextContent>().joinToString("") { it.text }
-        }
-
-    private fun assistantMessageText(message: AssistantMessage): String =
-        message.content.joinToString("") { block ->
-            when (block) {
-                is TextContent -> block.text
-                is ThinkingContent -> block.thinking
-                is ToolCall -> block.name
-                else -> ""
             }
         }
 
@@ -1057,8 +1062,14 @@ private class ProcessPluginBridge(
                         )
                     }
 
-                    else -> {
-                        add(buildJsonObject { put("type", "image") })
+                    is ImageContent -> {
+                        add(
+                            buildJsonObject {
+                                put("type", "image")
+                                put("data", block.data)
+                                put("mimeType", block.mimeType)
+                            },
+                        )
                     }
                 }
             }

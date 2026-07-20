@@ -4,6 +4,7 @@ import dev.xuexue.pi.ai.AbortController
 import dev.xuexue.pi.ai.AssistantMessageEvent
 import dev.xuexue.pi.ai.Context
 import dev.xuexue.pi.ai.FailureStopReason
+import dev.xuexue.pi.ai.ImageContent
 import dev.xuexue.pi.ai.ImagesContext
 import dev.xuexue.pi.ai.ImagesModel
 import dev.xuexue.pi.ai.ImagesOptions
@@ -13,6 +14,7 @@ import dev.xuexue.pi.ai.ModelInput
 import dev.xuexue.pi.ai.SimpleStreamOptions
 import dev.xuexue.pi.ai.StreamOptions
 import dev.xuexue.pi.ai.TextContent
+import dev.xuexue.pi.ai.ToolResultMessage
 import dev.xuexue.pi.ai.UserMessage
 import dev.xuexue.pi.ai.UserText
 import dev.xuexue.pi.coding.InteractionRequest
@@ -27,6 +29,9 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.Test
@@ -347,6 +352,125 @@ class ProcessPiExtensionTest {
         }
 
     @Test
+    fun processPluginCanResolveProjectTrustBeforeProjectPluginsLoad() =
+        runTest {
+            val directory = Files.createTempDirectory("xuexue-process-plugin-trust").toFile()
+            val script = directory.resolve("plugin.sh")
+            script.writeText(
+                """
+                #!/bin/sh
+                while IFS= read -r line; do
+                  case "${'$'}line" in
+                    *initialize*)
+                      echo '{"type":"subscribe","event":"PROJECT_TRUST"}'
+                      echo '{"type":"ready"}'
+                      ;;
+                    *'"event":"project_trust"'*)
+                      echo '{"type":"event_result","result":"project_trust","trusted":"yes","remember":true}'
+                      ;;
+                    *shutdown*)
+                      exit 0
+                      ;;
+                  esac
+                done
+                """.trimIndent(),
+            )
+            check(script.setExecutable(true))
+            try {
+                val runner = PiExtensionRunner(directory.path)
+                runner.load(ProcessPiExtension("process", listOf(script.path), directory.path))
+
+                val result = runner.emitProjectTrust(PiExtensionContext(directory.path, PiExtensionMode.RPC))
+
+                assertEquals(ProjectTrustDecision.YES, result?.trusted)
+                assertEquals(true, result?.remember)
+                runner.dispose()
+            } finally {
+                directory.deleteRecursively()
+            }
+        }
+
+    @Test
+    fun processPluginContextAndToolResultUseStructuredMessageWireFormat() =
+        runTest {
+            val directory = Files.createTempDirectory("xuexue-process-plugin-structured-events").toFile()
+            val script = directory.resolve("plugin.sh")
+            script.writeText(
+                """
+                #!/bin/sh
+                while IFS= read -r line; do
+                  case "${'$'}line" in
+                    *initialize*)
+                      echo '{"type":"subscribe","event":"CONTEXT"}'
+                      echo '{"type":"subscribe","event":"TOOL_RESULT"}'
+                      echo '{"type":"ready"}'
+                      ;;
+                    *'"event":"context"'*)
+                      case "${'$'}line" in
+                        *'"role":"toolResult"'*'"data":"AAAA"'*)
+                          echo '{"type":"event_result","result":"context","messages":[{"role":"user","content":"from process","timestamp":7}]}'
+                          ;;
+                        *)
+                          echo '{"type":"event_result","result":"context","messages":[]}'
+                          ;;
+                      esac
+                      ;;
+                    *'"event":"tool_result"'*)
+                      echo '{"type":"event_result","result":"tool_result","content":[{"type":"image","data":"BBBB","mimeType":"image/png"}],"details":{"source":"process"},"isError":true}'
+                      ;;
+                    *shutdown*)
+                      exit 0
+                      ;;
+                  esac
+                done
+                """.trimIndent(),
+            )
+            check(script.setExecutable(true))
+            try {
+                val runner = PiExtensionRunner(directory.path)
+                runner.load(ProcessPiExtension("process", listOf(script.path), directory.path))
+                val contextMessages =
+                    runner.emitContext(
+                        listOf(
+                            ToolResultMessage(
+                                toolCallId = "call-1",
+                                toolName = "image-tool",
+                                content = listOf(ImageContent("AAAA", "image/png")),
+                                isError = false,
+                                timestamp = 1,
+                            ),
+                        ),
+                    )
+                val contextMessage = assertIs<UserMessage>(contextMessages.single())
+                assertEquals("from process", assertIs<UserText>(contextMessage.content).value)
+
+                val toolResult =
+                    runner.emitToolResult(
+                        PiExtensionEvent.ToolResult(
+                            toolCallId = "call-1",
+                            toolName = "image-tool",
+                            content = listOf(TextContent("before")),
+                            details = null,
+                            isError = false,
+                        ),
+                    )
+                assertEquals("BBBB", assertIs<ImageContent>(toolResult.content.single()).data)
+                assertEquals(
+                    "process",
+                    toolResult.details
+                        ?.jsonObject
+                        ?.get("source")
+                        ?.jsonPrimitive
+                        ?.contentOrNull,
+                )
+                assertTrue(toolResult.isError)
+                runner.dispose()
+            } finally {
+                directory.deleteRecursively()
+            }
+        }
+
+    @Test
     fun processPluginCanSuspendForAHostInteractionDuringAnEvent() =
         runTest {
             val directory = Files.createTempDirectory("xuexue-process-plugin-interaction").toFile()
@@ -419,15 +543,15 @@ class ProcessPiExtensionTest {
             output = listOf(ModelInput.IMAGE),
             cost = ModelCost(0.0, 0.0, 0.0, 0.0),
         )
+}
 
-    @Suppress("InjectDispatcher") // Polls an external process fixture on the real IO dispatcher.
-    private suspend fun awaitFile(file: File) {
-        withContext(Dispatchers.IO) {
-            repeat(500) {
-                if (file.exists()) return@withContext
-                delay(10)
-            }
-            error("Process fixture did not create ${file.name}")
+@Suppress("InjectDispatcher") // Polls an external process fixture on the real IO dispatcher.
+private suspend fun awaitFile(file: File) {
+    withContext(Dispatchers.IO) {
+        repeat(500) {
+            if (file.exists()) return@withContext
+            delay(10)
         }
+        error("Process fixture did not create ${file.name}")
     }
 }

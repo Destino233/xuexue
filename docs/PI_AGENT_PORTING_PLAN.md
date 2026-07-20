@@ -278,6 +278,8 @@ source/manifest/资源协议已落地，Desktop Runtime 已把已解析的 packa
 dispose 自动注销）和 `SessionResources`（Provider 资源注册、按 sessionId 清理、聚合
 失败），并由 AgentSession 的 shutdown/dispose 最终路径调用；同时 `PiExtensionApi.exec`
 已接入 `PiCommandExecutor` 与 JVM 非 shell 执行器，提供 cwd/env、分离输出和退出码边界。
+Process 事件现在使用正式 AgentMessage wire codec，并支持 `project_trust`、`context`、动态资源和
+`tool_result` 的结构化返回。
 同时新增 `ProjectTrustStore`/`ProjectTrustStorage`：以 `trust.json` 保存布尔决策，支持父目录
 继承、子目录清除、严格 JSON 校验、跨进程文件锁和原子写入；`resolveProjectTrusted()` 按
 override、项目资源门、扩展、持久化、默认策略、交互选择的顺序解析，Compose/RPC 可注入同一
