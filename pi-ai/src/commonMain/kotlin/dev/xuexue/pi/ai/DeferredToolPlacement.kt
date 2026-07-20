@@ -53,17 +53,4 @@ internal fun splitDeferredTools(
 }
 
 /** Pi's deterministic short hash used for client-generated Responses item ids. */
-internal fun deferredToolShortHash(value: String): String {
-    var h1 = 0xDEADBEEF.toInt()
-    var h2 = 0x41C6CE57.toInt()
-    value.forEach { character ->
-        val code = character.code
-        h1 = (h1 xor code) * 2654435761.toInt()
-        h2 = (h2 xor code) * 1597334677.toInt()
-    }
-    h1 = ((h1 xor (h1 ushr 16)) * 2246822507.toInt()) xor
-        ((h2 xor (h2 ushr 13)) * 3266489909.toInt())
-    h2 = ((h2 xor (h2 ushr 16)) * 2246822507.toInt()) xor
-        ((h1 xor (h1 ushr 13)) * 3266489909.toInt())
-    return h2.toUInt().toString(36) + h1.toUInt().toString(36)
-}
+internal fun deferredToolShortHash(value: String): String = shortHash(value)

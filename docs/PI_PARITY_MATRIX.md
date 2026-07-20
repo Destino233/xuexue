@@ -83,8 +83,8 @@
 | `src/utils/estimate.ts`、`overflow.ts` | token 估算与溢出识别 | Pi context tests | `pending` |
 | `src/utils/retry.ts`、`error-body.ts` | 重试与错误体 | `ProviderSupport.kt` 统一保留非 2xx status/body、空 JSON 对象处理和 4000 字符截断；`ProviderErrorTest` 覆盖 403/429、空体、超长体、OpenAI Completions 和 OpenRouter Images 网关原因；Codex adapter 已覆盖状态码、数字/毫秒/HTTP-date `Retry-After`、429 delay cap 和网络重试 | `in-progress` |
 | `src/utils/json-parse.ts`、`validation.ts` | `JsonRepair.kt`、`PartialJsonParser.kt`、`StreamingJson.kt`、`ToolArgumentValidation.kt` | `JsonParsingTest` 覆盖修复/部分 JSON；`ToolArgumentValidationTest` 覆盖 Pi primitive coercion、嵌套 properties、required、additionalProperties、allOf/anyOf/oneOf 和错误格式；复杂 TypeBox-only 关键字仍待补 | `in-progress` |
-| `src/utils/hash.ts`、`headers.ts`、`provider-env.ts` | 通用 Provider 辅助逻辑 | 对应单元测试 | `pending` |
-| `src/utils/sanitize-unicode.ts` | Unicode 清理 | surrogate fixture | `pending` |
+| `src/utils/hash.ts`、`headers.ts`、`provider-env.ts` | `ProviderUtilities.kt`、`deferredToolShortHash()` | `ProviderUtilitiesTest` 覆盖 Pi UTF-16 hash、null header 删除、空 override fallback 和环境优先级；JVM 环境直接来自 `System.getenv()`，不复刻 Node/Bun `/proc` fallback | `verified` |
+| `src/utils/sanitize-unicode.ts` | `SanitizeUnicode.kt` | `SanitizeUnicodeTest` 覆盖完整和孤立 surrogate | `verified` |
 
 ## 4. `packages/agent` 对照
 
