@@ -8,6 +8,8 @@ set -euo pipefail
 endpoint="${XUEXUE_PDF_EVAL_ENDPOINT:-http://127.0.0.1:8765/analyze}"
 health_endpoint="${endpoint%/analyze}/health"
 sidecar_pid="${XUEXUE_PDF_EVAL_SIDECAR_PID:-}"
+python_bin="${XUEXUE_PADDLEOCR_PYTHON:-python3}"
+paddle_device="${XUEXUE_PADDLEOCR_DEVICE:-auto}"
 started_sidecar=0
 
 cleanup() {
@@ -18,24 +20,37 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-if ! curl --silent --fail --max-time 2 "$health_endpoint" >/dev/null; then
-    python_bin="${XUEXUE_PADDLEOCR_PYTHON:-python3}"
-    log_path="${XUEXUE_PDF_EVAL_SIDECAR_LOG:-${XUEXUE_PDF_EVAL_REPORT%.*}.sidecar.log}"
-    mkdir -p "$(dirname "$log_path")"
-    "$python_bin" tools/paddleocr-sidecar/paddleocr_sidecar.py \
-        --host 127.0.0.1 \
-        --port "${XUEXUE_PADDLEOCR_PORT:-8765}" \
-        --version "${XUEXUE_PADDLEOCR_VERSION:-3.x-sidecar}" \
-        >"$log_path" 2>&1 &
-    sidecar_pid=$!
-    started_sidecar=1
+health_ready() {
+    local payload
+    payload="$(curl --silent --fail --max-time 2 "$health_endpoint")" || return 1
+    printf '%s' "$payload" |
+        "$python_bin" -c 'import json, sys; raise SystemExit(0 if json.load(sys.stdin).get("ready") is True else 1)' \
+            2>/dev/null
+}
+
+if ! health_ready; then
+    if ! curl --silent --fail --max-time 2 "$health_endpoint" >/dev/null; then
+        log_path="${XUEXUE_PDF_EVAL_SIDECAR_LOG:-${XUEXUE_PDF_EVAL_REPORT%.*}.sidecar.log}"
+        mkdir -p "$(dirname "$log_path")"
+        "$python_bin" tools/paddleocr-sidecar/paddleocr_sidecar.py \
+            --host 127.0.0.1 \
+            --port "${XUEXUE_PADDLEOCR_PORT:-8765}" \
+            --version "${XUEXUE_PADDLEOCR_VERSION:-3.x-sidecar}" \
+            --device "$paddle_device" \
+            >"$log_path" 2>&1 &
+        sidecar_pid=$!
+        started_sidecar=1
+    fi
     for _ in $(seq 1 180); do
-        if curl --silent --fail --max-time 2 "$health_endpoint" >/dev/null; then
+        if health_ready; then
             break
         fi
         sleep 1
     done
-    curl --silent --fail --max-time 2 "$health_endpoint" >/dev/null
+    health_ready || {
+        echo "PaddleOCR sidecar did not become ready: $health_endpoint" >&2
+        exit 1
+    }
 fi
 
 JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-26-openjdk}" \

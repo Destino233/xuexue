@@ -13,16 +13,17 @@
 
 ## 外部扫描样本
 
-当前已登记一份可公开下载的公共领域扫描样本：
+当前已登记一份可公开下载的公共领域扫描样本，以及一份本机用户提供的中文教材样本：
 
 | manifest | 来源 | 页面范围 | 状态 |
 | --- | --- | ---: | --- |
 | `docs/pdf-evaluation-manifests/adventures-of-sherlock-holmes-1892.json` | Internet Archive, 1892 | 12 个章节起始页 / 353 页 | PP-StructureV3 真实运行 |
+| `docs/pdf-evaluation-manifests/mst-math-2027-mixed-text-layer.json` | 本机用户提供的中文教材 | 12 个章节起始页 / 555 页 | 已登记，GPU/CPU 矩阵待实跑 |
 
 manifest 中的 `pages` 使用从 0 开始的 PDF 物理页序号，`expected` 使用标题、目标物理页和层级。评测测试会校验 PDF
 SHA-256，逐页经过 MuPDF 渲染、PaddleOCR adapter、页级缓存和同一个 `ChapterEvaluator`，并输出标题精确率/召回率、
 层级边、目标页、首次运行耗时、P95、sidecar RSS 和缓存命中数。12 页是可审计的章节起始页子集，不应被描述为整本
-353 页的 OCR 准确率；中文教材、论文、双栏、竖排、旋转和混合文字层样本仍需继续登记。
+353 页的 OCR 准确率；中文教材样本已登记，论文、双栏、竖排、旋转和其他混合文字层样本仍需继续登记。
 
 下载样本后运行真实评测：
 

@@ -44,14 +44,14 @@ class FakePaddle:
 
 class PaddleRuntimeTest(unittest.TestCase):
     def test_auto_selects_real_cuda_device(self):
-        paddle = FakePaddle(cuda=True, available=["gpu:0"])
+        paddle = FakePaddle(cuda=True, xpu=True, available=["xpu:0", "gpu:0", "CustomGPU:0"], custom_types=["CustomGPU"])
 
         runtime = SIDECAR.probe_paddle_runtime("auto", paddle)
 
         self.assertEqual("gpu:0", runtime["device"])
         self.assertEqual("cuda", runtime["backend"])
         self.assertTrue(runtime["device_available"])
-        self.assertEqual(["gpu:0"], paddle.device.available)
+        self.assertEqual(["xpu:0", "gpu:0", "CustomGPU:0"], paddle.device.available)
         self.assertEqual("gpu:0", paddle.device.selected)
 
     def test_auto_uses_cpu_when_paddle_has_no_accelerator(self):

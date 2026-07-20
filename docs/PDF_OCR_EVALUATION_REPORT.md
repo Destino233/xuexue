@@ -87,8 +87,10 @@ PATH=/usr/lib/jvm/java-26-openjdk/bin:$PATH \
 ## 环境和边界
 
 真实评测使用的是仓库外受管理的 PP-StructureV3 sidecar；常规 CI 不需要安装 Paddle 运行时，仍只运行
-确定性 fixture 和协议测试。当前没有 PaddleOCR-VL 的 A/B 结果，也没有中文教材、论文、无目录书籍、双栏、
-竖排、旋转/倾斜或混合文字层样本，因此第 12 节按文档类型设定的完整质量门禁仍未全部满足。
+确定性 fixture 和协议测试。中文混合文字层样本已登记在
+`docs/pdf-evaluation-manifests/mst-math-2027-mixed-text-layer.json`，但当前机器只有 Paddle CPU wheel，
+尚未完成该样本的 GPU/CPU 矩阵报告。当前仍没有 PaddleOCR-VL 的 A/B 结果，也没有论文、无目录书籍、双栏、
+竖排或旋转/倾斜样本，因此第 12 节按文档类型设定的完整质量门禁仍未全部满足。
 
 识别 runner 已按页写入 `PdfPageLayoutStore`，章节检测器消费可重复的页源，不在内存中保留全量
 `PdfPageLayout`。长文档基准证明页级缓存和恢复可用，但不证明 1,000 页真实 OCR 的端到端性能；真实

@@ -51,8 +51,9 @@
 compiler errors、因此分析准确性受限；这不是任务失败，也未通过扩展 baseline 隐藏任何问题。
 
 因此 PP-StructureV3 的“真实运行链路”已有单一英文扫描样本证据，但第一版仍不能标记为完成：
-当前没有中文教材、论文、无目录、双栏、竖排、旋转/倾斜或混合文字层的真实样本，也没有
-PaddleOCR-VL A/B 结果、整本 OCR 长时测试、Windows/macOS sidecar 实际产物和 GPU/CPU 模型启动矩阵证据。
+中文混合文字层教材已登记在 `docs/pdf-evaluation-manifests/mst-math-2027-mixed-text-layer.json`，但当前机器只有
+Paddle CPU wheel，尚未完成该样本的 GPU/CPU 模型启动矩阵和最终报告。当前仍没有论文、无目录、双栏、竖排、
+旋转/倾斜样本，也没有 PaddleOCR-VL A/B 结果、整本 OCR 长时测试和 Windows/macOS sidecar 实际产物。
 这些条件不能由 12 页子集、跨平台打包脚本或确定性页级 fixture 替代。
 
 ## 2. 已冻结的技术决策

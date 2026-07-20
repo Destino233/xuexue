@@ -289,7 +289,11 @@ internal class PdfDocumentAnalysisRunner(
         currentCoroutineContext().ensureActive()
         val layout =
             engine.analyzePage(
-                request.copy(imagePng = imagePng),
+                request.copy(
+                    width = renderedImage.pixelWidth,
+                    height = renderedImage.pixelHeight,
+                    imagePng = imagePng,
+                ),
             )
         val nativeEvidence = native?.classificationEvidence
         val nativeCharacters = nativeEvidence?.nativeCharacterCount ?: 0
@@ -342,6 +346,8 @@ internal class PdfDocumentAnalysisRunner(
         currentCoroutineContext().ensureActive()
         return RenderedAnalysisImage(
             png = rgbaToPng(raster.pixelWidth, raster.pixelHeight, raster.rgbaBytes),
+            pixelWidth = raster.pixelWidth,
+            pixelHeight = raster.pixelHeight,
             inkCoverage = raster.inkCoverage(),
         )
     }
@@ -516,5 +522,7 @@ private fun isInkPixel(
 
 private data class RenderedAnalysisImage(
     val png: ByteArray,
+    val pixelWidth: Int,
+    val pixelHeight: Int,
     val inkCoverage: Float,
 )
