@@ -43,7 +43,7 @@ Headless Runtime 骨架，并开始由 XueXue Compose 作为正式宿主消费�
 | 会话 | `:pi-coding-agent` 已有 Pi v3 append-only tree/JSONL、`AgentSession`、retry 与手动/阈值/overflow compaction | branch summary、导入导出和原测试逐文件映射仍待补；`AgentSessionRuntime` 已提供统一 startup/new/resume/fork/shutdown 生命周期 |
 | 上下文 | 已有 Pi 系统提示构建器、ResourceLoader、父目录 AGENTS/CLAUDE 继承、SYSTEM/APPEND_SYSTEM、Skills 与模板发现；已补动态资源 metadata、ignore 规则、`AgentSession` 提示词重建和插件 hooks | 缺完整 YAML、package manager、JAR/Process loader、异步资源生命周期和 token 管理 |
 | UI | Compose 已通过 `AgentSessionRuntime` 调用 prompt/steer/abort，收集正式 Runtime 运行态 StateFlow，并消费 Runtime 交互请求；旧 DTO/投影仍作为迁移兼容层，且已保留 thinking/tool call/tool result 的可检查投影 | 会话树和完整 structured message 投影尚未完全替换旧消息列表 |
-| 设置、扩展与包 | SettingsManager、Kotlin 扩展 API/Runner、JVM JAR/Process discovery、path/git/Maven 下载、资源贡献、trust/offline/hash/staging、glob 资源选择和文件锁已接入 | 完整 git 更新/回滚 fixture、package manifest/filter 全语义、Process image-provider wrapper、旧 classloader/资源完整释放仍待补 |
+| 设置、扩展与包 | SettingsManager、Kotlin 扩展 API/Runner、JVM JAR/Process discovery、path/git/Maven 下载、资源贡献、ProjectTrustStore trust/offline/hash/staging、glob 资源选择和文件锁已接入 | Runtime 启动前的全局插件预加载/信任决策接线、完整 git 更新/回滚 fixture、package manifest/filter 全语义、Process image-provider wrapper、旧 classloader/资源完整释放仍待补 |
 | SDK/RPC | `PiRpcCodec`、`AgentSessionRpcHandler`、`PiRpcServer` 已支持 JSONL command/response/event；prompt preflight 异步响应、steer/follow-up 图片、模型/会话/队列/compaction、Bash、带完整 `sourceInfo` 的命令查询、interaction response 和 Process 插件交互均已接入；`export_html` 已通过宿主能力导出安全静态 HTML；`cycle_model` 已支持 scoped 顺序、认证过滤、顺逆时针和显式 `data:null` | SDK/Compose/RPC 三宿主一致性测试和完整 Pi Markdown/highlight/theme fidelity 仍待补 |
 
 当前的 `PiAgentRuntime`、`AgentClient`、`WorkbenchAgentController` 和会话文件
@@ -256,8 +256,12 @@ source/manifest/资源协议已落地，Desktop Runtime 已把已解析的 packa
 dispose 自动注销）和 `SessionResources`（Provider 资源注册、按 sessionId 清理、聚合
 失败），并由 AgentSession 的 shutdown/dispose 最终路径调用；同时 `PiExtensionApi.exec`
 已接入 `PiCommandExecutor` 与 JVM 非 shell 执行器，提供 cwd/env、分离输出和退出码边界。
-下一步仍是安装进度、Process image-provider wrapper、exec 的超时/取消协议和 package reload
-资源生命周期。
+同时新增 `ProjectTrustStore`/`ProjectTrustStorage`：以 `trust.json` 保存布尔决策，支持父目录
+继承、子目录清除、严格 JSON 校验、跨进程文件锁和原子写入；`resolveProjectTrusted()` 按
+override、项目资源门、扩展、持久化、默认策略、交互选择的顺序解析，Compose/RPC 可注入同一
+选择回调。下一步仍是把该解析放到 Runtime 创建前，使全局插件先参与 `project_trust`，再加载
+项目 settings/packages/extensions；此外还有安装进度、Process image-provider wrapper、exec
+的超时/取消协议和 package reload 资源生命周期。
 
 验收：工具、命令、Provider、资源路径和关键生命周期钩子可以由插件注册；
 插件异常被隔离并生成诊断；reload 后旧监听器和资源全部释放。

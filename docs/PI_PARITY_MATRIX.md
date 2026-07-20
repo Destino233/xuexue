@@ -75,7 +75,7 @@
 | `src/api/*cache*.ts` | `pi-ai/PromptCache.kt` 与三类 Provider | `ProviderTest` 覆盖 `PI_CACHE_RETENTION` 默认值、none/short/long、OpenAI key Unicode 截断、兼容代理和 Anthropic marker；Bedrock cache point、跨 Provider cache usage 与完整 deferred-tool cache 语义仍待补 | `in-progress` |
 | `src/auth/**`、`src/oauth.ts` | `pi-ai/AuthStore.kt` | `AuthStoreTest` 覆盖 runtime/stored/environment precedence、credential-scoped env、OAuth expiry view；文件锁持久化、刷新/login/cancel OAuth 仍待补 | `in-progress` |
 | `src/env-api-keys.ts` | `findEnvironmentApiKeys()`、`InMemoryAuthStore` | `AuthStoreTest` 覆盖主要 provider aliases 和 environment source status；完整 ambient AWS/Vertex credential discovery待补 | `in-progress` |
-| `src/images.ts`、`images-api-registry.ts` | 图片生成调度 | abort、error、结果和用量 | `pending` |
+| `src/images.ts`、`images-api-registry.ts` | `ImagesApiRegistry.kt`、`ProviderRegistry` 图像分发 | `ImagesApiRegistryTest` 覆盖按 API 注册/替换、sourceId、未知 API、provider 能力不匹配和空 API 拒绝；生成结果仍需补齐 abort/error/usage 端到端 fixture | `in-progress` |
 | `src/session-resources.ts` | `pi-ai/SessionResources.kt`、`AgentSession.shutdown/dispose` | `SessionResourcesTest` 覆盖注册、幂等注销、sessionId 传递、聚合错误和继续清理；AgentSession 最终释放路径调用全局资源清理 | `verified` |
 | `src/compat.ts`、`legacy-api-aliases.ts` | 公共兼容 facade | stream/complete/model aliases | `pending` |
 | `src/utils/abort-signals.ts` | 取消信号组合 | 原因、竞态和资源清理 | `pending` |
@@ -123,7 +123,7 @@
 | `src/core/extensions/wrapper.ts` | `AgentSession` extension hook bridge | `AgentSessionExtensionTest` 覆盖 tool call/result、context 和 before-agent-start 接线；Kotlin extension 可注册 Provider/ImageProvider 并由 Desktop registry 合并，Process 文本和图像 Provider 已分别通过 `register_provider`/`provider_stream`、`register_image_provider`/`image_generate` 接入 | `in-progress` |
 | `src/core/event-bus.ts` | `extensions/PiEventBus.kt`、`PiEventBusController` | `PiEventBusTest` 覆盖 registration order、unsubscribe、handler error isolation、clear；`PiExtensionRunnerTest.extensionEventSubscriptionsAreRemovedWhenRunnerDisposes` 覆盖扩展 reload/dispose 自动移除监听器 | `verified` |
 | `src/core/package-manager.ts` | `packages/PiPackageModels.kt`、`DefaultPiPackageManager.desktop.kt` | `PiPackageModelsTest`、`DefaultPiPackageManagerTest` 覆盖 path source、git/Maven source 解析、package.json/自有 manifest、资源路径、settings 持久化、内容 hash、project trust 和 `PI_OFFLINE` 缺包诊断；git staging 原子替换/回滚代码已落地，远程 Maven 解析、完整 update 语义和 package pattern 仍待补 | `in-progress` |
-| `src/core/project-trust.ts`、`trust-manager.ts` | 项目信任时序 | global/project load boundary | `pending` |
+| `src/core/project-trust.ts`、`trust-manager.ts` | `trust/ProjectTrustStore.kt`、`ProjectTrustStorage`、`resolveProjectTrusted()` | `ProjectTrustStoreTest` 覆盖 trust.json 严格 JSON、父目录最近决策、清除子目录覆盖、项目资源检测、override/saved/default 时序；JVM 文件锁、原子写入和 Compose/RPC 选择入口已实现，Runtime 启动前的全局插件预加载接线仍待补 | `in-progress` |
 | `src/core/tools/read.ts` | Desktop `ReadTool`、`ToolOutput.kt` | head truncation、UTF-8 byte/line limits、offset/limit；图片输入和 truncation details 仍待补 | `in-progress` |
 | `src/core/tools/write.ts`、`edit.ts`、`edit-diff.ts` | Desktop `WriteTool`/`EditTool`、`FileMutationQueue.kt` | exact replacement、unified diff、同路径串行队列和异常释放；Pi diff/render details 与 legacy args 待补 | `in-progress` |
 | `src/core/tools/bash.ts`、`bash-executor.ts` | `AgentSessionBashExecutor`、Desktop `LocalBashExecutor`、Desktop `BashTool` | `PiRpcProtocolTest.handlerExecutesAndPersistsBashResults`、`LocalBashExecutorTest` 覆盖 cwd/合并输出/退出码、tail 截断和 full-output 文件；取消销毁已实现，结果经 `AgentSession.recordBashResult` 统一落盘 | `in-progress` |
