@@ -23,6 +23,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@Suppress("TooManyFunctions") // Lifecycle, device selection, and archive cases share one sidecar fixture boundary.
 class PaddleOcrServiceManagerTest {
     @Test
     fun zipArtifactIsVerifiedInstalledAndReused() =
