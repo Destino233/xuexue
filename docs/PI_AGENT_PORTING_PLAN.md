@@ -269,7 +269,10 @@ Pi 的首个明确决策规则工作，命令可由 Runner 执行并接入 Agent
 Provider；宿主以 `provider_stream` 发送模型、Context、stream options，并将
 `AssistantMessageEvent` 按 PiJson 逐事件转发回 Runtime。图像 Provider 使用
 `register_image_provider` 和 `image_generate`，结果为 `AssistantImages`，错误和取消
-保持 `ImagesStopReason`。`PiPackageManager` 的统一
+保持 `ImagesStopReason`。Process 的工具、文本 Provider 和图像 Provider 请求现在共享
+串行 JSONL 生命周期：宿主生成 `requestId`，忽略带其他 ID 的晚到响应，同时兼容不回传
+ID 的旧插件；工具 `AbortSignal` 会转为同一通道上的 `cancel` 请求，取消后的终态不会被
+误报为成功。`PiPackageManager` 的统一
 source/manifest/资源协议已落地，Desktop Runtime 已把已解析的 package extension paths
 交给 `PiPluginDiscovery`。本轮补齐了 Pi 的共享 `PiEventBus`（扩展订阅随 Runner
 dispose 自动注销）和 `SessionResources`（Provider 资源注册、按 sessionId 清理、聚合
@@ -279,9 +282,9 @@ dispose 自动注销）和 `SessionResources`（Provider 资源注册、按 sess
 继承、子目录清除、严格 JSON 校验、跨进程文件锁和原子写入；`resolveProjectTrusted()` 按
 override、项目资源门、扩展、持久化、默认策略、交互选择的顺序解析，Compose/RPC 可注入同一
 选择回调。下一步仍是把该解析放到 Runtime 创建前，使全局插件先参与 `project_trust`，再加载
-项目 settings/packages/extensions；此外还有安装进度、Process image-provider wrapper、Process
-JSONL 请求生命周期和 package reload 资源生命周期。JVM `exec` 已补齐 timeout/AbortSignal、部分
-输出、spawn 失败和进程树终止语义。
+项目 settings/packages/extensions；此外还有安装进度、Process 请求超时后的强制宿主回收和
+package reload 资源生命周期。JVM `exec` 已补齐 timeout/AbortSignal、部分输出、spawn 失败和
+进程树终止语义。
 
 验收：工具、命令、Provider、资源路径和关键生命周期钩子可以由插件注册；
 插件异常被隔离并生成诊断；reload 后旧监听器和资源全部释放。
@@ -399,7 +402,10 @@ Process Provider 使用与工具请求相同的 JSONL 通道：插件初始化�
 插件用 `provider_event` 或 `provider_done` 返回由 `PiJson` 编码的
 `AssistantMessageEvent`；`provider_error` 映射为终止错误事件。API key 只在宿主已经
 解析出 `SimpleStreamOptions.stream.apiKey` 时转发，Process 宿主不自行读取凭据。
-取消请求会终止 Kotlin 侧事件流，插件应把请求视为不可继续使用。
+响应应回传请求的 `requestId`；宿主为兼容旧插件也接受省略 ID 的响应，但会丢弃明确属于
+其他请求的晚到响应。工具或 Provider 的 `AbortSignal` 触发后，宿主发送
+`{"type":"cancel","requestId":"<id>"}`；插件应返回该请求的终态并停止继续输出，宿主会把
+终态映射为取消而不是成功。无响应插件的 grace timeout 与进程回收仍待补。
 
 ### 6.3 JVM 插件清单
 

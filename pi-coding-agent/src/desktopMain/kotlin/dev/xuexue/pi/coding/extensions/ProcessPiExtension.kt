@@ -11,6 +11,7 @@ package dev.xuexue.pi.coding.extensions
 
 import dev.xuexue.pi.agent.AgentTool
 import dev.xuexue.pi.agent.AgentToolResult
+import dev.xuexue.pi.ai.AbortSignal
 import dev.xuexue.pi.ai.AgentMessage
 import dev.xuexue.pi.ai.AssistantImages
 import dev.xuexue.pi.ai.AssistantMessage
@@ -58,6 +59,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -81,6 +84,7 @@ import java.io.File
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Clock
 
 /** Process-hosted extension using one JSON object per stdin/stdout line. */
@@ -153,7 +157,8 @@ private class ProcessPluginBridge(
     private val environment: Map<String, String>,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
-    private val lock = Any()
+    private val requestMutex = Mutex()
+    private val writerLock = Any()
     private val streamScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var process: Process? = null
     private var reader: BufferedReader? = null
@@ -173,18 +178,20 @@ private class ProcessPluginBridge(
 
     suspend fun initialize(api: PiExtensionApi) =
         withContext(Dispatchers.IO) {
-            synchronized(lock) {
-                sendLocked(
-                    buildJsonObject {
-                        put("type", "initialize")
-                        put("extensionId", extensionId)
-                        put("apiVersion", "1")
-                    },
-                )
+            requestMutex.withLock {
+                synchronized(writerLock) {
+                    sendLocked(
+                        buildJsonObject {
+                            put("type", "initialize")
+                            put("extensionId", extensionId)
+                            put("apiVersion", "1")
+                        },
+                    )
+                }
                 while (true) {
                     val message = messageObject()
                     when (message["type"]?.jsonPrimitive?.contentOrNull) {
-                        "ready" -> return@synchronized
+                        "ready" -> break
                         "register_tool" -> api.registerTool(parseTool(message))
                         "register_command" -> api.registerCommand(parseCommand(message))
                         "register_provider" -> api.registerProvider(parseProvider(message))
@@ -200,10 +207,12 @@ private class ProcessPluginBridge(
 
     suspend fun dispose() =
         withContext(Dispatchers.IO) {
-            synchronized(lock) {
-                if (process == null) return@synchronized
-                runCatching {
-                    sendLocked(buildJsonObject { put("type", "shutdown") })
+            requestMutex.withLock {
+                if (process == null) return@withLock
+                synchronized(writerLock) {
+                    runCatching {
+                        sendLocked(buildJsonObject { put("type", "shutdown") })
+                    }
                 }
                 process?.destroy()
                 if (process?.waitFor(2, java.util.concurrent.TimeUnit.SECONDS) == false) process?.destroyForcibly()
@@ -245,40 +254,26 @@ private class ProcessPluginBridge(
             stream.push(providerError(model, "Operation aborted", aborted = true))
             return stream
         }
+        val requestId = UUID.randomUUID().toString()
+        val started = AtomicBoolean(false)
+        val cancelSent = AtomicBoolean(false)
+        val subscription =
+            options.stream.signal?.onAbort {
+                if (started.get()) sendCancellation(requestId, cancelSent)
+            }
         val job =
             streamScope.launch {
                 try {
-                    synchronized(lock) {
-                        sendLocked(providerStreamRequest(providerId, model, context, options))
-                        var terminal = false
-                        while (!terminal) {
-                            val message = messageObject()
-                            when (message["type"]?.jsonPrimitive?.contentOrNull) {
-                                "provider_event", "provider_done" -> {
-                                    val event = parseProviderEvent(message)
-                                    stream.push(event)
-                                    terminal =
-                                        message["type"]?.jsonPrimitive?.contentOrNull == "provider_done" ||
-                                        event is AssistantMessageEvent.Done ||
-                                        event is AssistantMessageEvent.Error
-                                }
-
-                                "provider_error" -> {
-                                    stream.push(
-                                        providerError(
-                                            model,
-                                            message["message"]?.jsonPrimitive?.contentOrNull
-                                                ?: "Process provider failed",
-                                        ),
-                                    )
-                                    terminal = true
-                                }
-
-                                else -> {
-                                    error("Unknown process provider message: ${message["type"]}")
-                                }
-                            }
+                    requestMutex.withLock {
+                        if (options.stream.signal?.isAborted == true) {
+                            throw CancellationException("Operation aborted")
                         }
+                        synchronized(writerLock) {
+                            sendLocked(providerStreamRequest(providerId, model, context, options, requestId))
+                        }
+                        started.set(true)
+                        if (options.stream.signal?.isAborted == true) sendCancellation(requestId, cancelSent)
+                        readProviderResponses(requestId, model, options.stream.signal, stream)
                     }
                 } catch (error: CancellationException) {
                     stream.push(providerError(model, error.message ?: "Operation aborted", aborted = true))
@@ -286,14 +281,54 @@ private class ProcessPluginBridge(
                     stream.push(providerError(model, error.message ?: error.toString()))
                 }
             }
-        val subscription =
-            options.stream.signal?.onAbort {
-                job.cancel()
-                stream.push(providerError(model, "Operation aborted", aborted = true))
-            }
         job.invokeOnCompletion { subscription?.dispose() }
         return stream
     }
+
+    private fun readProviderResponses(
+        requestId: String,
+        model: Model,
+        signal: AbortSignal?,
+        stream: AssistantMessageEventStream,
+    ) {
+        var terminal = false
+        while (!terminal) {
+            val message = messageObject()
+            if (signal?.isAborted == true) throw CancellationException("Operation aborted")
+            if (matchesRequest(message, requestId)) {
+                terminal = forwardProviderResponse(message, model, stream)
+            }
+        }
+    }
+
+    private fun forwardProviderResponse(
+        message: JsonObject,
+        model: Model,
+        stream: AssistantMessageEventStream,
+    ): Boolean =
+        when (message["type"]?.jsonPrimitive?.contentOrNull) {
+            "provider_event", "provider_done" -> {
+                val event = parseProviderEvent(message)
+                stream.push(event)
+                message["type"]?.jsonPrimitive?.contentOrNull == "provider_done" ||
+                    event is AssistantMessageEvent.Done ||
+                    event is AssistantMessageEvent.Error
+            }
+
+            "provider_error" -> {
+                stream.push(
+                    providerError(
+                        model,
+                        message["message"]?.jsonPrimitive?.contentOrNull ?: "Process provider failed",
+                    ),
+                )
+                true
+            }
+
+            else -> {
+                error("Unknown process provider message: ${message["type"]}")
+            }
+        }
 
     suspend fun generateImages(
         providerId: String,
@@ -302,40 +337,79 @@ private class ProcessPluginBridge(
         options: ImagesOptions,
     ): AssistantImages {
         if (options.signal?.isAborted == true) return imageError(model, "Operation aborted", aborted = true)
-        return withContext(Dispatchers.IO) {
-            synchronized(lock) {
-                sendLocked(imageProviderRequest(providerId, model, context, options))
-                readImageProviderResponse(model)
+        val requestId = UUID.randomUUID().toString()
+        val started = AtomicBoolean(false)
+        val cancelSent = AtomicBoolean(false)
+        val subscription =
+            options.signal?.onAbort {
+                if (started.get()) sendCancellation(requestId, cancelSent)
             }
+        return try {
+            withContext(Dispatchers.IO) {
+                requestMutex.withLock {
+                    if (options.signal?.isAborted == true) {
+                        imageError(model, "Operation aborted", aborted = true)
+                    } else {
+                        synchronized(writerLock) {
+                            sendLocked(imageProviderRequest(providerId, model, context, options, requestId))
+                        }
+                        started.set(true)
+                        if (options.signal?.isAborted == true) sendCancellation(requestId, cancelSent)
+                        readImageProviderResponse(model, requestId, options.signal)
+                    }
+                }
+            }
+        } catch (error: CancellationException) {
+            imageError(model, error.message ?: "Operation aborted", aborted = true)
+        } finally {
+            subscription?.dispose()
         }
     }
 
-    private fun readImageProviderResponse(model: ImagesModel): AssistantImages {
-        while (true) {
+    private fun readImageProviderResponse(
+        model: ImagesModel,
+        requestId: String,
+        signal: AbortSignal?,
+    ): AssistantImages {
+        var result: AssistantImages? = null
+        while (result == null) {
             val message = messageObject()
-            when (message["type"]?.jsonPrimitive?.contentOrNull) {
-                "image_result" -> {
-                    val payload = message["result"] ?: message["payload"]
-                    return parseAssistantImages(
-                        model,
-                        requireNotNull(payload) { "Process image provider result is missing result" },
-                    )
+            result =
+                if (signal?.isAborted == true) {
+                    imageError(model, "Operation aborted", aborted = true)
+                } else if (matchesRequest(message, requestId)) {
+                    parseImageProviderResponse(message, model)
+                } else {
+                    null
                 }
+        }
+        return result
+    }
 
-                "image_error" -> {
-                    return imageError(
-                        model,
-                        message["message"]?.jsonPrimitive?.contentOrNull
-                            ?: "Process image provider failed",
-                    )
-                }
+    private fun parseImageProviderResponse(
+        message: JsonObject,
+        model: ImagesModel,
+    ): AssistantImages =
+        when (message["type"]?.jsonPrimitive?.contentOrNull) {
+            "image_result" -> {
+                val payload = message["result"] ?: message["payload"]
+                parseAssistantImages(
+                    model,
+                    requireNotNull(payload) { "Process image provider result is missing result" },
+                )
+            }
 
-                else -> {
-                    error("Unknown process image provider message: ${message["type"]}")
-                }
+            "image_error" -> {
+                imageError(
+                    model,
+                    message["message"]?.jsonPrimitive?.contentOrNull ?: "Process image provider failed",
+                )
+            }
+
+            else -> {
+                error("Unknown process image provider message: ${message["type"]}")
             }
         }
-    }
 
     private fun parseAssistantImages(
         model: ImagesModel,
@@ -387,10 +461,11 @@ private class ProcessPluginBridge(
         model: ImagesModel,
         context: ImagesContext,
         options: ImagesOptions,
+        requestId: String,
     ): JsonObject =
         buildJsonObject {
             put("type", "image_generate")
-            put("requestId", UUID.randomUUID().toString())
+            put("requestId", requestId)
             put("providerId", providerId)
             put(
                 "model",
@@ -503,10 +578,11 @@ private class ProcessPluginBridge(
         model: Model,
         context: Context,
         options: SimpleStreamOptions,
+        requestId: String,
     ): JsonObject =
         buildJsonObject {
             put("type", "provider_stream")
-            put("requestId", UUID.randomUUID().toString())
+            put("requestId", requestId)
             put("providerId", providerId)
             put("model", PiJson.encodeToJsonElement(Model.serializer(), model))
             put("context", providerContextPayload(context))
@@ -627,7 +703,7 @@ private class ProcessPluginBridge(
             parameters = parameters,
             promptSnippet = message["promptSnippet"]?.jsonPrimitive?.contentOrNull,
             promptGuidelines = message["promptGuidelines"]?.asStringList().orEmpty(),
-            execute = { toolCallId, params, _, _ -> invokeTool(toolCallId, name, params) },
+            execute = { toolCallId, params, signal, _ -> invokeTool(toolCallId, name, params, signal) },
         )
     }
 
@@ -671,6 +747,7 @@ private class ProcessPluginBridge(
         toolCallId: String,
         name: String,
         params: JsonObject,
+        signal: AbortSignal?,
     ): AgentToolResult =
         withContext(Dispatchers.IO) {
             val response =
@@ -682,6 +759,7 @@ private class ProcessPluginBridge(
                         put("name", name)
                         put("params", params)
                     },
+                    signal = signal,
                 )
             val content: List<dev.xuexue.pi.ai.ToolResultContent> =
                 response["content"]
@@ -942,46 +1020,110 @@ private class ProcessPluginBridge(
     private suspend fun request(
         message: JsonObject,
         context: PiExtensionContext? = null,
-    ): JsonObject =
-        run {
-            synchronized(lock) {
-                sendLocked(message)
+        signal: AbortSignal? = null,
+    ): JsonObject {
+        val requestId = message["requestId"]?.jsonPrimitive?.contentOrNull
+        val started = AtomicBoolean(false)
+        val cancelSent = AtomicBoolean(false)
+        val subscription =
+            signal?.onAbort {
+                if (started.get() && requestId != null) sendCancellation(requestId, cancelSent)
             }
-            var terminal: JsonObject? = null
-            while (terminal == null) {
-                val response = synchronized(lock) { messageObject() }
-                when (response["type"]?.jsonPrimitive?.contentOrNull) {
-                    "interaction_request" -> {
-                        val interaction =
-                            context?.interaction
-                                ?: error("Process plugin requested interaction without a host")
-                        val request = parseInteractionRequest(response["request"]?.jsonObject ?: response)
-                        val result = interaction.request(request)
-                        synchronized(lock) {
-                            sendLocked(
-                                buildJsonObject {
-                                    put("type", "interaction_response")
-                                    put("requestId", request.id)
-                                    put("response", interactionResponsePayload(result))
-                                },
-                            )
-                        }
-                    }
+        try {
+            return requestMutex.withLock {
+                if (signal?.isAborted == true) throw CancellationException("Operation aborted")
+                synchronized(writerLock) {
+                    sendLocked(message)
+                }
+                started.set(true)
+                if (signal?.isAborted == true && requestId != null) sendCancellation(requestId, cancelSent)
+                var terminal: JsonObject? = null
+                while (terminal == null) {
+                    val response = messageObject()
+                    terminal = handleRequestResponse(response, requestId, context, signal)
+                }
+                requireNotNull(terminal)
+            }
+        } finally {
+            subscription?.dispose()
+        }
+    }
 
-                    "notify" -> {
-                        val interaction =
-                            context?.interaction
-                                ?: error("Process plugin sent notification without a host")
-                        interaction.notify(parseNotify(response["request"]?.jsonObject ?: response))
-                    }
+    private suspend fun handleRequestResponse(
+        response: JsonObject,
+        requestId: String?,
+        context: PiExtensionContext?,
+        signal: AbortSignal?,
+    ): JsonObject? =
+        when (response["type"]?.jsonPrimitive?.contentOrNull) {
+            "interaction_request" -> {
+                handleInteractionRequest(response, context)
+                null
+            }
 
-                    else -> {
-                        terminal = response
-                    }
+            "notify" -> {
+                val interaction =
+                    context?.interaction
+                        ?: error("Process plugin sent notification without a host")
+                interaction.notify(parseNotify(response["request"]?.jsonObject ?: response))
+                null
+            }
+
+            else -> {
+                if (!matchesRequest(response, requestId)) {
+                    null
+                } else {
+                    if (signal?.isAborted == true) throw CancellationException("Operation aborted")
+                    response
                 }
             }
-            requireNotNull(terminal)
         }
+
+    private suspend fun handleInteractionRequest(
+        response: JsonObject,
+        context: PiExtensionContext?,
+    ) {
+        val interaction =
+            context?.interaction
+                ?: error("Process plugin requested interaction without a host")
+        val request = parseInteractionRequest(response["request"]?.jsonObject ?: response)
+        val result = interaction.request(request)
+        synchronized(writerLock) {
+            sendLocked(
+                buildJsonObject {
+                    put("type", "interaction_response")
+                    put("requestId", request.id)
+                    put("response", interactionResponsePayload(result))
+                },
+            )
+        }
+    }
+
+    private fun matchesRequest(
+        response: JsonObject,
+        requestId: String?,
+    ): Boolean {
+        val responseId = response["requestId"]?.jsonPrimitive?.contentOrNull
+        return requestId == null || responseId == null || responseId == requestId
+    }
+
+    private fun sendCancellation(
+        requestId: String,
+        cancelSent: AtomicBoolean,
+    ) {
+        if (!cancelSent.compareAndSet(false, true)) return
+        synchronized(writerLock) {
+            if (process == null) return@synchronized
+            runCatching {
+                sendLocked(
+                    buildJsonObject {
+                        put("type", "cancel")
+                        put("requestId", requestId)
+                    },
+                )
+            }
+        }
+    }
 
     private fun sendLocked(message: JsonObject) {
         val output = writer ?: error("Process plugin is not running")
