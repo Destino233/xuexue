@@ -69,10 +69,11 @@ class ProviderRegistry(
 ) {
     private val providersByApi = providers.flatMap { provider -> provider.supportedApis.map { it to provider } }.toMap()
     private val providersById = providers.associateBy { it.id }
-    private val imageProvidersByApi = imageProviders.flatMap { provider -> provider.supportedApis.map { it to provider } }.toMap()
+    private val imageRegistry = ImagesApiRegistry(imageProviders)
 
     val providers: List<PiProvider> = providers.distinctBy { it.id }
-    val imageProviders: List<PiImageProvider> = imageProviders.distinctBy { it.id }
+    val imageProviders: List<PiImageProvider>
+        get() = imageRegistry.providers
 
     fun find(model: Model): PiProvider? =
         providersByApi[model.api]
@@ -90,9 +91,7 @@ class ProviderRegistry(
         model: ImagesModel,
         context: ImagesContext,
         options: ImagesOptions,
-    ): AssistantImages =
-        imageProvidersByApi[model.api]?.generateImages(model, context, options)
-            ?: error("No image provider registered for ${model.provider}/${model.id} (${model.api})")
+    ): AssistantImages = imageRegistry.generateImages(model, context, options)
 
     fun withAdditionalProviders(
         additionalProviders: List<PiProvider> = emptyList(),
