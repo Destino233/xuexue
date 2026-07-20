@@ -15,9 +15,22 @@ import dev.xuexue.core.ToolWindow
 import dev.xuexue.core.WorkbenchFocusTarget
 import dev.xuexue.pi.agent.Agent
 import dev.xuexue.pi.agent.AgentState
+import dev.xuexue.pi.coding.AgentSessionEvent
+import dev.xuexue.pi.coding.AgentSessionRuntime
+import dev.xuexue.pi.coding.InteractionRequest
+import dev.xuexue.pi.coding.InteractionRequestBroker
+import dev.xuexue.pi.coding.InteractionResponse
 import dev.xuexue.platform.AgentMessage
 import dev.xuexue.platform.PersistedLayoutPreset
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
+import dev.xuexue.pi.coding.AgentSessionState as PiAgentSessionState
 
 interface WorkbenchLayoutModel {
     var activeTool: ToolWindow
@@ -293,10 +306,16 @@ interface AgentRuntimeModel {
     val agentSendAvailability: AgentSendAvailability
     val agentContextPaths: SnapshotStateList<String>
     val agentContextSnippets: SnapshotStateList<AgentContextSnippet>
+    val agentInteractionRequests: StateFlow<List<InteractionRequest>>
+    val agentInteractionNotifications: SharedFlow<InteractionRequest.Notify>
+    val formalAgentState: StateFlow<PiAgentSessionState?>
+    val formalAgentEvents: SharedFlow<AgentSessionEvent>
 }
 
+@Suppress("TooManyFunctions")
 class AgentRuntimeState : AgentRuntimeModel {
     val piAgent = Agent()
+    val interactionBroker = InteractionRequestBroker()
     override val piAgentState: StateFlow<AgentState> = piAgent.state
     override val agentSessions = mutableStateListOf(AgentSessionState("default", "默认会话"))
     override var activeAgentSessionId by mutableStateOf("default")
@@ -326,6 +345,35 @@ class AgentRuntimeState : AgentRuntimeModel {
             )
     override val agentContextPaths = mutableStateListOf<String>()
     override val agentContextSnippets = mutableStateListOf<AgentContextSnippet>()
+    override val agentInteractionRequests: StateFlow<List<InteractionRequest>> = interactionBroker.requests
+    override val agentInteractionNotifications: SharedFlow<InteractionRequest.Notify> = interactionBroker.notifications
+    private val mutableFormalAgentState = MutableStateFlow<PiAgentSessionState?>(null)
+    private val mutableFormalAgentEvents = MutableSharedFlow<AgentSessionEvent>(extraBufferCapacity = 256)
+    private var formalRuntimeBinding: Job? = null
+    override val formalAgentState: StateFlow<PiAgentSessionState?> = mutableFormalAgentState
+    override val formalAgentEvents: SharedFlow<AgentSessionEvent> = mutableFormalAgentEvents
+
+    /** Bind Compose/RPC state to the formal Pi runtime and rebind on session replacement. */
+    fun bindFormalRuntime(
+        runtime: AgentSessionRuntime?,
+        scope: CoroutineScope,
+    ) {
+        formalRuntimeBinding?.cancel()
+        formalRuntimeBinding = null
+        mutableFormalAgentState.value = runtime?.state?.value
+        if (runtime == null) return
+        formalRuntimeBinding =
+            scope.launch {
+                launch {
+                    runtime.state.collect { state -> mutableFormalAgentState.value = state }
+                }
+                launch {
+                    runtime.events.collect { event -> mutableFormalAgentEvents.emit(event) }
+                }
+            }
+    }
+
+    fun respondAgentInteraction(response: InteractionResponse): Boolean = interactionBroker.respond(response)
 
     fun applyStreamEvent(
         session: AgentSessionState,

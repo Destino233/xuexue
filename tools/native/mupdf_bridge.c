@@ -4,10 +4,17 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
+#include <limits.h>
 
 #include "mupdf/fitz.h"
+#include "mupdf/pdf.h"
 
 #define XUEXUE_JNI_VERSION JNI_VERSION_1_8
+#define MAX_OUTLINE_DEPTH 64
+#define MAX_OUTLINE_NODES 1000000
+#define MAX_OUTLINE_STRING_BYTES (16U * 1024U * 1024U)
+#define MAX_OUTLINE_PAYLOAD_BYTES (64U * 1024U * 1024U)
 static fz_context *base_context;
 static pthread_key_t context_key;
 static pthread_mutex_t init_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -328,6 +335,130 @@ static jbyteArray copy_pixmap_rgba(JNIEnv *env, fz_context *ctx, fz_pixmap *pixm
         }
     }
     return (*env)->ExceptionCheck(env) ? NULL : result;
+}
+
+static void append_outline_string(fz_context *ctx, fz_buffer *buffer, const char *value)
+{
+    size_t length = value == NULL ? 0 : strlen(value);
+    if (length > MAX_OUTLINE_STRING_BYTES || length > (size_t)INT32_MAX)
+        fz_throw(ctx, FZ_ERROR_LIMIT, "PDF outline string is too long.");
+    fz_append_int32_le(ctx, buffer, value == NULL ? -1 : (int)length);
+    if (value != NULL && length > 0)
+        fz_append_data(ctx, buffer, value, length);
+}
+
+static int outline_count(fz_context *ctx, fz_outline *outline, int depth)
+{
+    int count = 0;
+    int child_count;
+    if (depth > MAX_OUTLINE_DEPTH)
+        fz_throw(ctx, FZ_ERROR_LIMIT, "PDF outline nesting is too deep.");
+    while (outline != NULL)
+    {
+        if (count >= MAX_OUTLINE_NODES)
+            fz_throw(ctx, FZ_ERROR_LIMIT, "PDF outline contains too many nodes.");
+        ++count;
+        child_count = outline_count(ctx, outline->down, depth + 1);
+        if (child_count > MAX_OUTLINE_NODES - count)
+            fz_throw(ctx, FZ_ERROR_LIMIT, "PDF outline contains too many nodes.");
+        count += child_count;
+        outline = outline->next;
+    }
+    return count;
+}
+
+static void append_outline_nodes(
+    fz_context *ctx,
+    fz_buffer *buffer,
+    fz_document *document,
+    fz_outline *outline,
+    int depth)
+{
+    if (depth > MAX_OUTLINE_DEPTH)
+        fz_throw(ctx, FZ_ERROR_LIMIT, "PDF outline nesting is too deep.");
+    while (outline != NULL)
+    {
+        fz_location location = outline->page;
+        fz_page *page = NULL;
+        fz_rect bounds = fz_empty_rect;
+        int page_index = -1;
+        float top = -1;
+        if (outline->uri != NULL)
+            location = fz_resolve_link(ctx, document, outline->uri, &outline->x, &outline->y);
+        page_index = fz_page_number_from_location(ctx, document, location);
+        if (page_index >= 0)
+        {
+            page = fz_load_page(ctx, document, page_index);
+            bounds = fz_bound_page(ctx, page);
+            top = normalized_coordinate(outline->y, bounds.y0, bounds.y1 - bounds.y0);
+            fz_drop_page(ctx, page);
+        }
+        fz_append_int32_le(ctx, buffer, depth);
+        fz_append_int32_le(ctx, buffer, page_index);
+        append_float_le(ctx, buffer, top);
+        fz_append_int32_le(ctx, buffer, (int)outline->flags);
+        append_outline_string(ctx, buffer, outline->title);
+        append_outline_string(ctx, buffer, outline->uri);
+        if (outline->down != NULL)
+            append_outline_nodes(ctx, buffer, document, outline->down, depth + 1);
+        outline = outline->next;
+    }
+}
+
+static void append_rect_le(fz_context *ctx, fz_buffer *buffer, fz_rect rect)
+{
+    append_float_le(ctx, buffer, rect.x0);
+    append_float_le(ctx, buffer, rect.y0);
+    append_float_le(ctx, buffer, rect.x1);
+    append_float_le(ctx, buffer, rect.y1);
+}
+
+static fz_rect char_bounds(fz_stext_char *character)
+{
+    fz_rect bounds = fz_empty_rect;
+    fz_point points[4];
+    int index;
+
+    points[0] = character->quad.ul;
+    points[1] = character->quad.ur;
+    points[2] = character->quad.lr;
+    points[3] = character->quad.ll;
+    bounds.x0 = bounds.x1 = points[0].x;
+    bounds.y0 = bounds.y1 = points[0].y;
+    for (index = 1; index < 4; ++index)
+    {
+        if (points[index].x < bounds.x0)
+            bounds.x0 = points[index].x;
+        if (points[index].x > bounds.x1)
+            bounds.x1 = points[index].x;
+        if (points[index].y < bounds.y0)
+            bounds.y0 = points[index].y;
+        if (points[index].y > bounds.y1)
+            bounds.y1 = points[index].y;
+    }
+    return bounds;
+}
+
+static int line_count(fz_stext_line *line)
+{
+    int count = 0;
+    while (line != NULL)
+    {
+        ++count;
+        line = line->next;
+    }
+    return count;
+}
+
+static int char_count(fz_stext_char *character)
+{
+    int count = 0;
+    while (character != NULL)
+    {
+        ++count;
+        character = character->next;
+    }
+    return count;
 }
 
 JNIEXPORT jstring JNICALL
@@ -1072,6 +1203,408 @@ Java_dev_xuexue_platform_MuPdfNative_dropTextPage(JNIEnv *env, jobject self, jlo
     (void)self;
     if (ctx != NULL && handle != 0)
         fz_drop_stext_page(ctx, (fz_stext_page *)(intptr_t)handle);
+}
+
+JNIEXPORT jbyteArray JNICALL
+Java_dev_xuexue_platform_MuPdfNative_extractStructuredText(JNIEnv *env, jobject self, jlong handle)
+{
+    fz_context *ctx = get_context(env);
+    fz_stext_page *text_page = (fz_stext_page *)(intptr_t)handle;
+    fz_stext_block *block;
+    fz_buffer *buffer = NULL;
+    jbyteArray result;
+    int block_total = 0;
+
+    (void)self;
+    if (ctx == NULL || text_page == NULL)
+        return NULL;
+    for (block = text_page->first_block; block != NULL; block = block->next)
+        ++block_total;
+    fz_var(buffer);
+    fz_try(ctx)
+    {
+        fz_append_int32_le(ctx, buffer = fz_new_buffer(ctx, 4096), 0x31545853);
+        fz_append_int32_le(ctx, buffer, 2);
+        append_float_le(ctx, buffer, text_page->mediabox.x0);
+        append_float_le(ctx, buffer, text_page->mediabox.y0);
+        append_float_le(ctx, buffer, text_page->mediabox.x1 - text_page->mediabox.x0);
+        append_float_le(ctx, buffer, text_page->mediabox.y1 - text_page->mediabox.y0);
+        fz_append_int32_le(ctx, buffer, block_total);
+        for (block = text_page->first_block; block != NULL; block = block->next)
+        {
+            fz_stext_line *line = NULL;
+            int lines = block->type == FZ_STEXT_BLOCK_TEXT ? line_count(block->u.t.first_line) : 0;
+            fz_append_int32_le(ctx, buffer, block->type);
+            append_rect_le(ctx, buffer, block->bbox);
+            fz_append_int32_le(ctx, buffer, lines);
+            if (block->type != FZ_STEXT_BLOCK_TEXT)
+                continue;
+            for (line = block->u.t.first_line; line != NULL; line = line->next)
+            {
+                fz_stext_char *character;
+                append_rect_le(ctx, buffer, line->bbox);
+                fz_append_byte(ctx, buffer, line->wmode != 0);
+                fz_append_byte(ctx, buffer, 0);
+                fz_append_byte(ctx, buffer, 0);
+                fz_append_byte(ctx, buffer, 0);
+                fz_append_int32_le(ctx, buffer, char_count(line->first_char));
+                for (character = line->first_char; character != NULL; character = character->next)
+                {
+                    append_rect_le(ctx, buffer, char_bounds(character));
+                    fz_append_int32_le(ctx, buffer, character->c);
+                    append_float_le(ctx, buffer, character->size);
+                    fz_append_int32_le(ctx, buffer, character->flags);
+                    fz_append_int32_le(ctx, buffer, (int)character->argb);
+                }
+            }
+        }
+    }
+    fz_catch(ctx)
+    {
+        fz_drop_buffer(ctx, buffer);
+        rethrow_mupdf(env, ctx);
+        return NULL;
+    }
+    result = copy_buffer(env, ctx, buffer);
+    fz_drop_buffer(ctx, buffer);
+    return result;
+}
+
+static int read_payload_uint32(
+    const unsigned char *data,
+    size_t length,
+    size_t *offset,
+    uint32_t *value)
+{
+    if (*offset > length || length - *offset < 4)
+        return 0;
+    *value = (uint32_t)data[*offset] |
+        ((uint32_t)data[*offset + 1] << 8) |
+        ((uint32_t)data[*offset + 2] << 16) |
+        ((uint32_t)data[*offset + 3] << 24);
+    *offset += 4;
+    return 1;
+}
+
+static int read_payload_int(
+    const unsigned char *data,
+    size_t length,
+    size_t *offset,
+    int *value)
+{
+    uint32_t raw;
+    if (!read_payload_uint32(data, length, offset, &raw))
+        return 0;
+    *value = (int32_t)raw;
+    return 1;
+}
+
+static int read_payload_float(
+    const unsigned char *data,
+    size_t length,
+    size_t *offset,
+    float *value)
+{
+    uint32_t bits;
+    union
+    {
+        uint32_t bits;
+        float value;
+    } decoded;
+    if (!read_payload_uint32(data, length, offset, &bits))
+        return 0;
+    decoded.bits = bits;
+    *value = decoded.value;
+    return 1;
+}
+
+static char *read_payload_string(fz_context *ctx, const unsigned char *data, size_t length, size_t *offset)
+{
+    int string_length;
+    char *result;
+    if (!read_payload_int(data, length, offset, &string_length) ||
+        string_length < 0 ||
+        (size_t)string_length > MAX_OUTLINE_STRING_BYTES ||
+        *offset > length ||
+        (size_t)string_length > length - *offset)
+        fz_throw(ctx, FZ_ERROR_FORMAT, "Invalid PDF outline export string.");
+    result = fz_malloc(ctx, (size_t)string_length + 1);
+    memcpy(result, data + *offset, (size_t)string_length);
+    result[string_length] = '\0';
+    *offset += (size_t)string_length;
+    return result;
+}
+
+static char *outline_target_uri(fz_context *ctx, pdf_document *document, int page, float top)
+{
+    pdf_page *page_object = NULL;
+    char *uri = NULL;
+    fz_rect bounds;
+    float target_y;
+
+    fz_var(page_object);
+    fz_var(uri);
+    fz_try(ctx)
+    {
+        if (isfinite(top) && top >= 0.0f && top <= 1.0f)
+        {
+            page_object = pdf_load_page(ctx, document, page);
+            bounds = pdf_bound_page(ctx, page_object, FZ_CROP_BOX);
+            target_y = bounds.y0 + top * (bounds.y1 - bounds.y0);
+            uri = fz_asprintf(ctx, "#page=%d&zoom=nan,nan,%g", page + 1, target_y);
+        }
+        else
+        {
+            uri = fz_asprintf(ctx, "#page=%d", page + 1);
+        }
+    }
+    fz_always(ctx)
+    {
+        pdf_drop_page(ctx, page_object);
+    }
+    fz_catch(ctx)
+    {
+        fz_free(ctx, uri);
+        fz_rethrow(ctx);
+    }
+    return uri;
+}
+
+JNIEXPORT jbyteArray JNICALL
+Java_dev_xuexue_platform_MuPdfNative_loadOutline(JNIEnv *env, jobject self, jlong handle)
+{
+    fz_context *ctx = get_context(env);
+    fz_document *document = (fz_document *)(intptr_t)handle;
+    fz_outline *outline = NULL;
+    fz_buffer *buffer = NULL;
+    jbyteArray result;
+    int count;
+
+    (void)self;
+    if (ctx == NULL || document == NULL)
+        return NULL;
+    fz_var(outline);
+    fz_var(buffer);
+    fz_try(ctx)
+    {
+        outline = fz_load_outline(ctx, document);
+        count = outline_count(ctx, outline, 0);
+        buffer = fz_new_buffer(ctx, 4096);
+        fz_append_int32_le(ctx, buffer, 0x314C4F58);
+        fz_append_int32_le(ctx, buffer, 1);
+        fz_append_int32_le(ctx, buffer, count);
+        append_outline_nodes(ctx, buffer, document, outline, 0);
+    }
+    fz_always(ctx)
+    {
+        fz_drop_outline(ctx, outline);
+    }
+    fz_catch(ctx)
+    {
+        fz_drop_buffer(ctx, buffer);
+        rethrow_mupdf(env, ctx);
+        return NULL;
+    }
+    result = copy_buffer(env, ctx, buffer);
+    fz_drop_buffer(ctx, buffer);
+    return result;
+}
+
+JNIEXPORT void JNICALL
+Java_dev_xuexue_platform_MuPdfNative_exportOutline(
+    JNIEnv *env,
+    jobject self,
+    jbyteArray source_path_utf8,
+    jbyteArray output_path_utf8,
+    jbyteArray payload,
+    jint strategy)
+{
+    fz_context *ctx = get_context(env);
+    pdf_document *document = NULL;
+    fz_outline_iterator *iterator = NULL;
+    char *source_path = NULL;
+    char *output_path = NULL;
+    unsigned char *data = NULL;
+    jsize payload_length;
+    size_t offset = 0;
+    int count;
+    int previous_depth = -1;
+    int current_depth = -1;
+    int index;
+    pdf_write_options write_options = pdf_default_write_options;
+
+    (void)self;
+    if (ctx == NULL)
+        return;
+    if (strategy != 0 && strategy != 1)
+    {
+        throw_java(env, "java/lang/IllegalArgumentException", "Unknown PDF outline export strategy.");
+        return;
+    }
+    source_path = copy_utf8(env, source_path_utf8);
+    if (source_path == NULL)
+        return;
+    output_path = copy_utf8(env, output_path_utf8);
+    if (output_path == NULL)
+    {
+        free(source_path);
+        return;
+    }
+    if (strcmp(source_path, output_path) == 0)
+    {
+        free(source_path);
+        free(output_path);
+        throw_java(env, "java/lang/IllegalArgumentException", "PDF outline export must use a new output path.");
+        return;
+    }
+    if (payload == NULL)
+    {
+        free(source_path);
+        free(output_path);
+        throw_java(env, "java/lang/NullPointerException", "PDF outline export payload must not be null.");
+        return;
+    }
+    payload_length = (*env)->GetArrayLength(env, payload);
+    if (payload_length < 12 || (size_t)payload_length > MAX_OUTLINE_PAYLOAD_BYTES)
+    {
+        free(source_path);
+        free(output_path);
+        throw_java(env, "java/lang/IllegalArgumentException", "PDF outline export payload is too short.");
+        return;
+    }
+    data = (unsigned char *)malloc((size_t)payload_length);
+    if (data == NULL)
+    {
+        free(source_path);
+        free(output_path);
+        throw_java(env, "java/lang/OutOfMemoryError", "Could not allocate PDF outline export payload.");
+        return;
+    }
+    (*env)->GetByteArrayRegion(env, payload, 0, payload_length, (jbyte *)data);
+    if ((*env)->ExceptionCheck(env))
+    {
+        free(data);
+        free(source_path);
+        free(output_path);
+        return;
+    }
+
+    fz_var(document);
+    fz_var(iterator);
+    fz_try(ctx)
+    {
+        {
+            int magic;
+            int version;
+            if (!read_payload_int(data, (size_t)payload_length, &offset, &magic) ||
+                !read_payload_int(data, (size_t)payload_length, &offset, &version) ||
+                magic != 0x31454C58 ||
+                version != 1)
+                fz_throw(ctx, FZ_ERROR_FORMAT, "Invalid PDF outline export payload.");
+        }
+        if (!read_payload_int(data, (size_t)payload_length, &offset, &count))
+            fz_throw(ctx, FZ_ERROR_FORMAT, "Invalid PDF outline export payload.");
+        if (count < 0 || count > MAX_OUTLINE_NODES)
+            fz_throw(ctx, FZ_ERROR_LIMIT, "PDF outline export contains too many nodes.");
+        document = pdf_open_document(ctx, source_path);
+        if (pdf_specifics(ctx, (fz_document *)document) == NULL)
+            fz_throw(ctx, FZ_ERROR_ARGUMENT, "Source document is not an editable PDF.");
+        if (pdf_needs_password(ctx, document))
+            fz_throw(ctx, FZ_ERROR_ARGUMENT, "PDF password authentication is required before Outline export.");
+        if (!pdf_has_permission(ctx, document, FZ_PERMISSION_EDIT) ||
+            !pdf_has_permission(ctx, document, FZ_PERMISSION_ASSEMBLE))
+            fz_throw(ctx, FZ_ERROR_ARGUMENT, "PDF permissions do not allow Outline editing or assembly.");
+        if (pdf_was_repaired(ctx, document))
+            fz_throw(ctx, FZ_ERROR_FORMAT, "PDF was repaired while opening; refusing Outline export.");
+        if (pdf_count_signatures(ctx, document) > 0)
+            fz_throw(ctx, FZ_ERROR_ARGUMENT, "PDF contains digital signatures that export would invalidate.");
+        iterator = fz_new_outline_iterator(ctx, (fz_document *)document);
+        if (strategy == 1)
+        {
+            while (fz_outline_iterator_item(ctx, iterator) != NULL)
+                fz_outline_iterator_delete(ctx, iterator);
+        }
+        else if (fz_outline_iterator_item(ctx, iterator) != NULL)
+        {
+            while (fz_outline_iterator_next(ctx, iterator) == 0)
+                ;
+        }
+        for (index = 0; index < count; ++index)
+        {
+            fz_outline_item item;
+            char *title = NULL;
+            char *uri = NULL;
+            int depth;
+            int page;
+            float top;
+            if (!read_payload_int(data, (size_t)payload_length, &offset, &depth) ||
+                !read_payload_int(data, (size_t)payload_length, &offset, &page) ||
+                !read_payload_float(data, (size_t)payload_length, &offset, &top))
+                fz_throw(ctx, FZ_ERROR_FORMAT, "Invalid PDF outline export payload.");
+            (void)top;
+            if (depth < 0 || depth > MAX_OUTLINE_DEPTH || (index > 0 && depth > previous_depth + 1))
+                fz_throw(ctx, FZ_ERROR_FORMAT, "PDF outline export contains an invalid hierarchy.");
+            if (page < 0 || page >= fz_count_pages(ctx, (fz_document *)document))
+                fz_throw(ctx, FZ_ERROR_ARGUMENT, "PDF outline export target page is outside the document.");
+            title = read_payload_string(ctx, data, (size_t)payload_length, &offset);
+            uri = outline_target_uri(ctx, document, page, top);
+            item.title = title;
+            item.uri = uri;
+            item.is_open = 1;
+            item.flags = 0;
+            item.r = 0;
+            item.g = 0;
+            item.b = 0;
+            if (index == 0)
+            {
+                current_depth = 0;
+            }
+            else if (depth == current_depth)
+            {
+                if (fz_outline_iterator_next(ctx, iterator) < 0)
+                    fz_throw(ctx, FZ_ERROR_ARGUMENT, "Could not move to the next PDF outline item.");
+            }
+            else if (depth == current_depth + 1)
+            {
+                if (fz_outline_iterator_down(ctx, iterator) < 0)
+                    fz_throw(ctx, FZ_ERROR_ARGUMENT, "Could not descend into the PDF outline tree.");
+            }
+            else
+            {
+                while (current_depth > depth)
+                {
+                    if (fz_outline_iterator_up(ctx, iterator) < 0)
+                        fz_throw(ctx, FZ_ERROR_ARGUMENT, "Could not ascend the PDF outline tree.");
+                    --current_depth;
+                }
+                if (fz_outline_iterator_next(ctx, iterator) < 0)
+                    fz_throw(ctx, FZ_ERROR_ARGUMENT, "Could not move to a PDF outline sibling.");
+            }
+            fz_outline_iterator_insert(ctx, iterator, &item);
+            fz_free(ctx, title);
+            fz_free(ctx, uri);
+            if (fz_outline_iterator_prev(ctx, iterator) < 0)
+                fz_throw(ctx, FZ_ERROR_ARGUMENT, "Could not normalize the PDF outline iterator.");
+            previous_depth = depth;
+            current_depth = depth;
+        }
+        if (offset != (size_t)payload_length)
+            fz_throw(ctx, FZ_ERROR_FORMAT, "PDF outline export payload contains trailing bytes.");
+        write_options.do_incremental = pdf_can_be_saved_incrementally(ctx, document);
+        pdf_save_document(ctx, document, output_path, &write_options);
+    }
+    fz_always(ctx)
+    {
+        fz_drop_outline_iterator(ctx, iterator);
+        pdf_drop_document(ctx, document);
+        free(data);
+        free(source_path);
+        free(output_path);
+    }
+    fz_catch(ctx)
+    {
+        rethrow_mupdf(env, ctx);
+    }
 }
 
 JNIEXPORT jbyteArray JNICALL

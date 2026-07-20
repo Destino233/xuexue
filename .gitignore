@@ -7,4 +7,6 @@ out/
 .DS_Store
 .xuexue/
 .mupdf/
+__pycache__/
+*.pyc
 参考内容/

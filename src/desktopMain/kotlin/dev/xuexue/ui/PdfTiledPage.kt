@@ -46,6 +46,7 @@ import dev.xuexue.DocumentTab
 import dev.xuexue.WorkbenchState
 import dev.xuexue.platform.PdfLink
 import dev.xuexue.platform.PdfNormalizedRect
+import dev.xuexue.platform.PdfOutlineReviewState
 import dev.xuexue.platform.PdfPageDimensions
 import dev.xuexue.platform.PdfRasterLayer
 import dev.xuexue.platform.PdfRasterPriority
@@ -56,9 +57,16 @@ import kotlin.math.ceil
 internal data class PdfPageInteraction(
     val searchRegions: List<PdfNormalizedRect> = emptyList(),
     val selectionRegions: List<PdfNormalizedRect> = emptyList(),
+    val outlineEvidenceRegions: List<PdfOutlineEvidenceRegion> = emptyList(),
     val selectionActions: PdfSelectionActions? = null,
     val textSelectionInteraction: PdfTextSelectionInteraction? = null,
     val onLink: (PdfLink) -> Unit = {},
+)
+
+internal data class PdfOutlineEvidenceRegion(
+    val bounds: PdfNormalizedRect,
+    val reviewState: PdfOutlineReviewState,
+    val confidence: Float?,
 )
 
 private data class PdfPagePresentation(
@@ -183,12 +191,10 @@ private fun PdfPageSurface(
                 PdfPageOverlays(
                     tab = tab,
                     page = page,
-                    searchRegions = interaction.searchRegions,
-                    selectionRegions = interaction.selectionRegions,
+                    interaction = interaction,
                     links = links,
                     pageWidth = pageWidth,
                     pageHeight = pageHeight,
-                    onLink = interaction.onLink,
                 )
             }
         }
@@ -256,12 +262,10 @@ private fun PdfTileGrid(
 private fun PdfPageOverlays(
     tab: DocumentTab,
     page: Int,
-    searchRegions: List<PdfNormalizedRect>,
-    selectionRegions: List<PdfNormalizedRect>,
+    interaction: PdfPageInteraction,
     links: List<PdfLink>,
     pageWidth: Dp,
     pageHeight: Dp,
-    onLink: (PdfLink) -> Unit,
 ) {
     tab.pdfAnnotations
         .asSequence()
@@ -287,11 +291,31 @@ private fun PdfPageOverlays(
                 MaterialTheme.colorScheme.tertiary.copy(alpha = 0.14f),
             )
         }
-    searchRegions.forEach { region ->
+    interaction.searchRegions.forEach { region ->
         PdfRegionOverlay(region, pageWidth, pageHeight, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.26f))
     }
-    selectionRegions.forEach { region ->
+    interaction.selectionRegions.forEach { region ->
         PdfRegionOverlay(region, pageWidth, pageHeight, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
+    }
+    interaction.outlineEvidenceRegions.forEach { evidence ->
+        val color =
+            when (evidence.reviewState) {
+                PdfOutlineReviewState.CANDIDATE -> MaterialTheme.colorScheme.tertiary
+                PdfOutlineReviewState.REJECTED -> MaterialTheme.colorScheme.error
+                PdfOutlineReviewState.CONFIRMED, PdfOutlineReviewState.MANUAL -> Color.Transparent
+            }
+        if (color != Color.Transparent) {
+            Box(
+                Modifier
+                    .offset(
+                        x = pageWidth * evidence.bounds.left,
+                        y = pageHeight * evidence.bounds.top,
+                    ).width(pageWidth * (evidence.bounds.right - evidence.bounds.left))
+                    .height(pageHeight * (evidence.bounds.bottom - evidence.bounds.top))
+                    .background(color.copy(alpha = 0.1f))
+                    .border(1.dp, color),
+            )
+        }
     }
     links.forEach { link ->
         Box(
@@ -301,7 +325,7 @@ private fun PdfPageOverlays(
                 .height(pageHeight * (link.region.bottom - link.region.top))
                 .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.05f))
                 .pointerHoverIcon(PointerIcon.Hand)
-                .clickable { onLink(link) },
+                .clickable { interaction.onLink(link) },
         )
     }
 }

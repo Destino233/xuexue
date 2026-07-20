@@ -136,6 +136,7 @@ internal class MuPdfSessionManager(
         )
 }
 
+@Suppress("TooManyFunctions") // Session operations must stay on the same MuPDF document actor.
 internal class MuPdfDocumentSession(
     private val path: Path,
     private val documentDispatcher: CoroutineDispatcher,
@@ -156,6 +157,28 @@ internal class MuPdfDocumentSession(
             val count = MuPdfNative.countPages(document())
             require(pageIndex in 0 until count) { "PDF page index $pageIndex is outside 0 until $count." }
             linkCache[pageIndex] ?: MuPdfNative.loadLinks(document(), pageIndex).also { linkCache[pageIndex] = it }
+        }
+
+    suspend fun loadOutline(): ByteArray = onActorWithProgressiveData { MuPdfNative.loadOutline(document()) }
+
+    suspend fun extractStructuredText(pageIndex: Int): PdfStructuredTextPage =
+        onActorWithProgressiveData {
+            val count = MuPdfNative.countPages(document())
+            require(pageIndex in 0 until count) { "PDF page index $pageIndex is outside 0 until $count." }
+            val entry =
+                pageCache[pageIndex]
+                    ?: loadPageSnapshot(pageIndex)
+                        .let(::MuPdfPageEntry)
+                        .also { loaded -> pageCache[pageIndex] = loaded }
+            entry.activeLeases++
+            try {
+                PdfNativePayloadCodec.decodeStructuredText(
+                    MuPdfNative.extractStructuredText(entry.snapshot.textPage().handle),
+                )
+            } finally {
+                entry.activeLeases--
+                evictDisplayLists()
+            }
         }
 
     suspend fun acquirePage(pageIndex: Int): MuPdfPageLease =

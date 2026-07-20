@@ -210,7 +210,19 @@ private fun ToolContent(
             }
 
             ToolWindow.OUTLINE -> {
-                OutlineTool(state)
+                val document = state.activeDocument
+                if (document?.kind == DocumentKind.PDF) {
+                    PdfOutlinePanel(
+                        state = state,
+                        tab = document,
+                        onPage = { page ->
+                            state.setPdfPosition(page = page, document = document)
+                            state.autoHideToolPanelAfterAction()
+                        },
+                    )
+                } else {
+                    OutlineTool(state)
+                }
             }
 
             ToolWindow.PROPERTIES -> {

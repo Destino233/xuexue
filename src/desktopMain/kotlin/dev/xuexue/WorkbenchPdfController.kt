@@ -52,9 +52,11 @@ internal class WorkbenchPdfController(
         scrollOffset: Int?,
         zoom: Float?,
         persist: Boolean = true,
+        topNormalized: Float? = null,
     ) {
         document?.takeIf { it.kind == DocumentKind.PDF }?.let { tab ->
             if (page != null) {
+                tab.pdfNavigationTopNormalized = topNormalized?.coerceIn(0f, 1f)
                 val nextPage = page.coerceAtLeast(0)
                 if (scrollOffset == null) {
                     tab.pdfScrollOffset = 0

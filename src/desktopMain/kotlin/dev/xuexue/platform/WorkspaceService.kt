@@ -5,6 +5,10 @@ import dev.xuexue.core.IndexedNote
 import dev.xuexue.core.MarkdownParser
 import dev.xuexue.core.WorkspaceEntry
 import dev.xuexue.core.WorkspaceIndex
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.LinkOption
@@ -117,8 +121,10 @@ data class PersistedWorkbench(
     val pdfColorModes: Map<String, String> = emptyMap(),
 )
 
+@Serializable
 data class AppPreferences(
     val documentWheelZoomMultiplier: Float = DEFAULT_DOCUMENT_WHEEL_ZOOM_MULTIPLIER,
+    val documentAnalysisSettings: DocumentAnalysisSettings = DocumentAnalysisSettings(),
 )
 
 const val DEFAULT_DOCUMENT_WHEEL_ZOOM_MULTIPLIER = 1f
@@ -136,6 +142,8 @@ fun normalizedDocumentWheelZoomMultiplier(value: Float): Float =
 class WorkspaceService(
     private val appStateDirectory: Path = Path.of(System.getProperty("user.home"), ".xuexue"),
 ) {
+    private val preferencesJson = Json { ignoreUnknownKeys = true }
+
     fun canonicalRoot(root: Path): Path {
         require(Files.isDirectory(root)) { "Workspace root is not a readable directory." }
         return root.toRealPath()
@@ -816,6 +824,15 @@ class WorkspaceService(
                         properties.getProperty("documentWheelZoomMultiplier")?.toFloatOrNull()
                             ?: DEFAULT_DOCUMENT_WHEEL_ZOOM_MULTIPLIER,
                     ),
+                documentAnalysisSettings =
+                    properties
+                        .getProperty("documentAnalysisSettings")
+                        ?.let { value ->
+                            runCatching {
+                                preferencesJson.decodeFromString<DocumentAnalysisSettings>(value)
+                            }.getOrNull()
+                        }
+                        ?: DocumentAnalysisSettings(),
             )
         }.getOrDefault(AppPreferences())
     }
@@ -830,6 +847,10 @@ class WorkspaceService(
                     setProperty(
                         "documentWheelZoomMultiplier",
                         normalizedDocumentWheelZoomMultiplier(preferences.documentWheelZoomMultiplier).toString(),
+                    )
+                    setProperty(
+                        "documentAnalysisSettings",
+                        preferencesJson.encodeToString(preferences.documentAnalysisSettings),
                     )
                 }
             Files.newOutputStream(temp).use { properties.store(it, "XueXue application preferences") }

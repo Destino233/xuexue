@@ -105,6 +105,17 @@ internal object MuPdfNative {
         optionsUtf8: ByteArray,
     ): ByteArray
 
+    external fun extractStructuredText(textPageHandle: Long): ByteArray
+
+    external fun loadOutline(documentHandle: Long): ByteArray
+
+    external fun exportOutline(
+        sourcePathUtf8: ByteArray,
+        outputPathUtf8: ByteArray,
+        payload: ByteArray,
+        strategy: Int,
+    )
+
     external fun createTextPage(displayListHandle: Long): Long
 
     external fun dropTextPage(textPageHandle: Long)

@@ -113,6 +113,20 @@ tasks.withType<Test>().configureEach {
         "--enable-native-access=ALL-UNNAMED",
         "-Djava.library.path=${muPdfDirectory.asFile.absolutePath}",
     )
+    listOf(
+        "xuexue.pdf.eval.pdf",
+        "xuexue.pdf.eval.manifest",
+        "xuexue.pdf.eval.report",
+        "xuexue.pdf.eval.endpoint",
+        "xuexue.pdf.eval.sidecarPid",
+        "xuexue.pdf.eval.dpi",
+        "xuexue.pdf.benchmark.pages",
+        "xuexue.pdf.benchmark.report",
+    ).forEach { propertyName ->
+        System.getProperty(propertyName)?.let { propertyValue ->
+            systemProperty(propertyName, propertyValue)
+        }
+    }
 }
 
 kotlin {
@@ -132,6 +146,7 @@ kotlin {
         }
         getByName("desktopMain") {
             dependencies {
+                implementation(project(":pi-coding-agent"))
                 implementation(project(":pi-agent-core"))
                 implementation(compose.desktop.currentOs)
                 implementation(compose.material3)

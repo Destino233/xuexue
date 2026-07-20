@@ -201,7 +201,7 @@ private fun WelcomeAction(
         )
     val elevation by
         animateDpAsState(
-            targetValue = if (hovered) 3.dp else 0.dp,
+            targetValue = if (primary && hovered) 3.dp else 0.dp,
             animationSpec = WorkbenchMotion.fastTween(),
             label = "welcome action elevation",
         )

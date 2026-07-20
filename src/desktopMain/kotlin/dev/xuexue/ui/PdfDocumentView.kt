@@ -1,4 +1,5 @@
-@file:Suppress("FunctionNaming", "ktlint:standard:function-naming")
+// The PDF screen owns several focused panel and viewport composables in one interaction surface.
+@file:Suppress("FunctionNaming", "ktlint:standard:function-naming", "TooManyFunctions")
 @file:OptIn(
     androidx.compose.material3.ExperimentalMaterial3Api::class,
     androidx.compose.ui.ExperimentalComposeUiApi::class,
@@ -11,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,6 +37,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Comment
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.automirrored.filled.NavigateBefore
 import androidx.compose.material.icons.automirrored.filled.NavigateNext
 import androidx.compose.material.icons.automirrored.filled.RotateRight
@@ -85,6 +88,8 @@ import dev.xuexue.WorkbenchState
 import dev.xuexue.platform.PdfDocumentMetadata
 import dev.xuexue.platform.PdfLink
 import dev.xuexue.platform.PdfNormalizedRect
+import dev.xuexue.platform.PdfOutlineNode
+import dev.xuexue.platform.PdfOutlineReviewState
 import dev.xuexue.platform.PdfPageDimensions
 import dev.xuexue.platform.PdfPagePoint
 import dev.xuexue.platform.PdfRasterPriority
@@ -105,7 +110,7 @@ import java.awt.datatransfer.StringSelection
 import java.net.URI
 import kotlin.math.roundToInt
 
-private enum class PdfSidePanel { NONE, THUMBNAILS, ANNOTATIONS }
+private enum class PdfSidePanel { NONE, THUMBNAILS, ANNOTATIONS, OUTLINE }
 
 private enum class PdfViewMode { CONTINUOUS, SINGLE, DOUBLE }
 
@@ -317,7 +322,7 @@ internal fun PdfDocument(
             currentPageDimensions = DEFAULT_PAGE_DIMENSIONS
         }
     }
-    LaunchedEffect(tab.pdfNavigationSerial, viewMode, pageCount) {
+    LaunchedEffect(tab.pdfNavigationSerial, tab.pdfNavigationTopNormalized, viewMode, pageCount) {
         if (viewMode == PdfViewMode.CONTINUOUS && pageCount > 0) {
             val targetPage = tab.pdfPage.coerceIn(0, pageCount - 1)
             if (
@@ -325,6 +330,13 @@ internal fun PdfDocument(
                 listState.firstVisibleItemScrollOffset != tab.pdfScrollOffset
             ) {
                 listState.scrollToItem(targetPage, tab.pdfScrollOffset)
+            }
+            tab.pdfNavigationTopNormalized?.let { top ->
+                val pageItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { item -> item.index == targetPage }
+                if (pageItem != null) {
+                    listState.scrollBy(pageItem.size * top)
+                    tab.pdfNavigationTopNormalized = null
+                }
             }
         }
     }
@@ -559,6 +571,11 @@ internal fun PdfDocument(
                 })
                 EditorTool(Icons.AutoMirrored.Filled.Comment, "批注", {
                     tab.pdfSidePanel = (if (sidePanel == PdfSidePanel.ANNOTATIONS) PdfSidePanel.NONE else PdfSidePanel.ANNOTATIONS).name
+                    state.persistLayout()
+                })
+                EditorTool(Icons.AutoMirrored.Filled.FormatListBulleted, "目录", {
+                    tab.pdfSidePanel =
+                        (if (sidePanel == PdfSidePanel.OUTLINE) PdfSidePanel.NONE else PdfSidePanel.OUTLINE).name
                     state.persistLayout()
                 })
             }
@@ -974,47 +991,182 @@ private fun PdfSidePanelView(
     onPage: (Int) -> Unit,
 ) {
     Column(Modifier.width(184.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surface)) {
-        Row(Modifier.fillMaxWidth().height(35.dp).padding(horizontal = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(if (panel == PdfSidePanel.THUMBNAILS) "缩略图" else "批注", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.weight(1f))
-            Text(if (panel == PdfSidePanel.THUMBNAILS) "$pageCount 页" else "${tab.pdfAnnotations.size}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-        }
+        PdfSidePanelHeader(panel, pageCount, tab)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        if (panel == PdfSidePanel.THUMBNAILS) {
-            LazyColumn(
-                Modifier.fillMaxSize(),
-                contentPadding =
-                    androidx.compose.foundation.layout
-                        .PaddingValues(vertical = 9.dp),
-                verticalArrangement = Arrangement.spacedBy(9.dp),
-            ) {
-                items(pageCount) { page -> PdfThumbnail(state, tab, page, tab.pdfPage == page) { onPage(page) } }
-            }
-        } else if (tab.pdfAnnotations.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) { Text("选择页面后可添加高亮或批注。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        } else {
-            LazyColumn(
-                Modifier.fillMaxSize(),
-                contentPadding =
-                    androidx.compose.foundation.layout
-                        .PaddingValues(vertical = 6.dp),
-            ) {
-                items(tab.pdfAnnotations, key = { it.id }) { annotation ->
-                    Row(Modifier.fillMaxWidth().clickable { onPage(annotation.page) }.padding(start = 10.dp, top = 8.dp, bottom = 8.dp, end = 3.dp), verticalAlignment = Alignment.Top) {
-                        Icon(if (annotation.kind == "highlight") Icons.Default.Highlight else Icons.AutoMirrored.Filled.Comment, null, Modifier.size(16.dp), tint = if (annotation.kind == "highlight") MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.tertiary)
-                        Spacer(Modifier.width(7.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("第 ${annotation.page + 1} 页", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
-                            Text(annotation.text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                        }
-                        IconButton(onClick = { state.removePdfAnnotation(tab, annotation) }, modifier = Modifier.size(27.dp)) { Icon(Icons.Default.DeleteOutline, "删除批注", Modifier.size(14.dp), tint = MaterialTheme.colorScheme.error) }
+        PdfSidePanelContent(state, tab, pageCount, panel, onPage)
+    }
+}
+
+@Composable
+private fun PdfSidePanelHeader(
+    panel: PdfSidePanel,
+    pageCount: Int,
+    tab: DocumentTab,
+) {
+    Row(
+        Modifier.fillMaxWidth().height(35.dp).padding(horizontal = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            panel.title(),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            panel.count(pageCount, tab),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.outline,
+        )
+    }
+}
+
+@Composable
+private fun PdfSidePanelContent(
+    state: WorkbenchState,
+    tab: DocumentTab,
+    pageCount: Int,
+    panel: PdfSidePanel,
+    onPage: (Int) -> Unit,
+) {
+    when (panel) {
+        PdfSidePanel.OUTLINE -> PdfOutlinePanel(state, tab, onPage, showHeader = false, compact = true)
+        PdfSidePanel.THUMBNAILS -> PdfThumbnailList(state, tab, pageCount, onPage)
+        PdfSidePanel.ANNOTATIONS -> PdfAnnotationList(state, tab, onPage)
+        PdfSidePanel.NONE -> Unit
+    }
+}
+
+@Composable
+private fun PdfThumbnailList(
+    state: WorkbenchState,
+    tab: DocumentTab,
+    pageCount: Int,
+    onPage: (Int) -> Unit,
+) {
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding =
+            androidx.compose.foundation.layout
+                .PaddingValues(vertical = 9.dp),
+        verticalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        items(pageCount) { page ->
+            PdfThumbnail(state, tab, page, tab.pdfPage == page) { onPage(page) }
+        }
+    }
+}
+
+@Composable
+private fun PdfAnnotationList(
+    state: WorkbenchState,
+    tab: DocumentTab,
+    onPage: (Int) -> Unit,
+) {
+    if (tab.pdfAnnotations.isEmpty()) {
+        Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+            Text(
+                "选择页面后可添加高亮或批注。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    } else {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding =
+                androidx.compose.foundation.layout
+                    .PaddingValues(vertical = 6.dp),
+        ) {
+            items(tab.pdfAnnotations, key = { it.id }) { annotation ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onPage(annotation.page) }
+                        .padding(start = 10.dp, top = 8.dp, bottom = 8.dp, end = 3.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    val isHighlight = annotation.kind == "highlight"
+                    Icon(
+                        if (isHighlight) Icons.Default.Highlight else Icons.AutoMirrored.Filled.Comment,
+                        null,
+                        Modifier.size(16.dp),
+                        tint =
+                            if (isHighlight) {
+                                MaterialTheme.colorScheme.secondary
+                            } else {
+                                MaterialTheme.colorScheme.tertiary
+                            },
+                    )
+                    Spacer(Modifier.width(7.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "第 ${annotation.page + 1} 页",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            annotation.text,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+                    IconButton(
+                        onClick = { state.removePdfAnnotation(tab, annotation) },
+                        modifier = Modifier.size(27.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.DeleteOutline,
+                            "删除批注",
+                            Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
             }
         }
     }
 }
+
+private fun PdfSidePanel.title(): String =
+    when (this) {
+        PdfSidePanel.THUMBNAILS -> "缩略图"
+        PdfSidePanel.ANNOTATIONS -> "批注"
+        PdfSidePanel.OUTLINE -> "目录"
+        PdfSidePanel.NONE -> ""
+    }
+
+private fun PdfSidePanel.count(
+    pageCount: Int,
+    tab: DocumentTab,
+): String =
+    when (this) {
+        PdfSidePanel.THUMBNAILS -> {
+            "$pageCount 页"
+        }
+
+        PdfSidePanel.ANNOTATIONS -> {
+            tab.pdfAnnotations.size.toString()
+        }
+
+        PdfSidePanel.OUTLINE -> {
+            tab.pdfOutline
+                ?.nodes
+                ?.let(::countPdfOutlineNodes)
+                ?.toString() ?: "0"
+        }
+
+        PdfSidePanel.NONE -> {
+            ""
+        }
+    }
+
+private fun countPdfOutlineNodes(
+    nodes: List<PdfOutlineNode>,
+): Int = nodes.sumOf { node -> 1 + countPdfOutlineNodes(node.children) }
 
 @Composable
 private fun PdfThumbnail(
@@ -1090,6 +1242,7 @@ private fun PdfPageItem(
     val originalAspectRatio = pageDimensions.widthPoints / pageDimensions.heightPoints
     val aspectRatio = if (rotation % 180f == 90f) 1f / originalAspectRatio else originalAspectRatio
     val fitWidth = tab.pdfFitMode == PdfFitMode.WIDTH.name
+    val outlineEvidenceRegions = outlineEvidenceForPage(tab.pdfOutline?.nodes.orEmpty(), page)
     Column(modifier.clickable(onClick = onSelect), horizontalAlignment = Alignment.CenterHorizontally) {
         Text("${page + 1}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
         Spacer(Modifier.height(5.dp))
@@ -1126,6 +1279,7 @@ private fun PdfPageItem(
                     PdfPageInteraction(
                         searchRegions = searchRegions,
                         selectionRegions = selectionRegions,
+                        outlineEvidenceRegions = outlineEvidenceRegions,
                         selectionActions = selectionActions,
                         textSelectionInteraction = textSelectionInteraction,
                         onLink = onLink,
@@ -1134,6 +1288,24 @@ private fun PdfPageItem(
         }
     }
 }
+
+internal fun outlineEvidenceForPage(
+    nodes: List<PdfOutlineNode>,
+    page: Int,
+): List<PdfOutlineEvidenceRegion> =
+    nodes.flatMap { node ->
+        val current =
+            node.evidence
+                ?.takeIf { evidence -> evidence.pageIndex == page }
+                ?.bounds
+                ?.let { bounds ->
+                    PdfOutlineEvidenceRegion(bounds, node.reviewState, node.confidence)
+                }?.takeIf { evidence ->
+                    evidence.reviewState == PdfOutlineReviewState.CANDIDATE ||
+                        evidence.reviewState == PdfOutlineReviewState.REJECTED
+                }
+        listOfNotNull(current) + outlineEvidenceForPage(node.children, page)
+    }
 
 private data class PdfZoomAnchor(
     val sourceZoom: Float,

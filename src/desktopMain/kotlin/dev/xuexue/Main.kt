@@ -27,9 +27,12 @@ fun main() =
             if (state.documents.any { it.dirty }) {
                 closeRequested = true
             } else {
-                state.persistLayout()
-                state.shutdown()
-                exitApplication()
+                scope.launch {
+                    state.persistLayout()
+                    state.shutdown()
+                    exitApplication()
+                }
+                Unit
             }
         }
 

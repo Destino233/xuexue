@@ -9,6 +9,7 @@ import dev.xuexue.core.DocumentKind
 import dev.xuexue.core.EditorMode
 import dev.xuexue.core.PiAgentMessage
 import dev.xuexue.platform.AgentMessage
+import dev.xuexue.platform.PdfOutlineDocument
 import kotlinx.serialization.Serializable
 import java.util.Locale
 
@@ -32,12 +33,17 @@ class DocumentTab(
     var pdfHorizontalOffset by mutableStateOf(0)
     var pdfVerticalOffset by mutableStateOf(0)
     var pdfNavigationSerial by mutableStateOf(0)
+    var pdfNavigationTopNormalized by mutableStateOf<Float?>(null)
     var pdfZoom by mutableStateOf(1f)
     var pdfFitMode by mutableStateOf("WIDTH")
     var pdfViewMode by mutableStateOf("CONTINUOUS")
     var pdfSidePanel by mutableStateOf("THUMBNAILS")
     var pdfRotation by mutableStateOf(0f)
     var pdfColorMode by mutableStateOf("NORMAL")
+    var pdfOutline by mutableStateOf<PdfOutlineDocument?>(null)
+    var pdfStaleOutline by mutableStateOf<PdfOutlineDocument?>(null)
+    var pdfOutlineError by mutableStateOf<String?>(null)
+    var pdfOutlineAnalyzing by mutableStateOf(false)
     var lastKnownModified by mutableStateOf(modifiedAt)
     var externalContent by mutableStateOf<String?>(null)
     var externalDeleted by mutableStateOf(false)

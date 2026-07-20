@@ -13,11 +13,13 @@ import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.Executors
 import java.util.concurrent.ThreadFactory
 import java.util.concurrent.atomic.AtomicInteger
 
+@Suppress("TooManyFunctions") // The backend groups the complete PdfReaderBackend contract around one MuPDF actor.
 internal class MuPdfReaderBackend(
     private val metrics: PdfPerformanceMetrics = PdfPerformanceMetrics(),
     private val progressiveSources: ProgressivePdfRegistry = ProgressivePdfRegistry(),
@@ -94,6 +96,38 @@ internal class MuPdfReaderBackend(
         withSession(path) { session ->
             pageProcessor.extractText(session, pageIndex)
         }
+
+    override suspend fun nativeOutline(path: Path): List<PdfNativeOutlineNode> =
+        withSession(path) { session ->
+            PdfNativePayloadCodec.decodeOutline(session.loadOutline())
+        }
+
+    override suspend fun structuredText(
+        path: Path,
+        pageIndex: Int,
+    ): PdfStructuredTextPage = withSession(path) { session -> session.extractStructuredText(pageIndex) }
+
+    override suspend fun exportOutline(
+        path: Path,
+        outputPath: Path,
+        payload: ByteArray,
+        strategy: PdfOutlineExportStrategy,
+    ) {
+        require(path.toAbsolutePath().normalize() != outputPath.toAbsolutePath().normalize()) {
+            "PDF outline export must use a new output path."
+        }
+        // MuPDF can append an Outline update safely only when the destination already
+        // contains the original byte stream; repaired PDFs fall back to a full save in C.
+        Files.copy(path, outputPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        withContext(documentDispatcher) {
+            MuPdfNative.exportOutline(
+                sourcePathUtf8 = path.toString().encodeToByteArray(),
+                outputPathUtf8 = outputPath.toString().encodeToByteArray(),
+                payload = payload,
+                strategy = strategy.ordinal,
+            )
+        }
+    }
 
     override suspend fun selectText(
         path: Path,

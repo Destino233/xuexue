@@ -1,0 +1,22 @@
+{
+  "datasetId": "archive-adventures-of-sherlock-holmes-1892",
+  "sourceUrl": "https://archive.org/download/adventuresofsherlockholmes/Adventures_of_Sherlock_Holmes.pdf",
+  "documentType": "public-domain scanned novel",
+  "pdfSha256": "ebe7ee4d8e53cbef879d19af961ff02c8508bd5af77716ae9f374804e34641bd",
+  "language": "en",
+  "pages": [13, 41, 72, 96, 128, 152, 181, 206, 237, 263, 289, 318],
+  "expected": [
+    {"title": "A SCANDAL IN BOHEMIA", "pageIndex": 13, "level": 1},
+    {"title": "THE RED-HEADED LEAGUE", "pageIndex": 41, "level": 1},
+    {"title": "A CASE OF IDENTITY", "pageIndex": 72, "level": 1},
+    {"title": "THE BOSCOMBE VALLEY MYSTERY", "pageIndex": 96, "level": 1},
+    {"title": "THE FIVE ORANGE PIPS", "pageIndex": 128, "level": 1},
+    {"title": "THE MAN WITH THE TWISTED LIP", "pageIndex": 152, "level": 1},
+    {"title": "THE ADVENTURE OF THE BLUE CARBUNCLE", "pageIndex": 181, "level": 1},
+    {"title": "THE ADVENTURE OF THE SPECKLED BAND", "pageIndex": 206, "level": 1},
+    {"title": "THE ADVENTURE OF THE ENGINEER'S THUMB", "pageIndex": 237, "level": 1},
+    {"title": "THE ADVENTURE OF THE NOBLE BACHELOR", "pageIndex": 263, "level": 1},
+    {"title": "THE ADVENTURE OF THE BERYL CORONET", "pageIndex": 289, "level": 1},
+    {"title": "THE ADVENTURE OF THE COPPER BEECHES", "pageIndex": 318, "level": 1}
+  ]
+}

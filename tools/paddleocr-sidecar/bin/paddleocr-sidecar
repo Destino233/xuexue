@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+PYTHON=${XUEXUE_PADDLEOCR_PYTHON:-python3}
+export PYTHONPATH="$ROOT/lib${PYTHONPATH:+:$PYTHONPATH}"
+exec "$PYTHON" "$ROOT/paddleocr_sidecar.py" "$@"

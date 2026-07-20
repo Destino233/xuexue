@@ -31,17 +31,22 @@ import dev.xuexue.core.WorkspaceEntry
 import dev.xuexue.core.WorkspaceIndex
 import dev.xuexue.core.agentSendAvailability
 import dev.xuexue.core.requiresExplicitApproval
+import dev.xuexue.pi.coding.InteractionResponse
 import dev.xuexue.platform.AgentClient
 import dev.xuexue.platform.AgentMessage
 import dev.xuexue.platform.AgentProviderConfig
 import dev.xuexue.platform.AppPreferences
 import dev.xuexue.platform.CachingPdfReaderBackend
 import dev.xuexue.platform.DEFAULT_DOCUMENT_WHEEL_ZOOM_MULTIPLIER
+import dev.xuexue.platform.DocumentAnalysisEngineDescriptor
+import dev.xuexue.platform.DocumentAnalysisSettings
 import dev.xuexue.platform.MuPdfReaderBackend
 import dev.xuexue.platform.OpenAiCompatibleAgentClient
 import dev.xuexue.platform.PdfDocumentMetadata
 import dev.xuexue.platform.PdfLink
 import dev.xuexue.platform.PdfNormalizedRect
+import dev.xuexue.platform.PdfOutlineExportStrategy
+import dev.xuexue.platform.PdfOutlineReviewState
 import dev.xuexue.platform.PdfPageDimensions
 import dev.xuexue.platform.PdfPagePoint
 import dev.xuexue.platform.PdfPageRaster
@@ -220,6 +225,18 @@ class WorkbenchState(
             onMessage = { message -> fileOperationMessage = message },
             onError = { message -> errorMessage = message },
         )
+    private val pdfOutlineController =
+        WorkbenchPdfOutlineController(
+            scope = scope,
+            workspaceService = workspaceService,
+            backend = resolvedPdfReaderBackend,
+            workspaceRoot = { workspaceRoot },
+            taskController = taskController,
+            onMessage = { message -> fileOperationMessage = message },
+            onError = { message -> errorMessage = message },
+            persistWorkbench = ::persistWorkbench,
+            ioDispatcher = Dispatchers.IO,
+        )
     private val remotePdfController =
         WorkbenchRemotePdfController(
             scope = scope,
@@ -256,15 +273,19 @@ class WorkbenchState(
                 workspaceService.loadAppPreferences() to workspaceService.loadLastWorkspace()
             }
         documentWheelZoomMultiplier = restored.first.documentWheelZoomMultiplier
+        pdfOutlineController.restoreSettings(restored.first.documentAnalysisSettings)
         val root = restored.second ?: return
         openWorkspace(root, restore = true)
     }
 
-    fun shutdown() {
+    suspend fun shutdown() {
         if (shutdown) return
         shutdown = true
+        pdfOutlineController.close()
         runCatching {
-            workspaceService.saveAppPreferences(AppPreferences(documentWheelZoomMultiplier))
+            workspaceService.saveAppPreferences(
+                AppPreferences(documentWheelZoomMultiplier, pdfOutlineController.settings),
+            )
         }
         pdfTextureCache.close()
         resolvedPdfReaderBackend.close()
@@ -385,6 +406,7 @@ class WorkbenchState(
             watcherJob?.cancel()
             discardWorkspaceEntryOpenRequests()
             saveAllDirty()
+            pdfOutlineController.cancelTasks()
             documentController.cancelAll()
             fileController.reset()
             taskController.clear(cancelRunning = true)
@@ -567,7 +589,10 @@ class WorkbenchState(
             if (!pinned) documents.firstOrNull { !it.pinned && !it.dirty }?.let { documents.remove(it) }
             val modifiedAt = runCatching { Files.getLastModifiedTime(path).toMillis() }.getOrDefault(0L)
             documents += DocumentTab(normalized, kind, content, pinned, modifiedAt)
-            documents.lastOrNull()?.takeIf { it.kind == DocumentKind.PDF }?.let(pdfController::loadAnnotations)
+            documents.lastOrNull()?.takeIf { it.kind == DocumentKind.PDF }?.let { pdf ->
+                pdfController.loadAnnotations(pdf)
+                pdfOutlineController.loadOutline(pdf)
+            }
             activePath = normalized
             recentDocuments.remove(normalized)
             recentDocuments.add(0, normalized)
@@ -688,7 +713,10 @@ class WorkbenchState(
                     modifiedAt = loaded.modifiedAt,
                 ).also { created ->
                     documents += created
-                    if (created.kind == DocumentKind.PDF) pdfController.loadAnnotations(created)
+                    if (created.kind == DocumentKind.PDF) {
+                        pdfController.loadAnnotations(created)
+                        pdfOutlineController.loadOutline(created)
+                    }
                 }
             }
 
@@ -1032,8 +1060,9 @@ class WorkbenchState(
         zoom: Float? = null,
         document: DocumentTab? = activeDocument,
         persist: Boolean = true,
+        topNormalized: Float? = null,
     ) {
-        pdfController.setPosition(document, page, scrollOffset, zoom, persist)
+        pdfController.setPosition(document, page, scrollOffset, zoom, persist, topNormalized)
     }
 
     fun setPdfFitMode(
@@ -1081,6 +1110,108 @@ class WorkbenchState(
         document: DocumentTab,
         pageIndex: Int,
     ): List<PdfLink> = pdfController.links(document, pageIndex)
+
+    val documentAnalysisEngineDescriptors: List<DocumentAnalysisEngineDescriptor>
+        get() = pdfOutlineController.engineDescriptors
+
+    val documentAnalysisSettings: DocumentAnalysisSettings
+        get() = pdfOutlineController.settings
+
+    val documentAnalysisHostComputeProfile
+        get() = pdfOutlineController.hostComputeProfile
+
+    val documentAnalysisAvailabilities
+        get() = pdfOutlineController.engineAvailabilities
+
+    val documentAnalysisRecommendedEngineId: String?
+        get() = pdfOutlineController.recommendedEngineId
+
+    fun refreshDocumentAnalysisHardware(startRuntime: Boolean = false) {
+        pdfOutlineController.refreshHardware(startRuntime)
+    }
+
+    fun analyzePdfOutline(
+        document: DocumentTab,
+        engineId: String? = null,
+    ) = pdfOutlineController.analyze(document, engineId)
+
+    fun cancelPdfOutlineAnalysis(document: DocumentTab) = pdfOutlineController.cancelAnalysis(document)
+
+    fun restoreStalePdfOutline(document: DocumentTab) = pdfOutlineController.restoreStaleOutline(document)
+
+    fun setDocumentAnalysisEngine(engineId: String) {
+        pdfOutlineController.setGlobalEngine(engineId)
+        persistDocumentPreferences()
+    }
+
+    fun setPdfDocumentAnalysisEngine(
+        document: DocumentTab,
+        engineId: String?,
+    ) {
+        pdfOutlineController.setDocumentEngine(document.relativePath, engineId)
+        persistDocumentPreferences()
+    }
+
+    fun setDocumentAnalysisVlFallback(enabled: Boolean) {
+        pdfOutlineController.setAllowVlFallback(enabled)
+        persistDocumentPreferences()
+    }
+
+    fun editPdfOutlineTitle(
+        document: DocumentTab,
+        id: String,
+        title: String,
+    ) = pdfOutlineController.editTitle(document, id, title)
+
+    fun setPdfOutlineReviewState(
+        document: DocumentTab,
+        id: String,
+        reviewState: PdfOutlineReviewState,
+    ) = pdfOutlineController.setReviewState(document, id, reviewState)
+
+    fun confirmPdfOutlineHighConfidence(document: DocumentTab) = pdfOutlineController.confirmHighConfidence(document)
+
+    fun setPdfOutlineDestination(
+        document: DocumentTab,
+        id: String,
+        pageIndex: Int,
+    ) = pdfOutlineController.setDestination(document, id, pageIndex)
+
+    fun addPdfOutlineNode(
+        document: DocumentTab,
+        parentId: String?,
+        title: String,
+        pageIndex: Int,
+    ) = pdfOutlineController.addNode(document, parentId, title, pageIndex)
+
+    fun removePdfOutlineNode(
+        document: DocumentTab,
+        id: String,
+    ) = pdfOutlineController.removeNode(document, id)
+
+    fun movePdfOutlineNode(
+        document: DocumentTab,
+        id: String,
+        delta: Int,
+    ) = pdfOutlineController.moveNode(document, id, delta)
+
+    fun changePdfOutlineLevel(
+        document: DocumentTab,
+        id: String,
+        indent: Boolean,
+    ) = pdfOutlineController.changeLevel(document, id, indent)
+
+    fun exportPdfOutline(
+        document: DocumentTab,
+        outputPath: Path,
+        strategy: PdfOutlineExportStrategy,
+    ) = pdfOutlineController.export(document, outputPath, strategy)
+
+    fun exportConfirmedPdfOutline(
+        document: DocumentTab,
+        outputPath: Path,
+        strategy: PdfOutlineExportStrategy,
+    ) = pdfOutlineController.export(document, outputPath, strategy, confirmedOnly = true)
 
     fun addPdfAnnotation(
         document: DocumentTab,
@@ -1389,6 +1520,8 @@ class WorkbenchState(
         agentController.decideApproval(decision)
     }
 
+    fun respondAgentInteraction(response: InteractionResponse): Boolean = agentController.respondInteraction(response)
+
     fun setAgentDiffDecision(
         messageIndex: Int,
         decision: String?,
@@ -1503,7 +1636,7 @@ class WorkbenchState(
     }
 
     fun persistDocumentPreferences() {
-        val preferences = AppPreferences(documentWheelZoomMultiplier)
+        val preferences = AppPreferences(documentWheelZoomMultiplier, pdfOutlineController.settings)
         scope.launch(Dispatchers.IO) { runCatching { workspaceService.saveAppPreferences(preferences) } }
     }
 

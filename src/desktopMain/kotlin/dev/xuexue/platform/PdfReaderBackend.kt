@@ -2,6 +2,7 @@ package dev.xuexue.platform
 
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.Serializable
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -14,6 +15,7 @@ data class PdfPageDimensions(
     val heightPoints: Float,
 )
 
+@Serializable
 data class PdfNormalizedRect(
     val left: Float,
     val top: Float,
@@ -34,6 +36,7 @@ data class PdfNormalizedRect(
 enum class PdfRasterPurpose {
     THUMBNAIL,
     VIEWPORT,
+    ANALYSIS,
 }
 
 enum class PdfRasterLayer {
@@ -67,8 +70,20 @@ object PdfRenderLod {
         purpose: PdfRasterPurpose,
     ): Float {
         require(requestedDpi > 0f) { "PDF render DPI must be positive." }
-        if (purpose == PdfRasterPurpose.THUMBNAIL) return requestedDpi.coerceIn(18f, 48f)
-        return viewportDpiLevels.firstOrNull { it >= requestedDpi } ?: viewportDpiLevels.last()
+        return when (purpose) {
+            PdfRasterPurpose.THUMBNAIL -> {
+                requestedDpi.coerceIn(18f, 48f)
+            }
+
+            PdfRasterPurpose.ANALYSIS -> {
+                requestedDpi
+            }
+
+            PdfRasterPurpose.VIEWPORT -> {
+                viewportDpiLevels.firstOrNull { it >= requestedDpi }
+                    ?: viewportDpiLevels.last()
+            }
+        }
     }
 
     fun quantizeWithHysteresis(
@@ -79,7 +94,9 @@ object PdfRenderLod {
     ): Float {
         require(requestedDpi > 0f) { "PDF render DPI must be positive." }
         require(hysteresisFraction in 0f..<1f) { "PDF LOD hysteresis must be between zero and one." }
-        if (purpose == PdfRasterPurpose.THUMBNAIL) return quantize(requestedDpi, purpose)
+        if (purpose != PdfRasterPurpose.VIEWPORT) {
+            return if (purpose == PdfRasterPurpose.THUMBNAIL) quantize(requestedDpi, purpose) else requestedDpi
+        }
         var index = viewportDpiLevels.indexOfFirst { level -> level == currentDpi }
         if (index >= 0) {
             while (
@@ -180,6 +197,22 @@ interface PdfReaderBackend : AutoCloseable {
         pageIndex: Int,
     ): String
 
+    suspend fun nativeOutline(path: Path): List<PdfNativeOutlineNode> = emptyList()
+
+    suspend fun structuredText(
+        path: Path,
+        pageIndex: Int,
+    ): PdfStructuredTextPage? = null
+
+    suspend fun exportOutline(
+        path: Path,
+        outputPath: Path,
+        payload: ByteArray,
+        strategy: PdfOutlineExportStrategy,
+    ) {
+        error("This PDF backend does not support Outline export.")
+    }
+
     suspend fun selectText(
         path: Path,
         pageIndex: Int,
@@ -195,10 +228,16 @@ interface PdfReaderBackend : AutoCloseable {
     override fun close() = Unit
 }
 
+enum class PdfOutlineExportStrategy {
+    APPEND,
+    REPLACE,
+}
+
 /**
  * Bounded application raster cache. MuPDF's display-list and GPU caches remain separate layers;
  * this cache keeps raster work from repeating while the same LOD is reused during zoom and navigation.
  */
+@Suppress("TooManyFunctions") // This adapter forwards the full backend contract while adding bounded raster caching.
 class CachingPdfReaderBackend(
     private val delegate: PdfReaderBackend,
     private val maxRasterBytes: Long = DEFAULT_CACHE_BYTES,
@@ -222,6 +261,9 @@ class CachingPdfReaderBackend(
 
     override suspend fun render(request: PdfRasterRequest): PdfPageRaster {
         val normalizedRequest = request.copy(dpi = PdfRenderLod.quantize(request.dpi, request.purpose))
+        if (normalizedRequest.purpose == PdfRasterPurpose.ANALYSIS) {
+            return delegate.render(normalizedRequest)
+        }
         val key = normalizedRequest.cacheKey()
         val lookup =
             mutex.withLock {
@@ -286,6 +328,20 @@ class CachingPdfReaderBackend(
         path: Path,
         pageIndex: Int,
     ): String = delegate.extractPageText(path, pageIndex)
+
+    override suspend fun nativeOutline(path: Path): List<PdfNativeOutlineNode> = delegate.nativeOutline(path)
+
+    override suspend fun structuredText(
+        path: Path,
+        pageIndex: Int,
+    ): PdfStructuredTextPage? = delegate.structuredText(path, pageIndex)
+
+    override suspend fun exportOutline(
+        path: Path,
+        outputPath: Path,
+        payload: ByteArray,
+        strategy: PdfOutlineExportStrategy,
+    ) = delegate.exportOutline(path, outputPath, payload, strategy)
 
     override suspend fun selectText(
         path: Path,
