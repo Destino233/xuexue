@@ -273,7 +273,10 @@ class WorkbenchStateTest {
                             )
                         } else {
                             assertEquals("tool", messages.last().role)
-                            assertTrue(messages.last().content.contains("Wrote Note.md"))
+                            assertTrue(
+                                messages.last().content.contains("Successfully wrote") &&
+                                    messages.last().content.contains("Note.md"),
+                            )
                             onEvent(AgentStreamEvent.TextDelta("File created."))
                             PiModelResponse(content = "File created.")
                         }

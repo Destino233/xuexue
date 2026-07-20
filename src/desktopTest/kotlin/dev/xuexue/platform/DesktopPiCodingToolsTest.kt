@@ -12,6 +12,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import java.awt.image.BufferedImage
@@ -19,6 +20,7 @@ import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.CopyOnWriteArrayList
 import javax.imageio.ImageIO
 import kotlin.io.path.createDirectories
 import kotlin.io.path.deleteRecursively
@@ -30,7 +32,9 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 @OptIn(kotlin.io.path.ExperimentalPathApi::class)
@@ -254,6 +258,51 @@ class DesktopPiCodingToolsTest {
                 )
             assertContains(assertIs<TextContent>(result.content.single()).text, "Successfully wrote")
             assertEquals("created", root.resolve("nested/new.txt").readText())
+        }
+
+    @Test
+    fun bashEmitsInitialAndCoalescedStreamingUpdates() =
+        runTest {
+            val updates = CopyOnWriteArrayList<AgentToolResult>()
+            val result =
+                requireNotNull(tools["bash"]).execute(
+                    "test-bash-updates",
+                    buildJsonObject { put("command", "seq 5000") },
+                    null,
+                ) { update -> updates += update }
+            assertTrue(updates.isNotEmpty())
+            assertTrue(updates.first().content.isEmpty())
+            assertTrue(updates.size < 100)
+            assertContains(assertIs<TextContent>(result.content.single()).text, "4999")
+        }
+
+    @Test
+    fun bashPersistsFullOutputForLineTruncation() =
+        runTest {
+            val result = execute("bash", buildJsonObject { put("command", "seq 3000") })
+            val text = assertIs<TextContent>(result.content.single()).text
+            assertContains(text, "Showing lines 1001-3000 of 3000")
+            val path = assertNotNull(result.details.jsonObject["fullOutputPath"])
+            val fullOutput = Files.readString(Path.of(path.jsonPrimitive.content))
+            assertContains(fullOutput, "1\n2\n3")
+            assertContains(fullOutput, "2998\n2999\n3000")
+        }
+
+    @Test
+    fun bashTimeoutIncludesOutputCollectedBeforeCancellation() =
+        runTest {
+            val error =
+                assertFailsWith<IllegalStateException> {
+                    execute(
+                        "bash",
+                        buildJsonObject {
+                            put("command", "printf before; sleep 2")
+                            put("timeout", 0.1)
+                        },
+                    )
+                }
+            assertContains(error.message.orEmpty(), "before")
+            assertContains(error.message.orEmpty(), "Command timed out after 0.1 seconds")
         }
 
     private suspend fun execute(

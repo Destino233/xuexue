@@ -25,7 +25,7 @@ class LocalBashExecutorTest {
     fun persistsFullOutputWhenTailIsTruncated() =
         runTest {
             val cwd = Files.createTempDirectory("xuexue-bash-test")
-            val result = LocalBashExecutor().execute("printf '%050000d' 0", cwd.toString())
+            val result = LocalBashExecutor().execute("printf '%060000d' 0", cwd.toString())
 
             assertTrue(result.truncated)
             val fullOutputPath = assertNotNull(result.fullOutputPath)

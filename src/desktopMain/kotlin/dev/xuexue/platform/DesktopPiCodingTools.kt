@@ -4,20 +4,24 @@ package dev.xuexue.platform
 
 import dev.xuexue.core.AgentOperationKind
 import dev.xuexue.core.FileMutationQueue
+import dev.xuexue.core.ToolTruncatedBy
 import dev.xuexue.core.ToolTruncationResult
 import dev.xuexue.core.truncateToolHead
-import dev.xuexue.core.truncateToolTail
 import dev.xuexue.pi.agent.AgentTool
 import dev.xuexue.pi.agent.AgentToolResult
 import dev.xuexue.pi.ai.AbortSignal
 import dev.xuexue.pi.ai.ImageContent
 import dev.xuexue.pi.ai.TextContent
 import dev.xuexue.pi.ai.ToolResultContent
+import dev.xuexue.pi.coding.PiBashOutputAccumulator
+import dev.xuexue.pi.coding.PiBashOutputSnapshot
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -36,9 +40,9 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
-import java.nio.file.StandardOpenOption
 import java.util.Base64
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.coroutineContext
 import kotlin.math.max
@@ -216,14 +220,35 @@ internal class DesktopPiCodingTools(
             val relative = displayPath(root, path)
             mutationQueue.withPath(path.toString()) {
                 allowed(AgentOperationKind.WRITE_FILE, relative, "Write ${content.length} characters")
+                val before =
+                    if (Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                        Files.readString(path, StandardCharsets.UTF_8)
+                    } else {
+                        ""
+                    }
                 throwIfAborted(signal)
                 workspaceService.atomicWrite(path, content)
                 throwIfAborted(signal)
+                val details =
+                    if (before != content) {
+                        val patch = generatePiUnifiedPatch(relative, before, content)
+                        buildJsonObject {
+                            put(
+                                "fileDiff",
+                                buildJsonObject {
+                                    put("relativePath", relative)
+                                    put("patch", patch.substringAfter("\n").substringAfter("\n"))
+                                },
+                            )
+                        }
+                    } else {
+                        buildJsonObject {}
+                    }
+                return@withPath AgentToolResult(
+                    content = listOf(TextContent("Successfully wrote ${content.length} bytes to $rawPath")),
+                    details = details,
+                )
             }
-            AgentToolResult(
-                content = listOf(TextContent("Successfully wrote ${content.length} bytes to $rawPath")),
-                details = buildJsonObject {},
-            )
         }
 
     private fun editTool(): AgentTool =
@@ -373,6 +398,8 @@ internal class DesktopPiCodingTools(
             execute = { _, args, signal, onUpdate -> executeBash(args, signal, onUpdate) },
         )
 
+    // Keep Pi's streaming, timeout, abort, exit-code, and temp-file lifecycle in one state machine.
+    @Suppress("CyclomaticComplexMethod", "LongMethod")
     private suspend fun executeBash(
         args: JsonObject,
         signal: AbortSignal?,
@@ -382,7 +409,14 @@ internal class DesktopPiCodingTools(
             throwIfAborted(signal)
             val command = args.requiredString("command")
             val timeoutSeconds = args["timeout"]?.jsonPrimitive?.doubleOrNull
-            require(timeoutSeconds == null || timeoutSeconds > 0.0) {
+            require(
+                timeoutSeconds == null ||
+                    (
+                        timeoutSeconds.isFinite() &&
+                            timeoutSeconds > 0.0 &&
+                            timeoutSeconds <= MAX_TIMEOUT_SECONDS
+                    ),
+            ) {
                 "Invalid timeout: must be a finite number of seconds"
             }
             val root = root()
@@ -395,58 +429,85 @@ internal class DesktopPiCodingTools(
             activeProcess.set(process)
             val abortSubscription = signal?.onAbort { destroyProcess(process) }
             val cancellation = coroutineContext[Job]?.invokeOnCompletion { destroyProcess(process) }
-            try {
-                val output =
-                    if (timeoutSeconds != null) {
-                        withTimeout((timeoutSeconds * 1_000).toLong().coerceAtLeast(1L)) {
-                            readProcessOutput(process)
-                        }
-                    } else {
-                        readProcessOutput(process)
+            val output = PiBashOutputAccumulator(PI_TOOL_MAX_LINES, PI_TOOL_MAX_BYTES, "pi-bash")
+            val timedOut = AtomicBoolean(false)
+            val timeoutJob =
+                timeoutSeconds?.let { seconds ->
+                    launch {
+                        delay((seconds * 1_000).toLong().coerceAtLeast(1L))
+                        if (timedOut.compareAndSet(false, true)) destroyProcess(process)
                     }
-                throwIfAborted(signal)
-                val exitCode = process.waitFor()
-                val truncation = truncateToolTail(output, PI_TOOL_MAX_LINES, PI_TOOL_MAX_BYTES)
-                var fullOutputPath: String? = null
-                if (truncation.truncated) {
-                    fullOutputPath =
-                        runCatching {
-                            Files
-                                .createTempFile("pi-bash-", ".log")
-                                .also { path ->
-                                    Files.writeString(
-                                        path,
-                                        output,
-                                        StandardCharsets.UTF_8,
-                                        StandardOpenOption.TRUNCATE_EXISTING,
-                                    )
-                                }.toString()
-                        }.getOrNull()
                 }
-                val text = bashOutput(truncation, fullOutputPath)
-                onUpdate?.update(
+            var outputDirty = false
+            var lastUpdateAt = 0L
+            var finalSnapshot: PiBashOutputSnapshot? = null
+
+            fun emitOutputUpdate() {
+                if (onUpdate == null || !outputDirty) return
+                val now = System.nanoTime()
+                if (now - lastUpdateAt < BASH_UPDATE_INTERVAL_NS) return
+                val snapshot = output.snapshot(persistIfTruncated = true)
+                val truncation = snapshot.toToolTruncation()
+                onUpdate.update(
                     AgentToolResult(
-                        content = listOf(TextContent(text)),
-                        details =
-                            piDetails(
-                                truncation.takeIf { it.truncated },
-                                fullOutputPath?.let { buildJsonObject { put("fullOutputPath", it) } },
-                            ),
+                        content = listOf(TextContent(snapshot.content)),
+                        details = piDetails(truncation.takeIf { snapshot.truncated }, snapshot.fullOutputDetails()),
                     ),
                 )
+                outputDirty = false
+                lastUpdateAt = now
+            }
+
+            fun finishOutput(): PiBashOutputSnapshot {
+                finalSnapshot?.let { return it }
+                output.finish()
+                emitOutputUpdate()
+                return output.snapshot(persistIfTruncated = true).also {
+                    finalSnapshot = it
+                    output.closeTempFile()
+                }
+            }
+
+            onUpdate?.update(AgentToolResult(content = emptyList(), details = buildJsonObject {}))
+            try {
+                val exitCode =
+                    readProcessOutput(process, output, signal) {
+                        outputDirty = true
+                        emitOutputUpdate()
+                    }
+                val snapshot = finishOutput()
+                if (timedOut.get()) {
+                    val text = bashOutput(snapshot.toToolTruncation(), snapshot.fullOutputPath)
+                    error("$text\n\nCommand timed out after $timeoutSeconds seconds")
+                }
+                if (signal?.isAborted == true) {
+                    error("${bashOutput(snapshot.toToolTruncation(), snapshot.fullOutputPath)}\n\nCommand aborted")
+                }
+                val truncation = snapshot.toToolTruncation()
+                val text = bashOutput(truncation, snapshot.fullOutputPath)
                 if (exitCode != 0) error("$text\n\nCommand exited with code $exitCode")
                 AgentToolResult(
                     content = listOf(TextContent(text)),
-                    details =
-                        piDetails(
-                            truncation.takeIf { it.truncated },
-                            fullOutputPath?.let { buildJsonObject { put("fullOutputPath", it) } },
-                        ),
+                    details = piDetails(truncation.takeIf { it.truncated }, snapshot.fullOutputDetails()),
                 )
-            } catch (error: kotlinx.coroutines.TimeoutCancellationException) {
+            } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
                 destroyProcess(process)
-                throw IllegalStateException("Command timed out after $timeoutSeconds seconds", error)
+                val snapshot = runCatching { finishOutput() }.getOrNull()
+                val outputText = snapshot?.let { bashOutput(it.toToolTruncation(), it.fullOutputPath) }.orEmpty()
+                val prefix = outputText.takeIf(String::isNotEmpty)?.let { "$it\n\n" }.orEmpty()
+                error("${prefix}Command timed out after $timeoutSeconds seconds")
+            } catch (error: CancellationException) {
+                destroyProcess(process)
+                val snapshot = runCatching { finishOutput() }.getOrNull()
+                val outputText = snapshot?.let { bashOutput(it.toToolTruncation(), it.fullOutputPath) }.orEmpty()
+                val prefix = outputText.takeIf(String::isNotEmpty)?.let { "$it\n\n" }.orEmpty()
+                if (signal?.isAborted == true) {
+                    error("${prefix}Command aborted")
+                }
+                throw error
             } finally {
+                if (finalSnapshot == null) runCatching { finishOutput() }
+                timeoutJob?.cancel()
                 abortSubscription?.dispose()
                 cancellation?.dispose()
                 activeProcess.compareAndSet(process, null)
@@ -460,15 +521,61 @@ internal class DesktopPiCodingTools(
         return listOf(shell, "-lc", command)
     }
 
-    private fun readProcessOutput(process: Process): String =
-        process.inputStream
-            .bufferedReader(StandardCharsets.UTF_8)
-            .use { it.readText().replace("\r", "") }
+    private fun readProcessOutput(
+        process: Process,
+        output: PiBashOutputAccumulator,
+        signal: AbortSignal?,
+        onChunk: () -> Unit,
+    ): Int {
+        val buffer = ByteArray(8 * 1024)
+        process.inputStream.use { input ->
+            while (true) {
+                if (signal?.isAborted == true) throw CancellationException("Operation aborted")
+                val count = input.read(buffer)
+                if (count < 0) break
+                output.append(buffer.copyOf(count))
+                onChunk()
+            }
+        }
+        return process.waitFor()
+    }
 
     private fun destroyProcess(process: Process) {
+        runCatching {
+            process.toHandle().descendants().toList().asReversed().forEach { descendant ->
+                descendant.destroy()
+            }
+        }
         process.destroy()
+        runCatching {
+            process.toHandle().descendants().toList().asReversed().forEach { descendant ->
+                if (descendant.isAlive) descendant.destroyForcibly()
+            }
+        }
         if (process.isAlive) process.destroyForcibly()
     }
+
+    private fun PiBashOutputSnapshot.toToolTruncation(): ToolTruncationResult =
+        ToolTruncationResult(
+            content = content,
+            truncated = truncated,
+            truncatedBy =
+                truncatedBy?.let {
+                    ToolTruncatedBy.valueOf(it.name)
+                },
+            totalLines = totalLines,
+            totalBytes = totalBytes,
+            outputLines = outputLines,
+            outputBytes = outputBytes,
+            lastLinePartial = lastLinePartial,
+            maxLines = maxLines,
+            maxBytes = maxBytes,
+        )
+
+    private fun PiBashOutputSnapshot.fullOutputDetails(): JsonObject? =
+        fullOutputPath?.let { path ->
+            buildJsonObject { put("fullOutputPath", path) }
+        }
 
     private fun bashOutput(
         truncation: ToolTruncationResult,
@@ -857,6 +964,11 @@ internal class DesktopPiCodingTools(
             ?.contentOrNull
             ?.toBooleanStrictOrNull()
             ?: false
+
+    private companion object {
+        const val BASH_UPDATE_INTERVAL_NS = 100_000_000L
+        const val MAX_TIMEOUT_SECONDS = 2_147_483.647
+    }
 
     private data class EditRequest(
         val oldText: String,

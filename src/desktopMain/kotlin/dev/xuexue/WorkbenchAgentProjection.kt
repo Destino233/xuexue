@@ -20,6 +20,8 @@ internal class WorkbenchAgentProjection(
     private val session: AgentSessionState,
     private val assistantId: String,
 ) {
+    private val toolTargets = mutableMapOf<String, String>()
+
     fun apply(event: AgentEvent) {
         when (event) {
             is AgentEvent.MessageStart -> applyMessage(event.message)
@@ -122,11 +124,8 @@ internal class WorkbenchAgentProjection(
             listOf("path", "file_path", "query", "command")
                 .firstNotNullOfOrNull { key -> event.args[key]?.jsonPrimitive?.contentOrNull }
                 .orEmpty()
-        val content =
-            listOf(event.toolName, target, event.args.toString())
-                .filter(String::isNotBlank)
-                .joinToString("\n")
-        upsert("tool_call", event.toolCallId, content)
+        if (target.isNotBlank()) toolTargets[event.toolCallId] = target
+        upsert("tool_call", event.toolCallId, toolCallContent(event.toolName, target, event.args))
     }
 
     private fun applyToolStart(event: AgentSessionEvent.ToolExecutionStart) {
@@ -134,11 +133,28 @@ internal class WorkbenchAgentProjection(
             listOf("path", "file_path", "query", "command")
                 .firstNotNullOfOrNull { key -> event.args[key]?.jsonPrimitive?.contentOrNull }
                 .orEmpty()
-        val content =
-            listOf(event.toolName, target, event.args.toString())
-                .filter(String::isNotBlank)
-                .joinToString("\n")
-        upsert("tool_call", event.toolCallId, content)
+        if (target.isNotBlank()) toolTargets[event.toolCallId] = target
+        upsert("tool_call", event.toolCallId, toolCallContent(event.toolName, target, event.args))
+    }
+
+    private fun toolCallContent(
+        toolName: String,
+        target: String,
+        args: JsonObject,
+    ): String {
+        val action =
+            when (toolName) {
+                "read" -> "Reading"
+                "write" -> "Writing"
+                "edit" -> "Editing"
+                "bash" -> "Running"
+                "grep" -> "Searching"
+                "find" -> "Finding"
+                "ls" -> "Listing"
+                else -> toolName
+            }
+        val headline = listOf(action, target).filter(String::isNotBlank).joinToString(" ")
+        return listOf(headline, args.toString()).filter(String::isNotBlank).joinToString("\n")
     }
 
     private fun applyToolUpdate(
@@ -151,7 +167,16 @@ internal class WorkbenchAgentProjection(
 
     private fun applyToolResult(message: ToolResultMessage) {
         val output = message.content.filterIsInstance<TextContent>().joinToString("") { it.text }
-        upsert("tool", message.toolCallId, output, message.isError)
+        val displayOutput =
+            if (message.toolName == "write") {
+                toolTargets[message.toolCallId]
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { target -> "Wrote $target\n$output" }
+                    ?: output
+            } else {
+                output
+            }
+        upsert("tool", message.toolCallId, displayOutput, message.isError)
         val fileDiff = (message.details as? JsonObject)?.get("fileDiff") as? JsonObject
         val relativePath = fileDiff?.get("relativePath")?.jsonPrimitive?.contentOrNull
         val patch = fileDiff?.get("patch")?.jsonPrimitive?.contentOrNull

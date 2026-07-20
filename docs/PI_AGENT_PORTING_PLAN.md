@@ -39,7 +39,7 @@ Headless Runtime 骨架，并开始由 XueXue Compose 作为正式宿主消费�
 | --- | --- | --- |
 | 模型调用 | `:pi-ai` 已有消息/内容/模型协议、事件流、取消、估算、`AuthStore`、`ModelRegistry`、1057 个文本模型和 35 个图像模型目录；OpenAI Completions/Responses、Azure Responses、Bedrock Converse、Anthropic Messages、Google Generative AI、OpenRouter Images、Mistral-compatible 和 OpenAI Codex Responses adapter 已接入 fixture；三类主要 Provider 的 Prompt Cache retention/key/marker 已统一；Anthropic/OpenAI Responses/Codex 原生 deferred tools 已接入；共享错误体路径已保留 status、网关 JSON reason、空体语义和截断诊断 | Google Vertex ADC/OAuth refresh、Bedrock profile/完整 AWS credential chain、Codex WebSocket connection reuse、OAuth refresh、Bedrock/deferred-tool cache 细节和兼容 facade 仍待补 |
 | Agent Loop | `:pi-agent-core` 已复刻双层 Loop、完整事件、并行/顺序工具、两类队列、钩子和工具参数 schema 校验；`ToolExecution.kt` 固定 `prepare -> schema validation -> before hook -> execute` 顺序 | 原 Agent 核心测试已映射；仍依赖上层补齐 retry、compaction 和资源刷新；复杂 TypeBox-only schema 关键字仍待补齐 |
-| 工具 | `read/write/edit/bash/grep/find/ls` 已接入 `AgentSession`；共享 UTF-8 head/tail 截断、同路径文件修改队列、Bash cancel cleanup 和 RPC/Session Bash full-output 文件已补；`read` 已支持图片尺寸/Base64 限制、BMP 转 PNG 和长首行原路径 fallback；`edit` 已保留 BOM/CRLF，支持 NFKC/智能引号/Unicode 空白/破折号/行尾空白 fuzzy matching、原始区间多编辑、重叠保护和 LCS unified diff；`grep/find/ls` 已覆盖 literal/context、二进制跳过、glob、`.gitignore` 和 dotfile/entry limit；`DesktopPiCodingToolsTest` 当前 11 项通过 | Bash stream accumulator/增量事件、进程树回收、nested git/ignore negation/prune、完整图片格式（Java ImageIO 不含 WebP）和 details 仍需逐项对齐 Pi；旧 `DesktopAgentTools` 路径仍需复用同一输出执行器 |
+| 工具 | `read/write/edit/bash/grep/find/ls` 已接入 `AgentSession`；共享 UTF-8 head/tail 截断、同路径文件修改队列、Bash cancel cleanup 和 RPC/Session Bash full-output 文件已补；`read` 已支持图片尺寸/Base64 限制、BMP 转 PNG 和长首行原路径 fallback；`write/edit` 已提供桌面 `fileDiff`/LCS unified patch details，Workbench projection 保留可读工具文案；`edit` 已保留 BOM/CRLF，支持 NFKC/智能引号/Unicode 空白/破折号/行尾空白 fuzzy matching、原始区间多编辑、重叠保护和 LCS unified diff；`grep/find/ls` 已覆盖 literal/context、二进制跳过、glob、`.gitignore` 和 dotfile/entry limit；桌面 Bash 已使用共享 UTF-8 流式 accumulator，支持 50KB/2000 行 tail、完整输出文件、初始/合并增量更新、timeout/abort 保留已收集输出和 descendants 回收；`DesktopPiCodingToolsTest` 当前 14 项、`PiBashOutputAccumulatorTest` 3 项通过 | nested git/ignore negation/prune、完整图片格式（Java ImageIO 不含 WebP）、detached process group 回收和全部 details 仍需逐项对齐 Pi；旧 `DesktopAgentTools` 路径仍需复用同一输出执行器 |
 | 会话 | `:pi-coding-agent` 已有 Pi v3 append-only tree/JSONL、`AgentSession`、retry 与手动/阈值/overflow compaction | branch summary、导入导出和原测试逐文件映射仍待补；`AgentSessionRuntime` 已提供统一 startup/new/resume/fork/shutdown 生命周期 |
 | 上下文 | 已有 Pi 系统提示构建器、ResourceLoader、父目录 AGENTS/CLAUDE 继承、SYSTEM/APPEND_SYSTEM、Skills 与模板发现；已补动态资源 metadata、ignore 规则、`AgentSession` 提示词重建和插件 hooks | 缺完整 YAML、package manager、JAR/Process loader、异步资源生命周期和 token 管理 |
 | UI | Compose 已通过 `AgentSessionRuntime` 调用 prompt/steer/abort，收集正式 Runtime 运行态 StateFlow，并消费 Runtime 交互请求；旧 DTO/投影仍作为迁移兼容层，且已保留 thinking/tool call/tool result 的可检查投影 | 会话树和完整 structured message 投影尚未完全替换旧消息列表 |
@@ -214,14 +214,20 @@ compaction 后可以继续对话并回看原始历史。
 `grepSupportsLiteralContextAndSkipsBinaryFiles`、`lsIncludesDotfilesAndReportsEntryLimit`、
 `editAppliesMultipleOriginalRangesAndReturnsPatchDetails`、
 `editPreservesBomAndCrLfWhileMatchingNormalizedText`、
-`editUsesPiFuzzyMatchingForSmartQuotesAndTrailingWhitespace` 和
-`writeCreatesParentDirectories`，共 11 项。图片处理目前依赖 JVM `ImageIO`；WebP 不纳入已完成
-语义，避免把格式失败误报为 Pi parity。
+`editUsesPiFuzzyMatchingForSmartQuotesAndTrailingWhitespace`、`writeCreatesParentDirectories`、
+`bashEmitsInitialAndCoalescedStreamingUpdates`、`bashPersistsFullOutputForLineTruncation` 和
+`bashTimeoutIncludesOutputCollectedBeforeCancellation`，共 14 项；另有
+`PiBashOutputAccumulatorTest` 覆盖跨 chunk UTF-8、trailing newline 行数和尾部超长单行。图片处理
+目前依赖 JVM `ImageIO`；WebP 不纳入已完成语义，避免把格式失败误报为 Pi parity。
 
 工作项：
 
 - 逐项复刻 Pi 的 `read/write/edit/bash/grep/find/ls` 参数、截断和 details。
-- 实现 shell output accumulator、二进制/图片读取、文件修改串行队列和 edit diff。
+- shell output accumulator 已统一到 `PiBashOutputAccumulator`：跨 chunk UTF-8 解码、50KB/2000
+  行 tail、trailing newline 语义、完整输出临时文件和 partial 最后一行均有测试；桌面 Bash
+  还提供初始/100ms 合并增量更新、独立 timeout timer、timeout/abort 的已收集输出和
+  `ProcessHandle.descendants()` 回收。继续补齐二进制/图片读取、文件修改串行队列和 edit diff
+  的剩余 Pi details。
 - 文件系统禁止绕过 canonical workspace 边界和 symlink 规则。
 - 工具 allowlist/exclude list、read-only、offline 和 project trust 使用统一策略。
 - 将审批实现成扩展钩子/交互请求，不写死在工具内部。

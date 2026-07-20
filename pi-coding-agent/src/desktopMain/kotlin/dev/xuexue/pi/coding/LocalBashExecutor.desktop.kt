@@ -6,8 +6,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
-import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.coroutineContext
@@ -62,46 +60,45 @@ class LocalBashExecutor : AgentSessionBashExecutor {
         return listOf(shell, "-lc", command)
     }
 
-    private fun readOutput(process: Process): String {
-        val bytes = ByteArrayOutputStream()
+    private fun readOutput(process: Process): PiBashOutputSnapshot {
+        val output = PiBashOutputAccumulator(tempFilePrefix = "xuexue-pi-bash")
         val buffer = ByteArray(8 * 1024)
         process.inputStream.use { input ->
             while (true) {
                 val count = input.read(buffer)
                 if (count < 0) break
-                bytes.write(buffer, 0, count)
+                output.append(buffer.copyOf(count))
             }
         }
-        return bytes.toByteArray().toString(Charsets.UTF_8).replace("\r", "")
+        output.finish()
+        return output.snapshot(persistIfTruncated = true).also { output.closeTempFile() }
     }
 
     private fun result(
-        output: String,
+        output: PiBashOutputSnapshot,
         exitCode: Int?,
         cancelled: Boolean,
-    ): BashResult {
-        if (output.length <= MAX_OUTPUT_CHARS) {
-            return BashResult(output, exitCode.takeUnless { cancelled }, cancelled, truncated = false)
-        }
-        val fullPath =
-            runCatching {
-                Files
-                    .createTempFile("xuexue-pi-bash-", ".log")
-                    .also { path ->
-                        Files.writeString(path, output)
-                    }.toString()
-            }.getOrNull()
-        return BashResult(
-            output = output.takeLast(MAX_OUTPUT_CHARS),
+    ): BashResult =
+        BashResult(
+            output = output.content,
             exitCode = exitCode.takeUnless { cancelled },
             cancelled = cancelled,
-            truncated = true,
-            fullOutputPath = fullPath,
+            truncated = output.truncated,
+            fullOutputPath = output.fullOutputPath,
         )
-    }
 
     private fun destroy(process: Process) {
+        runCatching {
+            process.toHandle().descendants().toList().asReversed().forEach { descendant ->
+                descendant.destroy()
+            }
+        }
         process.destroy()
+        runCatching {
+            process.toHandle().descendants().toList().asReversed().forEach { descendant ->
+                if (descendant.isAlive) descendant.destroyForcibly()
+            }
+        }
         if (process.isAlive) process.destroyForcibly()
     }
 
@@ -109,8 +106,4 @@ class LocalBashExecutor : AgentSessionBashExecutor {
         val process: Process,
         @Volatile var cancelled: Boolean = false,
     )
-
-    private companion object {
-        const val MAX_OUTPUT_CHARS = 20_000
-    }
 }
