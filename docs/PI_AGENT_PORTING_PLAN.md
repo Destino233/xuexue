@@ -283,8 +283,9 @@ dispose 自动注销）和 `SessionResources`（Provider 资源注册、按 sess
 override、项目资源门、扩展、持久化、默认策略、交互选择的顺序解析，Compose/RPC 可注入同一
 选择回调。下一步仍是把该解析放到 Runtime 创建前，使全局插件先参与 `project_trust`，再加载
 项目 settings/packages/extensions；此外还有安装进度、Process 请求超时后的强制宿主回收和
-package reload 资源生命周期。JVM `exec` 已补齐 timeout/AbortSignal、部分输出、spawn 失败和
-进程树终止语义。
+package reload 资源生命周期。Process bridge 已使用独立 JSONL reader channel，支持 Provider
+`timeoutMs`、取消 grace timeout 和无响应进程回收。JVM `exec` 已补齐 timeout/AbortSignal、
+部分输出、spawn 失败和进程树终止语义。
 
 验收：工具、命令、Provider、资源路径和关键生命周期钩子可以由插件注册；
 插件异常被隔离并生成诊断；reload 后旧监听器和资源全部释放。
@@ -405,7 +406,8 @@ Process Provider 使用与工具请求相同的 JSONL 通道：插件初始化�
 响应应回传请求的 `requestId`；宿主为兼容旧插件也接受省略 ID 的响应，但会丢弃明确属于
 其他请求的晚到响应。工具或 Provider 的 `AbortSignal` 触发后，宿主发送
 `{"type":"cancel","requestId":"<id>"}`；插件应返回该请求的终态并停止继续输出，宿主会把
-终态映射为取消而不是成功。无响应插件的 grace timeout 与进程回收仍待补。
+终态映射为取消而不是成功。Provider 的 `timeoutMs` 会结束当前流；取消请求在 2 秒 grace
+timeout 内没有终态时，宿主关闭 JSONL reader、终止进程并释放请求。
 
 ### 6.3 JVM 插件清单
 

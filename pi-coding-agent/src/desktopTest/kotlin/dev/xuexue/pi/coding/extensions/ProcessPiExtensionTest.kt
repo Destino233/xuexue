@@ -3,6 +3,7 @@ package dev.xuexue.pi.coding.extensions
 import dev.xuexue.pi.ai.AbortController
 import dev.xuexue.pi.ai.AssistantMessageEvent
 import dev.xuexue.pi.ai.Context
+import dev.xuexue.pi.ai.FailureStopReason
 import dev.xuexue.pi.ai.ImagesContext
 import dev.xuexue.pi.ai.ImagesModel
 import dev.xuexue.pi.ai.ImagesOptions
@@ -26,6 +27,7 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonObject
+import java.io.File
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -199,7 +201,6 @@ class ProcessPiExtensionTest {
         }
 
     @Test
-    @Suppress("InjectDispatcher") // The fixture is an external process and must run on the real IO dispatcher.
     fun processToolCancellationIsForwardedOverJsonlAndFailsTheInvocation() =
         runTest {
             val directory = Files.createTempDirectory("xuexue-process-plugin-cancel").toFile()
@@ -233,25 +234,112 @@ class ProcessPiExtensionTest {
                 runner.load(ProcessPiExtension("process", listOf(script.path), directory.path))
                 val controller = AbortController()
                 val invocation =
-                    async(Dispatchers.IO) {
+                    async {
                         runner
                             .getAllRegisteredTools()
                             .single()
                             .execute("call-cancel", buildJsonObject {}, controller.signal, null)
                     }
 
-                withContext(Dispatchers.IO) {
-                    repeat(500) {
-                        if (directory.resolve("tool-started").exists()) return@withContext
-                        delay(10)
-                    }
-                    error("Process tool did not start")
-                }
+                awaitFile(directory.resolve("tool-started"))
                 controller.abort()
 
                 val failure = runCatching { invocation.await() }.exceptionOrNull()
                 assertIs<CancellationException>(failure)
                 assertTrue(directory.resolve("cancel-received.jsonl").readText().contains("\"type\":\"cancel\""))
+                runner.dispose()
+            } finally {
+                directory.deleteRecursively()
+            }
+        }
+
+    @Test
+    fun processToolCancellationTerminatesAnUnresponsivePluginAfterGraceTimeout() =
+        runTest {
+            val directory = Files.createTempDirectory("xuexue-process-plugin-unresponsive").toFile()
+            val script = directory.resolve("plugin.sh")
+            script.writeText(
+                """
+                #!/bin/sh
+                while IFS= read -r line; do
+                  case "${'$'}line" in
+                    *initialize*)
+                      echo '{"type":"register_tool","name":"process-tool","description":"Process tool","parameters":{}}'
+                      echo '{"type":"ready"}'
+                      ;;
+                    *tool_call*)
+                      touch tool-started
+                      while :; do :; done
+                      ;;
+                  esac
+                done
+                """.trimIndent(),
+            )
+            check(script.setExecutable(true))
+            try {
+                val runner = PiExtensionRunner(directory.path)
+                runner.load(ProcessPiExtension("process", listOf(script.path), directory.path))
+                val controller = AbortController()
+                val invocation =
+                    async {
+                        runner
+                            .getAllRegisteredTools()
+                            .single()
+                            .execute("call-cancel", buildJsonObject {}, controller.signal, null)
+                    }
+
+                awaitFile(directory.resolve("tool-started"))
+                val startedAt = System.nanoTime()
+                controller.abort()
+
+                val failure = runCatching { invocation.await() }.exceptionOrNull()
+                val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
+                assertIs<CancellationException>(failure)
+                assertTrue(elapsedMs < 5_000, "Unresponsive plugin cancellation took $elapsedMs ms")
+                runner.dispose()
+            } finally {
+                directory.deleteRecursively()
+            }
+        }
+
+    @Test
+    fun processProviderTimeoutEndsTheStreamAndAllowsShutdown() =
+        runTest {
+            val directory = Files.createTempDirectory("xuexue-process-provider-timeout").toFile()
+            val script = directory.resolve("provider.sh")
+            script.writeText(
+                """
+                #!/bin/sh
+                while IFS= read -r line; do
+                  case "${'$'}line" in
+                    *initialize*)
+                      echo '{"type":"register_provider","id":"process-provider","name":"Process provider","supportedApis":["process-api"]}'
+                      echo '{"type":"ready"}'
+                      ;;
+                    *provider_stream*)
+                      while :; do :; done
+                      ;;
+                  esac
+                done
+                """.trimIndent(),
+            )
+            check(script.setExecutable(true))
+            try {
+                val runner = PiExtensionRunner(directory.path)
+                runner.load(ProcessPiExtension("process", listOf(script.path), directory.path))
+                val events =
+                    runner
+                        .getAllRegisteredProviders()
+                        .single()
+                        .stream(
+                            model(),
+                            Context(messages = listOf(UserMessage(UserText("timeout"), timestamp = 1))),
+                            SimpleStreamOptions(stream = StreamOptions(timeoutMs = 50)),
+                        ).asFlow()
+                        .toList()
+
+                val error = assertIs<AssistantMessageEvent.Error>(events.single())
+                assertEquals(FailureStopReason.ERROR, error.reason)
                 runner.dispose()
             } finally {
                 directory.deleteRecursively()
@@ -331,4 +419,15 @@ class ProcessPiExtensionTest {
             output = listOf(ModelInput.IMAGE),
             cost = ModelCost(0.0, 0.0, 0.0, 0.0),
         )
+
+    @Suppress("InjectDispatcher") // Polls an external process fixture on the real IO dispatcher.
+    private suspend fun awaitFile(file: File) {
+        withContext(Dispatchers.IO) {
+            repeat(500) {
+                if (file.exists()) return@withContext
+                delay(10)
+            }
+            error("Process fixture did not create ${file.name}")
+        }
+    }
 }

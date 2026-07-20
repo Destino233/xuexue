@@ -57,11 +57,15 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -84,6 +88,7 @@ import java.io.File
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Clock
 
@@ -156,13 +161,20 @@ private class ProcessPluginBridge(
     private val workingDirectory: String,
     private val environment: Map<String, String>,
 ) {
+    private companion object {
+        const val CANCEL_GRACE_TIMEOUT_MS = 2_000L
+    }
+
     private val json = Json { ignoreUnknownKeys = true }
     private val requestMutex = Mutex()
     private val writerLock = Any()
+    private val messages = Channel<JsonObject>(Channel.UNLIMITED)
+    private val cancelledRequests = ConcurrentHashMap.newKeySet<String>()
     private val streamScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var process: Process? = null
     private var reader: BufferedReader? = null
     private var writer: BufferedWriter? = null
+    private var readerJob: kotlinx.coroutines.Job? = null
 
     fun start() {
         val builder =
@@ -174,6 +186,19 @@ private class ProcessPluginBridge(
         process = started
         reader = BufferedReader(InputStreamReader(started.inputStream, Charsets.UTF_8))
         writer = BufferedWriter(OutputStreamWriter(started.outputStream, Charsets.UTF_8))
+        val input = requireNotNull(reader)
+        readerJob =
+            streamScope.launch {
+                try {
+                    while (true) {
+                        val line = input.readLine() ?: break
+                        messages.send(json.parseToJsonElement(line).jsonObject)
+                    }
+                    messages.close()
+                } catch (error: Throwable) {
+                    messages.close(error)
+                }
+            }
     }
 
     suspend fun initialize(api: PiExtensionApi) =
@@ -207,19 +232,19 @@ private class ProcessPluginBridge(
 
     suspend fun dispose() =
         withContext(Dispatchers.IO) {
-            requestMutex.withLock {
-                if (process == null) return@withLock
+            val current =
                 synchronized(writerLock) {
+                    val running = process ?: return@synchronized null
                     runCatching {
                         sendLocked(buildJsonObject { put("type", "shutdown") })
                     }
+                    running
                 }
-                process?.destroy()
-                if (process?.waitFor(2, java.util.concurrent.TimeUnit.SECONDS) == false) process?.destroyForcibly()
-                reader?.close()
-                writer?.close()
-                process = null
+            current?.destroy()
+            if (current != null && !current.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) {
+                current.destroyForcibly()
             }
+            terminateProcessHandles()
             streamScope.cancel()
         }
 
@@ -264,28 +289,40 @@ private class ProcessPluginBridge(
         val job =
             streamScope.launch {
                 try {
-                    requestMutex.withLock {
-                        if (options.stream.signal?.isAborted == true) {
-                            throw CancellationException("Operation aborted")
+                    withOptionalTimeout(options.stream.timeoutMs) {
+                        requestMutex.withLock {
+                            if (options.stream.signal?.isAborted == true) {
+                                throw CancellationException("Operation aborted")
+                            }
+                            synchronized(writerLock) {
+                                sendLocked(providerStreamRequest(providerId, model, context, options, requestId))
+                            }
+                            started.set(true)
+                            if (options.stream.signal?.isAborted == true) sendCancellation(requestId, cancelSent)
+                            readProviderResponses(requestId, model, options.stream.signal, stream)
+                            acknowledgeCancellation(requestId)
                         }
-                        synchronized(writerLock) {
-                            sendLocked(providerStreamRequest(providerId, model, context, options, requestId))
-                        }
-                        started.set(true)
-                        if (options.stream.signal?.isAborted == true) sendCancellation(requestId, cancelSent)
-                        readProviderResponses(requestId, model, options.stream.signal, stream)
                     }
+                } catch (error: TimeoutCancellationException) {
+                    if (started.get()) sendCancellation(requestId, cancelSent)
+                    stream.push(providerError(model, error.message ?: "Process provider timed out"))
                 } catch (error: CancellationException) {
                     stream.push(providerError(model, error.message ?: "Operation aborted", aborted = true))
                 } catch (error: Throwable) {
-                    stream.push(providerError(model, error.message ?: error.toString()))
+                    stream.push(
+                        providerError(
+                            model,
+                            error.message ?: error.toString(),
+                            aborted = options.stream.signal?.isAborted == true,
+                        ),
+                    )
                 }
             }
         job.invokeOnCompletion { subscription?.dispose() }
         return stream
     }
 
-    private fun readProviderResponses(
+    private suspend fun readProviderResponses(
         requestId: String,
         model: Model,
         signal: AbortSignal?,
@@ -294,8 +331,11 @@ private class ProcessPluginBridge(
         var terminal = false
         while (!terminal) {
             val message = messageObject()
-            if (signal?.isAborted == true) throw CancellationException("Operation aborted")
             if (matchesRequest(message, requestId)) {
+                if (signal?.isAborted == true) {
+                    acknowledgeCancellation(requestId)
+                    throw CancellationException("Operation aborted")
+                }
                 terminal = forwardProviderResponse(message, model, stream)
             }
         }
@@ -345,28 +385,41 @@ private class ProcessPluginBridge(
                 if (started.get()) sendCancellation(requestId, cancelSent)
             }
         return try {
-            withContext(Dispatchers.IO) {
-                requestMutex.withLock {
-                    if (options.signal?.isAborted == true) {
-                        imageError(model, "Operation aborted", aborted = true)
-                    } else {
-                        synchronized(writerLock) {
-                            sendLocked(imageProviderRequest(providerId, model, context, options, requestId))
+            withOptionalTimeout(options.timeoutMs) {
+                withContext(Dispatchers.IO) {
+                    requestMutex.withLock {
+                        if (options.signal?.isAborted == true) {
+                            imageError(model, "Operation aborted", aborted = true)
+                        } else {
+                            synchronized(writerLock) {
+                                sendLocked(imageProviderRequest(providerId, model, context, options, requestId))
+                            }
+                            started.set(true)
+                            if (options.signal?.isAborted == true) sendCancellation(requestId, cancelSent)
+                            val result = readImageProviderResponse(model, requestId, options.signal)
+                            acknowledgeCancellation(requestId)
+                            result
                         }
-                        started.set(true)
-                        if (options.signal?.isAborted == true) sendCancellation(requestId, cancelSent)
-                        readImageProviderResponse(model, requestId, options.signal)
                     }
                 }
             }
+        } catch (error: TimeoutCancellationException) {
+            if (started.get()) sendCancellation(requestId, cancelSent)
+            imageError(model, error.message ?: "Process image provider timed out")
         } catch (error: CancellationException) {
             imageError(model, error.message ?: "Operation aborted", aborted = true)
+        } catch (error: Throwable) {
+            imageError(
+                model,
+                error.message ?: error.toString(),
+                aborted = options.signal?.isAborted == true,
+            )
         } finally {
             subscription?.dispose()
         }
     }
 
-    private fun readImageProviderResponse(
+    private suspend fun readImageProviderResponse(
         model: ImagesModel,
         requestId: String,
         signal: AbortSignal?,
@@ -375,12 +428,13 @@ private class ProcessPluginBridge(
         while (result == null) {
             val message = messageObject()
             result =
-                if (signal?.isAborted == true) {
-                    imageError(model, "Operation aborted", aborted = true)
-                } else if (matchesRequest(message, requestId)) {
-                    parseImageProviderResponse(message, model)
-                } else {
+                if (!matchesRequest(message, requestId)) {
                     null
+                } else if (signal?.isAborted == true) {
+                    acknowledgeCancellation(requestId)
+                    imageError(model, "Operation aborted", aborted = true)
+                } else {
+                    parseImageProviderResponse(message, model)
                 }
         }
         return result
@@ -1042,11 +1096,21 @@ private class ProcessPluginBridge(
                     val response = messageObject()
                     terminal = handleRequestResponse(response, requestId, context, signal)
                 }
-                requireNotNull(terminal)
+                requireNotNull(terminal).also { requestId?.let(::acknowledgeCancellation) }
             }
+        } catch (error: Throwable) {
+            rethrowRequestError(error, signal)
         } finally {
             subscription?.dispose()
         }
+    }
+
+    private fun rethrowRequestError(
+        error: Throwable,
+        signal: AbortSignal?,
+    ): Nothing {
+        if (signal?.isAborted == true) throw CancellationException("Operation aborted")
+        throw error
     }
 
     private suspend fun handleRequestResponse(
@@ -1073,7 +1137,10 @@ private class ProcessPluginBridge(
                 if (!matchesRequest(response, requestId)) {
                     null
                 } else {
-                    if (signal?.isAborted == true) throw CancellationException("Operation aborted")
+                    if (signal?.isAborted == true) {
+                        requestId?.let(::acknowledgeCancellation)
+                        throw CancellationException("Operation aborted")
+                    }
                     response
                 }
             }
@@ -1112,6 +1179,7 @@ private class ProcessPluginBridge(
         cancelSent: AtomicBoolean,
     ) {
         if (!cancelSent.compareAndSet(false, true)) return
+        var sent = false
         synchronized(writerLock) {
             if (process == null) return@synchronized
             runCatching {
@@ -1121,9 +1189,57 @@ private class ProcessPluginBridge(
                         put("requestId", requestId)
                     },
                 )
+                sent = true
+            }
+        }
+        if (sent) {
+            cancelledRequests += requestId
+            streamScope.launch {
+                delay(CANCEL_GRACE_TIMEOUT_MS)
+                if (cancelledRequests.remove(requestId)) {
+                    terminateProcessHandles("Process plugin did not acknowledge cancellation")
+                }
             }
         }
     }
+
+    private fun acknowledgeCancellation(requestId: String) {
+        cancelledRequests.remove(requestId)
+    }
+
+    private fun terminateProcessHandles(reason: String = "Process plugin terminated") {
+        val handles =
+            synchronized(writerLock) {
+                val captured = Triple(process, reader, writer)
+                process = null
+                writer = null
+                reader = null
+                captured
+            }
+        val current = handles.first
+        if (current != null) {
+            runCatching { current.destroy() }
+            runCatching {
+                if (!current.waitFor(100, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                    current.destroyForcibly()
+                }
+            }
+        }
+        runCatching { handles.third?.close() }
+        runCatching { handles.second?.close() }
+        messages.close(IllegalStateException(reason))
+        readerJob?.cancel()
+    }
+
+    private suspend fun <T> withOptionalTimeout(
+        timeoutMs: Long?,
+        block: suspend () -> T,
+    ): T =
+        if (timeoutMs == null) {
+            block()
+        } else {
+            withTimeout(timeoutMs) { block() }
+        }
 
     private fun sendLocked(message: JsonObject) {
         val output = writer ?: error("Process plugin is not running")
@@ -1132,10 +1248,10 @@ private class ProcessPluginBridge(
         output.flush()
     }
 
-    private fun messageObject(): JsonObject {
-        val input = reader ?: error("Process plugin is not running")
-        val line = input.readLine() ?: error("Process plugin exited unexpectedly")
-        return json.parseToJsonElement(line).jsonObject
+    private suspend fun messageObject(): JsonObject {
+        val result = messages.receiveCatching()
+        result.exceptionOrNull()?.let { throw it }
+        return result.getOrNull() ?: error("Process plugin exited unexpectedly")
     }
 
     private fun requireString(
