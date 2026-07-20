@@ -199,6 +199,84 @@ def is_accelerated_device(device: str) -> bool:
     return bool(device.strip()) and device_backend(device) != "cpu"
 
 
+def custom_device_type(device: str) -> str | None:
+    backend = device_backend(device)
+    if not backend.startswith("custom:"):
+        return None
+    device_type = backend.removeprefix("custom:")
+    return device_type or None
+
+
+def pipeline_device_name(device: str) -> str:
+    """Add an explicit device id for PaddleOCR custom-device parsing."""
+    device_type = custom_device_type(device)
+    if device_type is None or ":" in device:
+        return device
+    return f"{device_type}:0"
+
+
+def configure_custom_device_support(device: str) -> None:
+    """Bridge PaddleX 3.7's device whitelist to Paddle custom devices.
+
+    Paddle 3.3 exposes custom-device inference through
+    ``InferenceConfig.enable_custom_device``. PaddleX 3.7 does not yet expose
+    arbitrary custom device names in its parser or static runner, so the
+    compatibility layer is installed only for a detected custom backend.
+    """
+    if custom_device_type(device) is None:
+        return
+
+    try:
+        import paddlex.utils.device as paddlex_device
+        from paddlex.inference.models.runners.paddle_static import runner as static_runner
+        from paddlex.inference.models.runners.paddle_static.config import pp_option
+    except ImportError as error:
+        raise RuntimeError("PaddleX is required for Paddle custom-device inference") from error
+
+    device_type = custom_device_type(device)
+    assert device_type is not None
+    if device_type not in paddlex_device.SUPPORTED_DEVICE_TYPE:
+        paddlex_device.SUPPORTED_DEVICE_TYPE.append(device_type)
+    if device_type not in pp_option.PaddlePredictorOption.SUPPORT_DEVICE:
+        pp_option.PaddlePredictorOption.SUPPORT_DEVICE += (device_type,)
+
+    if getattr(static_runner.PaddleStaticRunner, "_xuexue_custom_device_patch", False):
+        return
+
+    original_create = static_runner.PaddleStaticRunner._create
+
+    def create_runner(self: Any) -> Any:
+        selected_device = self._config.get("device_type", "cpu")
+        selected_custom_device = custom_device_type(selected_device)
+        if selected_custom_device is None:
+            return original_create(self)
+        if self._config.get("run_mode", "paddle").startswith("trt"):
+            raise RuntimeError(
+                f"TensorRT is not supported on Paddle custom device {selected_custom_device!r}"
+            )
+
+        paddle_inference = static_runner.import_paddle_module("paddle.inference")
+        model_paths = static_runner.get_model_paths(self.model_dir, self.model_file_prefix)
+        if "paddle" not in model_paths:
+            raise RuntimeError("No valid PaddlePaddle model found")
+        model_file, params_file = model_paths["paddle"]
+        config = paddle_inference.Config(str(model_file), str(params_file))
+        config.enable_custom_device(selected_custom_device, self._config.get("device_id", 0) or 0)
+        if hasattr(config, "disable_mkldnn"):
+            config.disable_mkldnn()
+        if hasattr(config, "enable_new_ir"):
+            config.enable_new_ir(self._config.get("enable_new_ir", True))
+            if self._config.get("enable_new_ir") and self._config.get("enable_cinn"):
+                config.enable_cinn()
+        if hasattr(config, "enable_new_executor"):
+            config.enable_new_executor()
+        config.set_optimization_level(3)
+        return paddle_inference.create_predictor(config)
+
+    static_runner.PaddleStaticRunner._create = create_runner
+    static_runner.PaddleStaticRunner._xuexue_custom_device_patch = True
+
+
 def runtime_matches_requested_device(runtime: Any, requested_device: str) -> bool:
     """Require the health response to honor explicit and GPU-first device requests."""
     if not isinstance(runtime, dict) or runtime.get("device_available") is not True:
@@ -438,11 +516,12 @@ class SidecarState:
 
     def _load_pipeline(self) -> None:
         try:
+            configure_custom_device_support(self.device)
             from paddleocr import PPStructureV3
 
             pipeline = PPStructureV3(
                 lang=self.language,
-                device=self.device,
+                device=pipeline_device_name(self.device),
                 enable_mkldnn=self.enable_mkldnn,
                 enable_cinn=self.enable_cinn,
                 cpu_threads=self.cpu_threads,
@@ -480,9 +559,10 @@ class SidecarState:
 
     def _load_vl_pipeline(self) -> None:
         try:
+            configure_custom_device_support(self.device)
             from paddleocr import PaddleOCRVL
 
-            pipeline = PaddleOCRVL(device=self.device)
+            pipeline = PaddleOCRVL(device=pipeline_device_name(self.device))
             with self.lock:
                 self.vl_pipeline = pipeline
                 self.vl_error = None

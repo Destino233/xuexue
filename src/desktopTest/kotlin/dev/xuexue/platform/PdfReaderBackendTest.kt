@@ -126,6 +126,31 @@ class PdfReaderBackendTest {
         }
 
     @Test
+    fun analysisRendersKeepRequestedDpiAndNeverEnterTheViewportCache() =
+        runBlocking {
+            val path = Files.createTempFile("xuexue-pdf-analysis-cache", ".pdf")
+            try {
+                val requestedDpi = mutableListOf<Float>()
+                val backend =
+                    CachingPdfReaderBackend(
+                        recordingBackend { request ->
+                            requestedDpi += request.dpi
+                            testRaster(request.pageIndex, marker = 2)
+                        },
+                        maxRasterBytes = 1,
+                    )
+                val request = PdfRasterRequest(path, 0, 300f, PdfRasterPurpose.ANALYSIS)
+
+                backend.render(request)
+                backend.render(request)
+
+                assertEquals(listOf(300f, 300f), requestedDpi)
+            } finally {
+                Files.deleteIfExists(path)
+            }
+        }
+
+    @Test
     fun nativeAnnotationsRenderOnlyInTheTransparentOverlayLayer() =
         runBlocking {
             val path = Files.createTempFile("xuexue-pdf-overlay", ".pdf")
