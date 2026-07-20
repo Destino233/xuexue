@@ -319,6 +319,9 @@ interface PiExtensionApi {
     fun registerCommand(command: PiExtensionCommand)
 
     fun contributeResources(paths: ResourceExtensionPaths)
+
+    /** Shared custom event channels; subscriptions are scoped to this extension. */
+    val events: PiEventBus
 }
 
 fun interface PiExtensionHandle {

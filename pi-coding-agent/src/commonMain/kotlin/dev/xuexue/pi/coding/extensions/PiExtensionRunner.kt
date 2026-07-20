@@ -17,6 +17,7 @@ private class LoadedExtension(
     val imageProviders = linkedMapOf<String, PiImageProvider>()
     val commands = linkedMapOf<String, PiExtensionCommand>()
     val resources = mutableListOf<ResourceExtensionPaths>()
+    val eventUnsubscribers = mutableListOf<() -> Unit>()
     var handle: PiExtensionHandle? = null
     var active = true
 }
@@ -26,6 +27,7 @@ private class LoadedExtension(
 class PiExtensionRunner(
     private val cwd: String,
     private val mode: PiExtensionMode = PiExtensionMode.PRINT,
+    val events: PiEventBusController = PiEventBusController(),
 ) {
     private val extensions = mutableListOf<LoadedExtension>()
     private val errors = mutableListOf<PiExtensionError>()
@@ -59,6 +61,10 @@ class PiExtensionRunner(
         emit(PiExtensionEvent.SessionShutdown(reason, targetSessionFile), defaultContext())
         extensions.asReversed().forEach { loaded ->
             loaded.active = false
+            loaded.eventUnsubscribers.asReversed().forEach { unsubscribe ->
+                runCatching { unsubscribe() }
+            }
+            loaded.eventUnsubscribers.clear()
             try {
                 loaded.handle?.dispose()
             } catch (error: Throwable) {
@@ -359,6 +365,30 @@ class PiExtensionRunner(
                 assertActive()
                 loaded.resources += paths
             }
+
+            override val events: PiEventBus =
+                object : PiEventBus {
+                    override fun emit(
+                        channel: String,
+                        data: Any?,
+                    ) {
+                        assertActive()
+                        this@PiExtensionRunner.events.emit(channel, data)
+                    }
+
+                    override fun on(
+                        channel: String,
+                        handler: (Any?) -> Unit,
+                    ): () -> Unit {
+                        assertActive()
+                        val unsubscribe = this@PiExtensionRunner.events.on(channel, handler)
+                        loaded.eventUnsubscribers += unsubscribe
+                        return {
+                            unsubscribe()
+                            loaded.eventUnsubscribers.remove(unsubscribe)
+                        }
+                    }
+                }
         }
 
     private fun defaultContext(): PiExtensionContext = PiExtensionContext(cwd, mode)

@@ -252,8 +252,10 @@ Provider；宿主以 `provider_stream` 发送模型、Context、stream options�
 `register_image_provider` 和 `image_generate`，结果为 `AssistantImages`，错误和取消
 保持 `ImagesStopReason`。`PiPackageManager` 的统一
 source/manifest/资源协议已落地，Desktop Runtime 已把已解析的 package extension paths
-交给 `PiPluginDiscovery`，下一步是安装进度、Process image-provider wrapper 和 reload
-资源生命周期。
+交给 `PiPluginDiscovery`。本轮补齐了 Pi 的共享 `PiEventBus`（扩展订阅随 Runner
+dispose 自动注销）和 `SessionResources`（Provider 资源注册、按 sessionId 清理、聚合
+失败），并由 AgentSession 的 shutdown/dispose 最终路径调用；下一步仍是安装进度、Process
+image-provider wrapper 和 package reload 资源生命周期。
 
 验收：工具、命令、Provider、资源路径和关键生命周期钩子可以由插件注册；
 插件异常被隔离并生成诊断；reload 后旧监听器和资源全部释放。

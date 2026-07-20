@@ -62,7 +62,7 @@
 | `src/image-models*.ts`、`images-models.ts` | `ImagesModel`、`ImagesContext`、`AssistantImages` 和图像 registry | `ProviderTest.openRouterImageProviderDecodesImageAndUsage`、`ProviderErrorTest.openRouterImageErrorEventRetainsGatewayBody` 覆盖输入、data URL、usage、状态码和网关错误体；脚本导入 35 个图像模型 | `in-progress` |
 | `src/providers/*.models.ts` | `PiGeneratedModelCatalog.kt`、`PiGeneratedImageModelCatalog.kt` | 35 个 provider catalog 和图像目录的确定性生成脚本；完整元数据语义仍需逐项快照校验 | `in-progress` |
 | `src/providers/*.ts` | Provider 注册定义 | API、base URL、headers、OAuth 和模型绑定 | `pending` |
-| `src/api/lazy.ts`、`*.lazy.ts` | 延迟 Provider 装载 | 首次调用、缓存和错误传播 | `pending` |
+| `src/api/lazy.ts`、`*.lazy.ts` | `pi-ai/LazyProvider.kt`、`LazyPiImageProvider` | `LazyProviderTest` 覆盖首次调用加载、成功缓存、加载错误转终止事件和错误缓存；Provider 元数据/API 不匹配会在加载边界失败 | `verified` |
 | `src/api/openai-completions.ts` | `OpenAiCompletionsProvider` | SSE 文本/tool/usage/error fixture；Prompt Cache key Unicode 64 码点截断、short/long/none、代理兼容开关、session-affinity 和 Anthropic cache marker 已覆盖；同时承载 Mistral-compatible endpoint | `in-progress` |
 | `src/api/openai-responses*.ts` | `OpenAiResponsesProvider` | payload、reasoning、独立 function-call item、参数 delta/done、usage/终止 fixture；provider-neutral cache key、`store=false`、24h retention、none、session headers 和 `supportsToolSearch` 的 immediate/tool-search call/output/defer_loading 已覆盖 | `in-progress` |
 | `src/api/openai-codex-responses.ts` | `OpenAiCodexResponsesProvider` | `OpenAiCodexResponsesProviderTest` 覆盖 JWT `chatgpt-account-id`、Codex `/codex/responses` payload、低 verbosity、加密 reasoning include、tool call/usage SSE、session headers 和 429 `Retry-After` 重试；JVM 公共 transport 当前统一走 SSE，WebSocket 连接复用仍待补 | `in-progress` |
@@ -76,7 +76,7 @@
 | `src/auth/**`、`src/oauth.ts` | `pi-ai/AuthStore.kt` | `AuthStoreTest` 覆盖 runtime/stored/environment precedence、credential-scoped env、OAuth expiry view；文件锁持久化、刷新/login/cancel OAuth 仍待补 | `in-progress` |
 | `src/env-api-keys.ts` | `findEnvironmentApiKeys()`、`InMemoryAuthStore` | `AuthStoreTest` 覆盖主要 provider aliases 和 environment source status；完整 ambient AWS/Vertex credential discovery待补 | `in-progress` |
 | `src/images.ts`、`images-api-registry.ts` | 图片生成调度 | abort、error、结果和用量 | `pending` |
-| `src/session-resources.ts` | 会话资源生命周期 | create/dispose 和异常清理 | `pending` |
+| `src/session-resources.ts` | `pi-ai/SessionResources.kt`、`AgentSession.shutdown/dispose` | `SessionResourcesTest` 覆盖注册、幂等注销、sessionId 传递、聚合错误和继续清理；AgentSession 最终释放路径调用全局资源清理 | `verified` |
 | `src/compat.ts`、`legacy-api-aliases.ts` | 公共兼容 facade | stream/complete/model aliases | `pending` |
 | `src/utils/abort-signals.ts` | 取消信号组合 | 原因、竞态和资源清理 | `pending` |
 | `src/utils/deferred-tools.ts` | `DeferredTools.kt`、Anthropic/OpenAI Responses/Codex payload 分支 | `DeferredToolsTest`、`ProviderTest.openAiResponsesUsesNativeDeferredToolSearch`、`openAiResponsesDoesNotSearchWhenCapabilityIsDisabled`、`anthropicMessagesUsesDeferredReferencesAndMarksLateTools`、`anthropicMessagesKeepsOneImmediateToolWhenAllAreDeferred`、`anthropicOAuthNormalizesDeferredToolNames`、`OpenAiCodexResponsesProviderTest`；共享拆分、去重、已用工具保持 immediate、原生加载点和 duplicate load guard 已覆盖；deferred cache 细节与完整 Pi harness 对照仍待补 | `in-progress` |
@@ -117,11 +117,11 @@
 | `src/core/settings-manager.ts` | `settings/SettingsManager.kt`、`SettingsStorage.kt` | 8 项 SettingsManager/desktop storage 测试覆盖深合并、旧字段迁移、外部编辑保留、信任、reload 错误、AgentSession retry/compaction 映射和 `.xuexue/pi` 延迟创建；完整设置表面与跨进程文件锁待补 | `in-progress` |
 | `src/core/model-registry.ts`、`model-resolver.ts` | `pi-ai/ModelRegistry.kt`、`AgentSession` scoped model cycle | dynamic provider、custom models、scoped exact/glob/thinking suffix、request auth、scope 顺序/认证过滤/顺逆时针/当前模型缺失和 thinking 继承已测试；完整 scoped model persistence 与 provider adapters 待补 | `in-progress` |
 | `src/core/auth-*.ts`、`resolve-config-value.ts` | `pi-ai/AuthStore.kt`、`resolveConfigValue()` | credential precedence、env template 和 OAuth expiry view 已测试；migration、command resolver、文件锁和 refresh/login OAuth 待补 | `in-progress` |
-| `src/core/extensions/types.ts` | `extensions/PiExtensionApi.kt` | `PiExtensionRunnerTest` 覆盖 Headless event/registration DTO、资源贡献、工具与命令元数据；TUI-only 类型按排除边界省略 | `in-progress` |
+| `src/core/extensions/types.ts` | `extensions/PiExtensionApi.kt` | `PiExtensionRunnerTest` 覆盖 Headless event/registration DTO、资源贡献、工具与命令元数据；共享 `events` 总线按扩展生命周期隔离；TUI-only 类型按排除边界省略 | `in-progress` |
 | `src/core/extensions/runner.ts` | `extensions/PiExtensionRunner.kt` | `PiExtensionRunnerTest`、`AgentSessionExtensionTest` 覆盖顺序、链式 context/before-agent-start、工具冲突、错误隔离、stale dispose 和 AgentSession hooks | `in-progress` |
 | `src/core/extensions/loader.ts` | `JvmPiPluginLoader`、`ProcessPiExtension`、`PiPluginDiscovery` | `ProcessPiExtensionTest` 覆盖 JSONL handshake、工具/文本和图像 Provider 注册、调用、AssistantMessageEvent/AssistantImages 结果和 shutdown；JAR manifest/entrypoint/trust 门、用户/项目/临时 discovery、大小写归一化和清单版本校验已测试；`PiPackageResolution.extensionPaths` 已提供给 Desktop discovery，完整 package 自动加载/reload 仍待补 | `in-progress` |
 | `src/core/extensions/wrapper.ts` | `AgentSession` extension hook bridge | `AgentSessionExtensionTest` 覆盖 tool call/result、context 和 before-agent-start 接线；Kotlin extension 可注册 Provider/ImageProvider 并由 Desktop registry 合并，Process 文本和图像 Provider 已分别通过 `register_provider`/`provider_stream`、`register_image_provider`/`image_generate` 接入 | `in-progress` |
-| `src/core/event-bus.ts` | 扩展共享事件总线 | emit/on/dispose 和扩展隔离 | `pending` |
+| `src/core/event-bus.ts` | `extensions/PiEventBus.kt`、`PiEventBusController` | `PiEventBusTest` 覆盖 registration order、unsubscribe、handler error isolation、clear；`PiExtensionRunnerTest.extensionEventSubscriptionsAreRemovedWhenRunnerDisposes` 覆盖扩展 reload/dispose 自动移除监听器 | `verified` |
 | `src/core/package-manager.ts` | `packages/PiPackageModels.kt`、`DefaultPiPackageManager.desktop.kt` | `PiPackageModelsTest`、`DefaultPiPackageManagerTest` 覆盖 path source、git/Maven source 解析、package.json/自有 manifest、资源路径、settings 持久化、内容 hash、project trust 和 `PI_OFFLINE` 缺包诊断；git staging 原子替换/回滚代码已落地，远程 Maven 解析、完整 update 语义和 package pattern 仍待补 | `in-progress` |
 | `src/core/project-trust.ts`、`trust-manager.ts` | 项目信任时序 | global/project load boundary | `pending` |
 | `src/core/tools/read.ts` | Desktop `ReadTool`、`ToolOutput.kt` | head truncation、UTF-8 byte/line limits、offset/limit；图片输入和 truncation details 仍待补 | `in-progress` |

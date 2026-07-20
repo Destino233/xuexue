@@ -168,6 +168,26 @@ class PiExtensionRunnerTest {
             }
         }
 
+    @Test
+    fun extensionEventSubscriptionsAreRemovedWhenRunnerDisposes() =
+        runTest {
+            val received = mutableListOf<Any?>()
+            val bus = PiEventBusController()
+            val runner = PiExtensionRunner("/workspace", events = bus)
+            runner.load(
+                KotlinPiExtension("events") {
+                    val unsubscribe = events.on("custom") { received += it }
+                    PiExtensionHandle { unsubscribe() }
+                },
+            )
+
+            bus.emit("custom", "before")
+            runner.dispose()
+            bus.emit("custom", "after")
+
+            assertEquals(listOf<Any?>("before"), received)
+        }
+
     private fun extension(
         id: String,
         suffix: String,

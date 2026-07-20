@@ -29,6 +29,7 @@ import dev.xuexue.pi.ai.UserMessage
 import dev.xuexue.pi.ai.UserText
 import dev.xuexue.pi.ai.calculateContextTokens
 import dev.xuexue.pi.ai.clampThinkingLevel
+import dev.xuexue.pi.ai.cleanupSessionResources
 import dev.xuexue.pi.ai.getSupportedThinkingLevels
 import dev.xuexue.pi.ai.isContextOverflow
 import dev.xuexue.pi.ai.isRetryableAssistantError
@@ -453,6 +454,7 @@ class AgentSession(
         runCatching { agent.abort() }
         disconnectFromAgent()
         listeners.store(emptyList())
+        cleanupSessionResources(sessionId)
     }
 
     suspend fun beforeSessionSwitch(
@@ -810,6 +812,7 @@ class AgentSession(
         runCatching { agent.abort() }
         disconnectFromAgent()
         listeners.store(emptyList())
+        cleanupSessionResources(sessionId)
     }
 
     private suspend fun runAgentPrompt(messages: List<AgentMessage>) {
