@@ -102,15 +102,26 @@ internal class DesktopPiCodingTools(
             require(Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) { "Not a regular file: $relative" }
             val mimeType = detectImageMime(path)
             if (mimeType != null) {
-                val data = Base64.getEncoder().encodeToString(Files.readAllBytes(path))
-                return@withContext AgentToolResult(
-                    content =
-                        listOf<ToolResultContent>(
-                            TextContent("Read image file [$mimeType]"),
-                            ImageContent(data, mimeType),
-                        ),
-                    details = buildJsonObject {},
-                )
+                return@withContext when (val image = processPiImage(Files.readAllBytes(path), mimeType)) {
+                    is PiImageProcessResult.Success -> {
+                        val note =
+                            buildString {
+                                append("Read image file [${image.mimeType}]")
+                                image.hints.forEach { hint -> append('\n').append(hint) }
+                            }
+                        AgentToolResult(
+                            content = listOf(TextContent(note), ImageContent(image.data, image.mimeType)),
+                            details = buildJsonObject {},
+                        )
+                    }
+
+                    is PiImageProcessResult.Failure -> {
+                        AgentToolResult(
+                            content = listOf(TextContent("Read image file [$mimeType]\n${image.message}")),
+                            details = buildJsonObject {},
+                        )
+                    }
+                }
             }
 
             val text = Files.readString(path, StandardCharsets.UTF_8)
@@ -124,7 +135,7 @@ internal class DesktopPiCodingTools(
             val end = limit?.let { (start + it).coerceAtMost(lines.size) } ?: lines.size
             val selected = lines.subList(start, end).joinToString("\n")
             val truncation = truncateToolHead(selected, PI_TOOL_MAX_LINES, PI_TOOL_MAX_BYTES)
-            val output = readOutput(text, selected, truncation, start, offset, limit)
+            val output = readOutput(text, truncation, start, offset, limit, rawPath)
             AgentToolResult(
                 content = listOf(TextContent(output)),
                 details = if (truncation.truncated) piDetails(truncation) else buildJsonObject {},
@@ -134,11 +145,11 @@ internal class DesktopPiCodingTools(
     @Suppress("ReturnCount")
     private fun readOutput(
         fullText: String,
-        selected: String,
         truncation: ToolTruncationResult,
         start: Int,
         startLine: Int,
         userLimit: Int?,
+        pathHint: String,
     ): String {
         if (truncation.firstLineExceedsLimit) {
             val firstLineBytes =
@@ -149,7 +160,7 @@ internal class DesktopPiCodingTools(
                     ?.size ?: 0
             return "[Line $startLine is ${piFormatSize(firstLineBytes)}, " +
                 "exceeds ${piFormatSize(PI_TOOL_MAX_BYTES)} limit. " +
-                "Use bash: sed -n '${startLine}p' ${selectedPathHint(selected)} | " +
+                "Use bash: sed -n '${startLine}p' $pathHint | " +
                 "head -c $PI_TOOL_MAX_BYTES]"
         }
         if (truncation.truncated) {
@@ -171,8 +182,6 @@ internal class DesktopPiCodingTools(
         }
         return truncation.content
     }
-
-    private fun selectedPathHint(selected: String): String = if (selected.isEmpty()) "<path>" else "<path>"
 
     private fun writeTool(): AgentTool =
         AgentTool(
@@ -318,18 +327,25 @@ internal class DesktopPiCodingTools(
             val relative = displayPath(root, path)
             mutationQueue.withPath(path.toString()) {
                 allowed(AgentOperationKind.WRITE_FILE, relative, "Edit workspace file")
-                val before = Files.readString(path, StandardCharsets.UTF_8)
-                val ranges = edits.map { edit -> findUniqueRange(before, edit.oldText) }
-                requireNoOverlaps(ranges)
-                val after = applyEdits(before, edits, ranges)
+                val rawContent = Files.readString(path, StandardCharsets.UTF_8)
+                val (bom, contentWithoutBom) = stripPiBom(rawContent)
+                val lineEnding = detectPiLineEnding(contentWithoutBom)
+                val normalizedContent = normalizePiLineEndings(contentWithoutBom)
+                val applied =
+                    applyPiEdits(
+                        normalizedContent,
+                        edits.map { edit -> PiEditReplacement(edit.oldText, edit.newText) },
+                        rawPath,
+                    )
+                val after = bom + restorePiLineEndings(applied.newContent, lineEnding)
                 throwIfAborted(signal)
                 workspaceService.atomicWrite(path, after)
-                val diff = simpleDiff(before, after)
+                val diff = generatePiDiff(applied.baseContent, applied.newContent)
                 val details =
                     buildJsonObject {
-                        put("diff", diff)
-                        put("patch", simplePatch(rawPath, before, after))
-                        put("firstChangedLine", firstChangedLine(before, after))
+                        put("diff", diff.diff)
+                        put("patch", generatePiUnifiedPatch(rawPath, applied.baseContent, applied.newContent))
+                        diff.firstChangedLine?.let { put("firstChangedLine", it) }
                     }
                 AgentToolResult(
                     content = listOf(TextContent("Successfully replaced ${edits.size} block(s) in $rawPath.")),
@@ -337,72 +353,6 @@ internal class DesktopPiCodingTools(
                 )
             }
         }
-
-    private fun findUniqueRange(
-        content: String,
-        oldText: String,
-    ): IntRange {
-        require(oldText.isNotEmpty()) { "Could not find the exact text because oldText is empty." }
-        val first = content.indexOf(oldText)
-        require(first >= 0) { "Could not find the exact text in the file." }
-        val second = content.indexOf(oldText, first + oldText.length)
-        require(second < 0) { "Found multiple occurrences of the exact text; each edit must be unique." }
-        return first until (first + oldText.length)
-    }
-
-    private fun requireNoOverlaps(ranges: List<IntRange>) {
-        ranges.indices.forEach { index ->
-            ranges.drop(index + 1).forEach { other ->
-                require(ranges[index].last < other.first || other.last < ranges[index].first) {
-                    "Edit ranges overlap; merge nearby changes into one edit."
-                }
-            }
-        }
-    }
-
-    private fun applyEdits(
-        content: String,
-        edits: List<EditRequest>,
-        ranges: List<IntRange>,
-    ): String {
-        val ordered = ranges.indices.sortedByDescending { ranges[it].first }
-        var result = content
-        ordered.forEach { index ->
-            val range = ranges[index]
-            result = result.replaceRange(range.first, range.last + 1, edits[index].newText)
-        }
-        return result
-    }
-
-    private fun simpleDiff(
-        before: String,
-        after: String,
-    ): String =
-        buildString {
-            append("@@ -1,")
-            append(before.lines().size)
-            append(" +1,")
-            append(after.lines().size)
-            append(" @@\n")
-            before.lines().forEach { append('-').append(it).append('\n') }
-            after.lines().forEach { append('+').append(it).append('\n') }
-        }.trimEnd()
-
-    private fun simplePatch(
-        path: String,
-        before: String,
-        after: String,
-    ): String = "--- $path\n+++ $path\n${simpleDiff(before, after)}"
-
-    private fun firstChangedLine(
-        before: String,
-        after: String,
-    ): Int {
-        var index = 0
-        val limit = minOf(before.length, after.length)
-        while (index < limit && before[index] == after[index]) index++
-        return before.substring(0, index).count { it == '\n' } + 1
-    }
 
     private fun bashTool(): AgentTool =
         AgentTool(

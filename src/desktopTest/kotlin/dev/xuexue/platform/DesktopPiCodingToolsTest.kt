@@ -14,8 +14,12 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import java.awt.image.BufferedImage
+import java.io.ByteArrayOutputStream
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import javax.imageio.ImageIO
 import kotlin.io.path.createDirectories
 import kotlin.io.path.deleteRecursively
 import kotlin.io.path.readText
@@ -30,6 +34,8 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 @OptIn(kotlin.io.path.ExperimentalPathApi::class)
+// Keep one fixture class so every Pi tool test shares the same authorized workspace setup.
+@Suppress("TooManyFunctions")
 class DesktopPiCodingToolsTest {
     private lateinit var root: Path
     private lateinit var tools: Map<String, AgentTool>
@@ -75,21 +81,33 @@ class DesktopPiCodingToolsTest {
     @Test
     fun readReturnsImageContentForSupportedImageMagic() =
         runTest {
-            root.resolve("pixel.png").writeBytes(
-                byteArrayOf(
-                    0x89.toByte(),
-                    0x50,
-                    0x4e,
-                    0x47,
-                    0x0d,
-                    0x0a,
-                    0x1a,
-                    0x0a,
-                ),
-            )
+            val output = ByteArrayOutputStream()
+            check(ImageIO.write(BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB), "png", output))
+            root.resolve("pixel.png").writeBytes(output.toByteArray())
             val result = execute("read", buildJsonObject { put("path", "pixel.png") })
             assertIs<ImageContent>(result.content[1])
             assertEquals("image/png", (result.content[1] as ImageContent).mimeType)
+        }
+
+    @Test
+    fun readConvertsBmpToPngAndReportsConversionHint() =
+        runTest {
+            val output = ByteArrayOutputStream()
+            check(ImageIO.write(BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB), "bmp", output))
+            root.resolve("pixel.bmp").writeBytes(output.toByteArray())
+            val result = execute("read", buildJsonObject { put("path", "pixel.bmp") })
+            assertContains(assertIs<TextContent>(result.content.first()).text, "converted from image/bmp to image/png")
+            assertEquals("image/png", assertIs<ImageContent>(result.content[1]).mimeType)
+        }
+
+    @Test
+    fun readLongFirstLineUsesTheOriginalPathInFallback() =
+        runTest {
+            root.resolve("long.txt").writeText("x".repeat(60 * 1024))
+            val result = execute("read", buildJsonObject { put("path", "long.txt") })
+            val text = assertIs<TextContent>(result.content.single()).text
+            assertContains(text, "sed -n '1p' long.txt")
+            assertTrue("<path>" !in text)
         }
 
     @Test
@@ -176,6 +194,51 @@ class DesktopPiCodingToolsTest {
             assertEquals("ALPHA\nbeta\nGAMMA\n", root.resolve("edit.txt").readText())
             assertContains(result.details.jsonObject["diff"].toString(), "GAMMA")
             assertContains(result.details.jsonObject["patch"].toString(), "+++ edit.txt")
+        }
+
+    @Test
+    fun editPreservesBomAndCrLfWhileMatchingNormalizedText() =
+        runTest {
+            root.resolve("crlf.txt").writeBytes("\uFEFFalpha\r\nbeta\r\n".toByteArray(StandardCharsets.UTF_8))
+            execute(
+                "edit",
+                buildJsonObject {
+                    put("path", "crlf.txt")
+                    putJsonArray("edits") {
+                        add(
+                            buildJsonObject {
+                                put("oldText", "alpha\n")
+                                put("newText", "ALPHA\n")
+                            },
+                        )
+                    }
+                },
+            )
+            val bytes = Files.readAllBytes(root.resolve("crlf.txt"))
+            val content = bytes.toString(StandardCharsets.UTF_8)
+            assertTrue(content.startsWith("\uFEFF"))
+            assertContains(content, "ALPHA\r\nbeta\r\n")
+        }
+
+    @Test
+    fun editUsesPiFuzzyMatchingForSmartQuotesAndTrailingWhitespace() =
+        runTest {
+            root.resolve("fuzzy.txt").writeText("say “hello”   \n")
+            execute(
+                "edit",
+                buildJsonObject {
+                    put("path", "fuzzy.txt")
+                    putJsonArray("edits") {
+                        add(
+                            buildJsonObject {
+                                put("oldText", "say \"hello\"\n")
+                                put("newText", "say hi\n")
+                            },
+                        )
+                    }
+                },
+            )
+            assertEquals("say hi\n", root.resolve("fuzzy.txt").readText())
         }
 
     @Test
