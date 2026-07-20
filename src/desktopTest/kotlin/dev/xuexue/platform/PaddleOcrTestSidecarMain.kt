@@ -15,7 +15,11 @@ object PaddleOcrTestSidecarMain {
         val stopped = Path.of(args[3])
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", port), 0)
         server.createContext("/health") { exchange ->
-            val body = "{\"version\":\"$version\",\"ready\":true}".encodeToByteArray()
+            val body =
+                "{\"version\":\"$version\",\"ready\":true," +
+                    "\"runtime\":{\"requested_device\":\"auto\",\"device\":\"cpu\"," +
+                    "\"backend\":\"cpu\",\"compiled_backends\":[\"cpu\"]," +
+                    "\"available_devices\":[],\"device_available\":true}}".encodeToByteArray()
             exchange.responseHeaders.add("Content-Type", "application/json")
             exchange.sendResponseHeaders(200, body.size.toLong())
             exchange.responseBody.use { output -> output.write(body) }

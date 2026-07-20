@@ -18,6 +18,7 @@ import java.util.zip.ZipOutputStream
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
@@ -219,9 +220,9 @@ class PaddleOcrServiceManagerTest {
                         val vl = exchange.requestURI.query == "probe=paddleocr-vl"
                         val response =
                             if (vl) {
-                                """{"version":"probe-version","ready":false,"engines":{"pp-structure-v3":true,"paddleocr-vl":false},"error":"VL missing"}"""
+                                """{"version":"probe-version","ready":false,"runtime":{"requested_device":"auto","device":"cpu","backend":"cpu","compiled_backends":["cpu"],"available_devices":[],"device_available":true},"engines":{"pp-structure-v3":true,"paddleocr-vl":false},"error":"VL missing"}"""
                             } else {
-                                """{"version":"probe-version","ready":true,"engines":{"pp-structure-v3":true,"paddleocr-vl":false}}"""
+                                """{"version":"probe-version","ready":true,"runtime":{"requested_device":"auto","device":"cpu","backend":"cpu","compiled_backends":["cpu"],"available_devices":[],"device_available":true},"engines":{"pp-structure-v3":true,"paddleocr-vl":false}}"""
                             }
                         exchange.sendResponseHeaders(200, response.encodeToByteArray().size.toLong())
                         exchange.responseBody.use { output -> output.write(response.encodeToByteArray()) }
@@ -265,7 +266,7 @@ class PaddleOcrServiceManagerTest {
                                 .contains("probe=paddleocr-vl")
                         val ready = !isVlProbe || vlReady.getAndSet(true)
                         val response =
-                            """{"version":"selected-engine-version","ready":$ready,"engines":{"pp-structure-v3":true,"paddleocr-vl":$ready}}"""
+                            """{"version":"selected-engine-version","ready":$ready,"runtime":{"requested_device":"auto","device":"cpu","backend":"cpu","compiled_backends":["cpu"],"available_devices":[],"device_available":true},"engines":{"pp-structure-v3":true,"paddleocr-vl":$ready}}"""
                         exchange.sendResponseHeaders(200, response.encodeToByteArray().size.toLong())
                         exchange.responseBody.use { output -> output.write(response.encodeToByteArray()) }
                     }
@@ -285,6 +286,97 @@ class PaddleOcrServiceManagerTest {
                 val health = manager.ensureReady(PaddleOcrVlEngine.ENGINE_ID)
                 assertTrue(health.healthy)
                 assertTrue(vlReady.get())
+            } finally {
+                manager.close()
+                server.stop(0)
+            }
+        }
+
+    @Test
+    fun autoRejectsCpuSidecarWhenAnAcceleratorIsReported() =
+        runBlocking {
+            val server =
+                HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).also { item ->
+                    item.createContext("/health") { exchange ->
+                        val response =
+                            """
+                            {
+                              "version": "gpu-first-version",
+                              "ready": true,
+                              "runtime": {
+                                "requested_device": "auto",
+                                "device": "cpu",
+                                "backend": "cpu",
+                                "compiled_backends": ["cpu", "custom:intel_gpu"],
+                                "available_devices": ["intel_gpu:0"],
+                                "device_available": true
+                              }
+                            }
+                            """.trimIndent()
+                        exchange.sendResponseHeaders(200, response.encodeToByteArray().size.toLong())
+                        exchange.responseBody.use { output -> output.write(response.encodeToByteArray()) }
+                    }
+                }
+            server.start()
+            val manager =
+                PaddleOcrServiceManager(
+                    config =
+                        PaddleOcrSidecarConfig(
+                            endpoint = URI("http://127.0.0.1:${server.address.port}"),
+                            version = "gpu-first-version",
+                        ),
+                    ioDispatcher = UnconfinedTestDispatcher(),
+                )
+            try {
+                val health = manager.ensureReady()
+                assertFalse(health.healthy)
+                assertTrue(health.detail.orEmpty().contains("GPU-first"))
+            } finally {
+                manager.close()
+                server.stop(0)
+            }
+        }
+
+    @Test
+    fun explicitGpuRequestRejectsCpuSidecar() =
+        runBlocking {
+            val server =
+                HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).also { item ->
+                    item.createContext("/health") { exchange ->
+                        val response =
+                            """
+                            {
+                              "version": "explicit-gpu-version",
+                              "ready": true,
+                              "runtime": {
+                                "requested_device": "gpu:0",
+                                "device": "cpu",
+                                "backend": "cpu",
+                                "compiled_backends": ["cpu"],
+                                "available_devices": [],
+                                "device_available": true
+                              }
+                            }
+                            """.trimIndent()
+                        exchange.sendResponseHeaders(200, response.encodeToByteArray().size.toLong())
+                        exchange.responseBody.use { output -> output.write(response.encodeToByteArray()) }
+                    }
+                }
+            server.start()
+            val manager =
+                PaddleOcrServiceManager(
+                    config =
+                        PaddleOcrSidecarConfig(
+                            endpoint = URI("http://127.0.0.1:${server.address.port}"),
+                            version = "explicit-gpu-version",
+                            requestedDevice = "gpu:0",
+                        ),
+                    ioDispatcher = UnconfinedTestDispatcher(),
+                )
+            try {
+                val health = manager.ensureReady()
+                assertFalse(health.healthy)
+                assertTrue(health.detail.orEmpty().contains("requested gpu:0"))
             } finally {
                 manager.close()
                 server.stop(0)

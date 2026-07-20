@@ -178,17 +178,44 @@ def device_backend(device: str) -> str:
 
 
 def device_matches(target: str, available: str) -> bool:
-    target_lower = target.lower()
-    available_lower = available.lower()
-    return target_lower == available_lower or (
-        target_lower.endswith(":0") and available_lower == target_lower.removesuffix(":0")
-    )
+    def identity(value: str) -> str:
+        return (
+            value.lower()
+            .removeprefix("custom_device:")
+            .removeprefix("custom:")
+            .removesuffix(":0")
+        )
+
+    return identity(target) == identity(available)
 
 
 def string_list(value: Any) -> list[str]:
     if not isinstance(value, (list, tuple)):
         return []
     return [str(item) for item in value if str(item).strip()]
+
+
+def is_accelerated_device(device: str) -> bool:
+    return bool(device.strip()) and device_backend(device) != "cpu"
+
+
+def runtime_matches_requested_device(runtime: Any, requested_device: str) -> bool:
+    """Require the health response to honor explicit and GPU-first device requests."""
+    if not isinstance(runtime, dict) or runtime.get("device_available") is not True:
+        return False
+    selected = runtime.get("device")
+    if not isinstance(selected, str) or not selected.strip():
+        return False
+
+    requested = canonical_device(requested_device)
+    if requested.lower() == "auto":
+        accelerator_reported = is_accelerated_device(selected) or any(
+            is_accelerated_device(device) for device in string_list(runtime.get("available_devices"))
+        )
+        return not accelerator_reported or is_accelerated_device(selected)
+    if requested.lower() == "cpu":
+        return selected.lower() == "cpu"
+    return device_matches(requested, selected)
 
 
 def probe_paddle_runtime(requested_device: str, paddle_module: Any = None) -> dict[str, Any]:

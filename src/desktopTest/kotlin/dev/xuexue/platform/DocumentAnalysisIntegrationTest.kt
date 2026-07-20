@@ -327,6 +327,36 @@ class DocumentAnalysisIntegrationTest {
     }
 
     @Test
+    fun reportedIntelCustomRuntimeCountsAsGpuEvenWithoutSyclLsProbe() {
+        val detector = HostComputeDetector { null }
+        val availability =
+            detector.availability(
+                descriptor = PpStructureV3Engine().descriptor,
+                profile =
+                    HostComputeProfile(
+                        os = "Linux",
+                        architecture = "x86_64",
+                        cpuThreads = 8,
+                        availableMemoryBytes = 8L * 1024 * 1024 * 1024,
+                        gpu =
+                            GpuProfile(
+                                vendor = "Intel",
+                                deviceName = "Arc B570",
+                                backend = "system",
+                            ),
+                    ),
+                runtime =
+                    EngineRuntimeCheck(
+                        backendSupported = true,
+                        runtimeBackend = "custom:intel_gpu",
+                    ),
+            )
+
+        assertEquals(AvailabilityState.AVAILABLE, availability.state)
+        assertEquals("GPU", availability.estimatedSpeed)
+    }
+
+    @Test
     fun sidecarHealthChecksExpectedVersion() =
         runBlocking {
             val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)

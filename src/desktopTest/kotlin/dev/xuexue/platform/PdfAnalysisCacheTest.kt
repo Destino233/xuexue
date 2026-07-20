@@ -27,6 +27,7 @@ class PdfAnalysisCacheTest {
             assertEquals(layout, cache.loadPage(key, 2))
             assertNull(cache.loadPage(key, 1))
             assertNull(cache.loadPage(key.copy(dpi = 301), 2))
+            assertNull(cache.loadPage(key.copy(runtimeFingerprint = "device=gpu:0;backend=cuda"), 2))
         } finally {
             Files.walk(root).use { paths ->
                 paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists)

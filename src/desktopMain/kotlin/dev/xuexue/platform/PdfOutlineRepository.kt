@@ -335,6 +335,7 @@ data class PdfAnalysisCacheKey(
     val dpi: Int,
     val language: String,
     val optionsFingerprint: String = "",
+    val runtimeFingerprint: String = "",
     val cacheSchemaVersion: Int = CURRENT_PDF_ANALYSIS_CACHE_SCHEMA,
 ) {
     init {
@@ -355,13 +356,14 @@ data class PdfAnalysisCacheKey(
             dpi,
             language,
             optionsFingerprint,
+            runtimeFingerprint,
             cacheSchemaVersion,
         ).joinToString("|")
 
     fun cacheDirectoryName(): String = sha256(identity())
 }
 
-const val CURRENT_PDF_ANALYSIS_CACHE_SCHEMA = 1
+const val CURRENT_PDF_ANALYSIS_CACHE_SCHEMA = 2
 
 @Serializable
 private data class PdfAnalysisCacheManifest(

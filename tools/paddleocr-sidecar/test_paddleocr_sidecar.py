@@ -79,6 +79,26 @@ class PaddleRuntimeTest(unittest.TestCase):
         self.assertEqual("custom:customgpu", runtime["backend"])
         self.assertTrue(runtime["device_available"])
 
+    def test_auto_can_select_intel_gpu_custom_device(self):
+        paddle = FakePaddle(available=["intel_gpu:0"], custom_types=["intel_gpu"])
+
+        runtime = SIDECAR.probe_paddle_runtime("auto", paddle)
+
+        self.assertEqual("intel_gpu:0", runtime["device"])
+        self.assertEqual("custom:intel_gpu", runtime["backend"])
+        self.assertTrue(runtime["device_available"])
+
+    def test_auto_health_match_rejects_cpu_when_accelerator_is_available(self):
+        runtime = {
+            "device": "cpu",
+            "device_available": True,
+            "available_devices": ["intel_gpu:0"],
+        }
+
+        self.assertFalse(SIDECAR.runtime_matches_requested_device(runtime, "auto"))
+        runtime["device"] = "intel_gpu:0"
+        self.assertTrue(SIDECAR.runtime_matches_requested_device(runtime, "auto"))
+
 
 if __name__ == "__main__":
     unittest.main()

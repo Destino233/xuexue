@@ -94,7 +94,10 @@ class HostComputeDetector(
             runtime.runtimeBackend
                 ?.let(::isGpuRuntimeBackend)
                 ?: true
-        val gpuComputeAvailable = profile.gpu?.backend in COMPUTE_BACKENDS && paddleGpuBackendAvailable
+        val hostGpuBackendAvailable = profile.gpu?.backend in COMPUTE_BACKENDS
+        val runtimeGpuBackendAvailable = runtime.runtimeBackend?.let(::isGpuRuntimeBackend) == true
+        val gpuComputeAvailable =
+            (hostGpuBackendAvailable || runtimeGpuBackendAvailable) && paddleGpuBackendAvailable
         val noGpu = descriptor.backends.contains(AnalysisComputeBackend.GPU) && !gpuComputeAvailable
         val memory = profile.gpu?.availableMemoryBytes ?: profile.availableMemoryBytes
         return when {

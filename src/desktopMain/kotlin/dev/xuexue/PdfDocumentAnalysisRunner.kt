@@ -100,7 +100,7 @@ internal class PdfDocumentAnalysisRunner(
                 }
 
                 try {
-                    ensureEngineReady(engine)
+                    val runtimeFingerprint = ensureEngineReady(engine)
                     ensureCurrent()
                     taskController.begin(
                         id = taskId,
@@ -109,7 +109,16 @@ internal class PdfDocumentAnalysisRunner(
                         onCancel = { job.cancel() },
                     )
                     analysisBudget.withPermit {
-                        val generated = analyzeDocument(root, document, engine, settings, taskId, ::isCurrent)
+                        val generated =
+                            analyzeDocument(
+                                root,
+                                document,
+                                engine,
+                                settings,
+                                taskId,
+                                runtimeFingerprint,
+                                ::isCurrent,
+                            )
                         ensureCurrent()
                         val merged = services.repository.mergePreservingReview(document.pdfOutline, generated.outline)
                         document.pdfOutline = merged
@@ -163,12 +172,13 @@ internal class PdfDocumentAnalysisRunner(
         activeJobs.clear()
     }
 
-    private suspend fun ensureEngineReady(engine: DocumentAnalysisEngine) {
-        if (engine.descriptor.engineId !in OCR_ENGINE_IDS) return
+    private suspend fun ensureEngineReady(engine: DocumentAnalysisEngine): String {
+        if (engine.descriptor.engineId !in OCR_ENGINE_IDS) return ""
         val health = services.sidecar.ensureReady(engine.descriptor.engineId)
         require(health.healthy) {
             health.detail ?: "PaddleOCR sidecar 不可用。"
         }
+        return health.runtime.cacheFingerprint()
     }
 
     private suspend fun analyzeDocument(
@@ -177,6 +187,7 @@ internal class PdfDocumentAnalysisRunner(
         engine: DocumentAnalysisEngine,
         settings: DocumentAnalysisSettings,
         taskId: String,
+        runtimeFingerprint: String,
         isCurrent: () -> Boolean,
     ): ChapterDetectionResult {
         val path = resolvePdfPath(services.workspaceService, root, document)
@@ -197,8 +208,28 @@ internal class PdfDocumentAnalysisRunner(
                         dpi = settings.dpi,
                         language = settings.language,
                     )
-                val native = nativeLayout(path, pageIndex, request, nativeEngine, settings, fingerprint, metadata)
-                val layout = selectLayout(path, pageIndex, request, native, engine, settings, fingerprint, metadata)
+                val native =
+                    nativeLayout(
+                        path,
+                        pageIndex,
+                        request,
+                        nativeEngine,
+                        settings,
+                        fingerprint,
+                        metadata,
+                    )
+                val layout =
+                    selectLayout(
+                        path,
+                        pageIndex,
+                        request,
+                        native,
+                        engine,
+                        settings,
+                        fingerprint,
+                        metadata,
+                        runtimeFingerprint,
+                    )
                 layoutStore.write(layout)
                 currentCoroutineContext().ensureActive()
                 if (!isCurrent()) throw CancellationException("PDF analysis was superseded.")
@@ -226,19 +257,42 @@ internal class PdfDocumentAnalysisRunner(
         settings: DocumentAnalysisSettings,
         fingerprint: String,
         metadata: PdfDocumentMetadata,
+        runtimeFingerprint: String,
     ): PdfPageLayout {
         val selected =
             when {
                 native != null && native.isTrustedNativeText() -> native
                 engine is NativePdfLayoutEngine -> native ?: emptyLayout(request, engine.descriptor.engineVersion)
-                else -> analyzeWithRaster(path, pageIndex, request, native, engine, settings, fingerprint, metadata)
+                else ->
+                    analyzeWithRaster(
+                        path,
+                        pageIndex,
+                        request,
+                        native,
+                        engine,
+                        settings,
+                        fingerprint,
+                        metadata,
+                        runtimeFingerprint,
+                    )
             }
         return if (settings.allowLowConfidenceVlFallback &&
             engine.descriptor.engineId == PpStructureV3Engine.ENGINE_ID &&
             selected.needsVlFallback()
         ) {
             services.engineRegistry.engineOrNull(PaddleOcrVlEngine.ENGINE_ID)?.let { vlEngine ->
-                val vl = analyzeWithRaster(path, pageIndex, request, native, vlEngine, settings, fingerprint, metadata)
+                val vl =
+                    analyzeWithRaster(
+                        path,
+                        pageIndex,
+                        request,
+                        native,
+                        vlEngine,
+                        settings,
+                        fingerprint,
+                        metadata,
+                        runtimeFingerprint,
+                    )
                 mergeVlLayout(selected, vl)
             } ?: selected
         } else {
@@ -280,8 +334,9 @@ internal class PdfDocumentAnalysisRunner(
         settings: DocumentAnalysisSettings,
         fingerprint: String,
         metadata: PdfDocumentMetadata,
+        runtimeFingerprint: String,
     ): PdfPageLayout {
-        val key = cacheKey(path, metadata, engine.descriptor, settings, fingerprint)
+        val key = cacheKey(path, metadata, engine.descriptor, settings, fingerprint, runtimeFingerprint)
         services.cache.loadPage(key, pageIndex)?.let { return it }
         val renderedImage = renderAnalysisImage(path, pageIndex, settings.dpi)
         val renderedInkCoverage = renderedImage.inkCoverage
@@ -358,6 +413,7 @@ internal class PdfDocumentAnalysisRunner(
         descriptor: DocumentAnalysisEngineDescriptor,
         settings: DocumentAnalysisSettings,
         fingerprint: String,
+        runtimeFingerprint: String = "",
     ): PdfAnalysisCacheKey =
         PdfAnalysisCacheKey(
             documentFingerprint = fingerprint,
@@ -369,6 +425,7 @@ internal class PdfDocumentAnalysisRunner(
             dpi = settings.dpi,
             language = settings.language,
             optionsFingerprint = "vlFallback=${settings.allowLowConfidenceVlFallback}",
+            runtimeFingerprint = runtimeFingerprint,
         )
 
     private companion object {

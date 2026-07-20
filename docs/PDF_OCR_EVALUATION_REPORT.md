@@ -56,6 +56,8 @@ tools/run_pdf_ocr_evaluation.sh
 
 12 个标题全部处于正确物理页和根级层级；其中 2 个达到自动确认阈值，其余保留为待审校的
 `CANDIDATE`。这组结果只代表 353 页英文扫描小说中的 12 页章节起始页，不能外推为整本书或其他文档类型的生产准确率。
+后续通过 `tools/run_pdf_ocr_evaluation.sh` 生成的 JSON 报告会同时记录 sidecar 的
+`requested/device/backend`，并按实际运行时隔离页缓存；本段旧基线仍是 CPU 运行结果。
 
 ## 长文档页级恢复
 

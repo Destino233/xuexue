@@ -51,6 +51,7 @@ data class PaddleOcrSidecarConfig(
     val executable: List<String> = emptyList(),
     val endpoint: URI = URI.create("http://127.0.0.1:8765"),
     val version: String = "3.x-sidecar",
+    val requestedDevice: String = DEFAULT_PADDLEOCR_DEVICE,
     val startupTimeout: Duration = Duration.ofSeconds(30),
     val installDirectory: Path = defaultPaddleOcrInstallDirectory(),
     val artifact: PaddleOcrSidecarArtifact? = null,
@@ -60,6 +61,7 @@ data class PaddleOcrSidecarConfig(
             "PaddleOCR sidecar must bind to loopback."
         }
         require(version.isNotBlank()) { "PaddleOCR sidecar version must not be blank." }
+        require(requestedDevice.isNotBlank()) { "PaddleOCR requested device must not be blank." }
         require(!startupTimeout.isNegative && !startupTimeout.isZero) {
             "PaddleOCR sidecar startup timeout must be positive."
         }
@@ -96,6 +98,8 @@ data class PaddleOcrSidecarConfig(
                     ?.let(URI::create)
                     ?: URI.create("http://127.0.0.1:8765")
             val version = System.getenv("XUEXUE_PADDLEOCR_VERSION")?.takeIf(String::isNotBlank) ?: "3.x-sidecar"
+            val requestedDevice =
+                System.getenv("XUEXUE_PADDLEOCR_DEVICE")?.takeIf(String::isNotBlank) ?: DEFAULT_PADDLEOCR_DEVICE
             val artifactUrl = System.getenv("XUEXUE_PADDLEOCR_ARTIFACT_URL")?.takeIf(String::isNotBlank)
             val artifactHash = System.getenv("XUEXUE_PADDLEOCR_ARTIFACT_SHA256")?.takeIf(String::isNotBlank)
             val artifact =
@@ -122,6 +126,7 @@ data class PaddleOcrSidecarConfig(
                 executable = executable,
                 endpoint = endpoint,
                 version = version,
+                requestedDevice = requestedDevice,
                 installDirectory = installDirectory,
                 artifact = artifact,
             )
@@ -159,7 +164,82 @@ data class PaddleOcrRuntime(
     val compiledBackends: Set<String> = emptySet(),
     val availableDevices: List<String> = emptyList(),
     val deviceAvailable: Boolean? = null,
-)
+) {
+    fun cacheFingerprint(): String = "device=${device.orEmpty()};backend=${backend.orEmpty()}"
+}
+
+private const val DEFAULT_PADDLEOCR_DEVICE = "auto"
+
+private fun canonicalPaddleDevice(value: String): String {
+    val normalized = value.trim()
+    return when {
+        normalized.equals("gpu", ignoreCase = true) || normalized.equals("cuda", ignoreCase = true) -> "gpu:0"
+        normalized.startsWith("cuda:", ignoreCase = true) -> "gpu:${normalized.substringAfter(':')}"
+        normalized.equals("xpu", ignoreCase = true) -> "xpu:0"
+        else -> normalized
+    }
+}
+
+private fun paddleDeviceBackend(device: String): String {
+    val normalized = device.trim().lowercase()
+    return when {
+        normalized == "cpu" -> "cpu"
+        normalized == "gpu" || normalized.startsWith("gpu:") || normalized == "cuda" ||
+            normalized.startsWith("cuda:") -> "cuda"
+        normalized == "xpu" || normalized.startsWith("xpu:") -> "xpu"
+        else -> "custom:${normalized.removePrefix("custom_device:").removePrefix("custom:").substringBefore(':')}"
+    }
+}
+
+private fun paddleDevicesMatch(
+    expected: String,
+    actual: String,
+): Boolean {
+    fun identity(value: String): String =
+        value
+            .lowercase()
+            .removePrefix("custom_device:")
+            .removePrefix("custom:")
+            .removeSuffix(":0")
+
+    return identity(expected) == identity(actual)
+}
+
+private fun isPaddleAcceleratedDevice(device: String): Boolean =
+    device.isNotBlank() && paddleDeviceBackend(device) != "cpu"
+
+private fun runtimePreferenceFailure(
+    runtime: PaddleOcrRuntime,
+    requestedDevice: String,
+): String? {
+    val actualDevice = runtime.device
+        ?: return "PaddleOCR sidecar health did not report the selected device."
+    if (runtime.deviceAvailable == null) {
+        return "PaddleOCR sidecar health did not confirm device availability."
+    }
+    val requested = canonicalPaddleDevice(requestedDevice)
+    return when {
+        requested.equals("auto", ignoreCase = true) -> {
+            val acceleratorReported =
+                isPaddleAcceleratedDevice(actualDevice) || runtime.availableDevices.any(::isPaddleAcceleratedDevice)
+            if (acceleratorReported && !isPaddleAcceleratedDevice(actualDevice)) {
+                "GPU-first policy rejected CPU sidecar: an accelerated Paddle device is available."
+            } else {
+                null
+            }
+        }
+
+        requested.equals("cpu", ignoreCase = true) && !actualDevice.equals("cpu", ignoreCase = true) -> {
+            "PaddleOCR requested CPU but sidecar selected $actualDevice."
+        }
+
+        !requested.equals("cpu", ignoreCase = true) && !paddleDevicesMatch(requested, actualDevice) -> {
+            "PaddleOCR requested $requested but sidecar selected $actualDevice."
+        }
+
+        else -> null
+    }
+}
 
 // Keep installation, health, lifecycle, and archive validation in one atomic service boundary.
 @Suppress("TooManyFunctions")
@@ -244,10 +324,11 @@ class PaddleOcrServiceManager(
     private suspend fun startProcessAndWait(command: List<String>): PaddleOcrHealth {
         process =
             withContext(ioDispatcher) {
-                ProcessBuilder(command)
-                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                    .redirectError(ProcessBuilder.Redirect.DISCARD)
-                    .start()
+                ProcessBuilder(command).apply {
+                    environment()["XUEXUE_PADDLEOCR_DEVICE"] = config.requestedDevice
+                    redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    redirectError(ProcessBuilder.Redirect.DISCARD)
+                }.start()
             }
         return try {
             val deadline = System.nanoTime() + config.startupTimeout.toNanos()
@@ -330,6 +411,7 @@ class PaddleOcrServiceManager(
         val engineReadiness = parseEngineReadiness(json)
         val measuredMemoryBytes = json["rss_bytes"]?.jsonPrimitive?.longOrNull
         val runtime = parseRuntime(json)
+        val runtimeFailure = runtimePreferenceFailure(runtime, config.requestedDevice)
         return when {
             reportedVersion == null -> {
                 PaddleOcrHealth(
@@ -346,6 +428,17 @@ class PaddleOcrServiceManager(
                     false,
                     version = reportedVersion,
                     detail = "sidecar 版本不匹配，期望 ${config.version}，实际 $reportedVersion",
+                    engineReadiness = engineReadiness,
+                    measuredMemoryBytes = measuredMemoryBytes,
+                    runtime = runtime,
+                )
+            }
+
+            runtimeFailure != null -> {
+                PaddleOcrHealth(
+                    false,
+                    version = reportedVersion,
+                    detail = runtimeFailure,
                     engineReadiness = engineReadiness,
                     measuredMemoryBytes = measuredMemoryBytes,
                     runtime = runtime,

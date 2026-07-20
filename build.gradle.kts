@@ -119,6 +119,7 @@ tasks.withType<Test>().configureEach {
         "xuexue.pdf.eval.report",
         "xuexue.pdf.eval.endpoint",
         "xuexue.pdf.eval.sidecarPid",
+        "xuexue.pdf.eval.runtime",
         "xuexue.pdf.eval.dpi",
         "xuexue.pdf.benchmark.pages",
         "xuexue.pdf.benchmark.report",

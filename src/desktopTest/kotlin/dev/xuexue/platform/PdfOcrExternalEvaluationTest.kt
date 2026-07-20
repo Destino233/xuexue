@@ -48,6 +48,7 @@ class PdfOcrExternalEvaluationTest {
                 URI.create(
                     System.getProperty("xuexue.pdf.eval.endpoint", "http://127.0.0.1:8765/analyze"),
                 ),
+            runtimeFingerprint = System.getProperty("xuexue.pdf.eval.runtime", "unknown"),
             dpi = System.getProperty("xuexue.pdf.eval.dpi", "200").toInt(),
         )
     }
@@ -95,6 +96,7 @@ class PdfOcrExternalEvaluationTest {
                 modelVersion = engine.descriptor.modelVersion,
                 dpi = input.dpi,
                 language = input.manifest.language,
+                runtimeFingerprint = input.runtimeFingerprint,
             )
         val firstPass = analyzePages(backend, input, engine, firstStore, cache, cacheKey)
         val cachedPass = analyzePages(backend, input, engine, secondStore, cache, cacheKey)
@@ -140,6 +142,7 @@ class PdfOcrExternalEvaluationTest {
                     pageCount = result.pageCount,
                     evaluatedPages = input.manifest.pages,
                     dpi = input.dpi,
+                    runtime = input.runtimeFingerprint,
                     engine = result.descriptor.engineId,
                     modelVersion = result.descriptor.modelVersion,
                     firstPass = result.firstPass,
@@ -276,6 +279,7 @@ class PdfOcrExternalEvaluationTest {
         val manifest: ExternalEvaluationManifest,
         val reportPath: Path,
         val endpoint: URI,
+        val runtimeFingerprint: String,
         val dpi: Int,
     )
 
@@ -316,6 +320,7 @@ class PdfOcrExternalEvaluationTest {
         val pageCount: Int,
         val evaluatedPages: List<Int>,
         val dpi: Int,
+        val runtime: String,
         val engine: String,
         val modelVersion: String?,
         val firstPass: ExternalPassReport,

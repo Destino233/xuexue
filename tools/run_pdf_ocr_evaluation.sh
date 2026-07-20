@@ -20,16 +20,40 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-health_ready() {
+check_health() {
+    local require_ready="$1"
     local payload
     payload="$(curl --silent --fail --max-time 2 "$health_endpoint")" || return 1
     printf '%s' "$payload" |
-        "$python_bin" -c 'import json, sys; raise SystemExit(0 if json.load(sys.stdin).get("ready") is True else 1)' \
-            2>/dev/null
+        "$python_bin" -c '
+import importlib.util
+import json
+import pathlib
+import sys
+
+module_path = pathlib.Path("tools/paddleocr-sidecar/paddleocr_sidecar.py")
+spec = importlib.util.spec_from_file_location("xuexue_paddleocr_sidecar", module_path)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+health = json.load(sys.stdin)
+if not module.runtime_matches_requested_device(health.get("runtime"), sys.argv[1]):
+    raise SystemExit(2)
+if sys.argv[2] == "1" and health.get("ready") is not True:
+    raise SystemExit(1)
+' "$paddle_device" "$require_ready" 2>/dev/null
 }
 
+health_ready() { check_health 1; }
+runtime_compatible() { check_health 0; }
+
 if ! health_ready; then
-    if ! curl --silent --fail --max-time 2 "$health_endpoint" >/dev/null; then
+    if curl --silent --fail --max-time 2 "$health_endpoint" >/dev/null; then
+        runtime_compatible || {
+            echo "Existing PaddleOCR sidecar does not satisfy requested device: $paddle_device" >&2
+            exit 1
+        }
+    else
         log_path="${XUEXUE_PDF_EVAL_SIDECAR_LOG:-${XUEXUE_PDF_EVAL_REPORT%.*}.sidecar.log}"
         mkdir -p "$(dirname "$log_path")"
         "$python_bin" tools/paddleocr-sidecar/paddleocr_sidecar.py \
@@ -53,6 +77,21 @@ if ! health_ready; then
     }
 fi
 
+runtime_fingerprint="$(
+    curl --silent --fail --max-time 2 "$health_endpoint" |
+        "$python_bin" -c '
+import json
+import sys
+
+runtime = json.load(sys.stdin).get("runtime") or {}
+print(
+    "requested=" + str(runtime.get("requested_device") or "") +
+    ";device=" + str(runtime.get("device") or "") +
+    ";backend=" + str(runtime.get("backend") or "")
+)
+'
+)"
+
 JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-26-openjdk}" \
 PATH="$JAVA_HOME/bin:$PATH" \
 ./gradlew :desktopTest \
@@ -62,4 +101,5 @@ PATH="$JAVA_HOME/bin:$PATH" \
     -Dxuexue.pdf.eval.report="$XUEXUE_PDF_EVAL_REPORT" \
     -Dxuexue.pdf.eval.endpoint="$endpoint" \
     -Dxuexue.pdf.eval.sidecarPid="${sidecar_pid:-0}" \
+    -Dxuexue.pdf.eval.runtime="$runtime_fingerprint" \
     -Dxuexue.pdf.eval.dpi="${XUEXUE_PDF_EVAL_DPI:-200}"
