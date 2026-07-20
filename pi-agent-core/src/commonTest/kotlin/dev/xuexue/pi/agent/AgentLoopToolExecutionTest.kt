@@ -17,6 +17,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -157,6 +158,76 @@ class AgentLoopToolExecutionTest {
 
             assertTrue(validated)
             assertEquals(1, executedEdits)
+        }
+
+    @Test
+    fun validatesToolSchemaBeforeBeforeHookAndExecution() =
+        runTest {
+            var executed = false
+            var beforeCalled = false
+            val tool =
+                AgentTool(
+                    name = "count",
+                    label = "Count",
+                    description = "Count tool",
+                    parameters =
+                        buildJsonObject {
+                            put("type", "object")
+                            putJsonObject("properties") {
+                                putJsonObject("value") { put("type", "number") }
+                            }
+                            putJsonArray("required") { add(JsonPrimitive("value")) }
+                        },
+                    execute = { _, _, _, _ ->
+                        executed = true
+                        toolResult("unexpected")
+                    },
+                )
+            val config =
+                object : AgentLoopConfig {
+                    override val model = testModel()
+
+                    override suspend fun convertToLlm(messages: List<AgentMessage>): List<Message> = testLlm(messages)
+
+                    override suspend fun beforeToolCall(
+                        context: BeforeToolCallContext,
+                        signal: dev.xuexue.pi.ai.AbortSignal?,
+                    ): BeforeToolCallResult? {
+                        beforeCalled = true
+                        return null
+                    }
+                }
+            var callIndex = 0
+            val events =
+                agentLoop(
+                    this,
+                    listOf(testUser("count")),
+                    AgentContext("", mutableListOf(), listOf(tool)),
+                    config,
+                    streamFunction =
+                        StreamFunction { _, _, _ ->
+                            if (callIndex++ == 0) {
+                                testCompleted(
+                                    testAssistant(
+                                        listOf(testToolCall("tool-1", "count", valueArguments("not-a-number"))),
+                                        stopReason = dev.xuexue.pi.ai.StopReason.TOOL_USE,
+                                    ),
+                                )
+                            } else {
+                                testCompleted(testAssistant(listOf(TextContent("done"))))
+                            }
+                        },
+                ).asFlow().toList()
+
+            val end = events.filterIsInstance<AgentEvent.ToolExecutionEnd>().single()
+            assertTrue(end.isError)
+            assertTrue(
+                end.result.content
+                    .single()
+                    .let { it is TextContent && it.text.contains("Validation failed") },
+            )
+            assertFalse(beforeCalled)
+            assertFalse(executed)
         }
 
     @Test

@@ -162,6 +162,18 @@ class SettingsManagerTest {
         assertEquals(listOf("tools/demo"), manager.getExtensionPaths())
     }
 
+    @Test
+    fun exposesExtensionPathsByTrustScopeForPluginDiscovery() {
+        val manager =
+            manager(
+                global = """{"extensions":["global/plugin.jar"]}""",
+                project = """{"extensions":["project/plugin.jar"]}""",
+            )
+
+        assertEquals(listOf("global/plugin.jar"), manager.getGlobalExtensionPaths())
+        assertEquals(listOf("project/plugin.jar"), manager.getProjectExtensionPaths())
+    }
+
     private fun manager(
         global: String,
         project: String = "{}",

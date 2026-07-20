@@ -59,6 +59,14 @@ class ModelsTest {
         assertFalse(modelsAreEqual(first, null))
     }
 
+    @Test
+    fun pinnedPiCatalogsContainAllGeneratedModels() {
+        assertEquals(1_057, generatedPiModelCatalog().size)
+        assertEquals(35, generatedPiImageModelCatalog().size)
+        assertTrue(generatedPiModelCatalog().any { it.api == "mistral-conversations" })
+        assertTrue(generatedPiModelCatalog().any { it.api == "bedrock-converse-stream" })
+    }
+
     private fun model(
         id: String = "model",
         provider: String = "provider",

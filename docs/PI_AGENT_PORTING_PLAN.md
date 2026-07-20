@@ -31,19 +31,20 @@
 
 ## 2. 当前实现定位
 
-当前代码已经建立三层 Kotlin 模块和可验证的 Headless 核心，但仍处于迁移阶段，
-不是最终完整 Runtime。
+截至 2026-07-20，代码已经建立三层 Kotlin 模块、Pi v3 会话树、能力包和可运行的
+Headless Runtime 骨架，并开始由 XueXue Compose 作为正式宿主消费。整体仍处于迁移
+阶段，不能把已接线误认为 Pi 0.80.6 的完整 parity。
 
 | 领域 | 当前状态 | 与 Pi 的主要差距 |
 | --- | --- | --- |
-| 模型调用 | `:pi-ai` 已有消息/内容/模型协议、事件流、取消、估算和基础错误工具 | 缺 Provider 目录、图片生成、OAuth、各 Provider adapter 和完整兼容 facade |
-| Agent Loop | `:pi-agent-core` 已复刻双层 Loop、完整事件、并行/顺序工具、两类队列和钩子 | 原 Agent 核心测试已映射；仍依赖上层补齐 retry、compaction 和资源刷新 |
-| 工具 | `read/write/edit/bash/grep/find/ls` 可运行 | 参数和输出语义尚未逐项对齐 Pi，缺文件修改队列 |
-| 会话 | `:pi-coding-agent` 已有 Pi v3 append-only tree/JSONL、`AgentSession`、retry 与手动/阈值/overflow compaction | 缺 branch summary、Runtime/services、导入导出和原测试逐文件映射 |
-| 上下文 | 已有 Pi 系统提示构建器、ResourceLoader、父目录 AGENTS/CLAUDE 继承、SYSTEM/APPEND_SYSTEM、Skills 与模板发现 | 缺完整 YAML/ignore 规则、package/extension metadata、AgentSession prompt 重建和 token 管理 |
-| UI | Compose 已订阅新 Agent 状态和事件并调用 prompt/steer/abort | 仍使用旧会话 DTO、临时 Provider/工具桥和消息投影，尚未切换到正式 AgentSession Runtime |
-| 设置、扩展与包 | SettingsManager 已有全局/项目深合并、迁移、信任隔离和外部编辑保留；ResourceLoader 已消费受信任设置资源 | 扩展 ABI/runner/loader、包安装、跨进程锁和 package 资源 reload 未实现 |
-| SDK/RPC | 未实现 | 未实现 |
+| 模型调用 | `:pi-ai` 已有消息/内容/模型协议、事件流、取消、估算、`AuthStore`、`ModelRegistry`、1057 个文本模型和 35 个图像模型目录；OpenAI Completions/Responses、Azure Responses、Bedrock Converse、Anthropic Messages、Google Generative AI、OpenRouter Images、Mistral-compatible 和 OpenAI Codex Responses adapter 已接入 fixture；三类主要 Provider 的 Prompt Cache retention/key/marker 已统一；Anthropic/OpenAI Responses/Codex 原生 deferred tools 已接入；共享错误体路径已保留 status、网关 JSON reason、空体语义和截断诊断 | Google Vertex ADC/OAuth refresh、Bedrock profile/完整 AWS credential chain、Codex WebSocket connection reuse、OAuth refresh、Bedrock/deferred-tool cache 细节和兼容 facade 仍待补 |
+| Agent Loop | `:pi-agent-core` 已复刻双层 Loop、完整事件、并行/顺序工具、两类队列、钩子和工具参数 schema 校验；`ToolExecution.kt` 固定 `prepare -> schema validation -> before hook -> execute` 顺序 | 原 Agent 核心测试已映射；仍依赖上层补齐 retry、compaction 和资源刷新；复杂 TypeBox-only schema 关键字仍待补齐 |
+| 工具 | `read/write/edit/bash/grep/find/ls` 可运行；共享 UTF-8 head/tail 截断、同路径文件修改队列、Bash cancel cleanup 和 RPC/Session Bash full-output 文件已补 | 参数、图片/二进制、glob/ignore、stream accumulator、进程树回收和 details 尚未逐项对齐 Pi；旧 `DesktopAgentTools` 路径仍需复用同一输出执行器 |
+| 会话 | `:pi-coding-agent` 已有 Pi v3 append-only tree/JSONL、`AgentSession`、retry 与手动/阈值/overflow compaction | branch summary、导入导出和原测试逐文件映射仍待补；`AgentSessionRuntime` 已提供统一 startup/new/resume/fork/shutdown 生命周期 |
+| 上下文 | 已有 Pi 系统提示构建器、ResourceLoader、父目录 AGENTS/CLAUDE 继承、SYSTEM/APPEND_SYSTEM、Skills 与模板发现；已补动态资源 metadata、ignore 规则、`AgentSession` 提示词重建和插件 hooks | 缺完整 YAML、package manager、JAR/Process loader、异步资源生命周期和 token 管理 |
+| UI | Compose 已通过 `AgentSessionRuntime` 调用 prompt/steer/abort，收集正式 Runtime 运行态 StateFlow，并消费 Runtime 交互请求；旧 DTO/投影仍作为迁移兼容层，且已保留 thinking/tool call/tool result 的可检查投影 | 会话树和完整 structured message 投影尚未完全替换旧消息列表 |
+| 设置、扩展与包 | SettingsManager、Kotlin 扩展 API/Runner、JVM JAR/Process discovery、path/git/Maven 下载、资源贡献、trust/offline/hash/staging、glob 资源选择和文件锁已接入 | 完整 git 更新/回滚 fixture、package manifest/filter 全语义、Process image-provider wrapper、旧 classloader/资源完整释放仍待补 |
+| SDK/RPC | `PiRpcCodec`、`AgentSessionRpcHandler`、`PiRpcServer` 已支持 JSONL command/response/event；prompt preflight 异步响应、steer/follow-up 图片、模型/会话/队列/compaction、Bash、带完整 `sourceInfo` 的命令查询、interaction response 和 Process 插件交互均已接入；`export_html` 已通过宿主能力导出安全静态 HTML；`cycle_model` 已支持 scoped 顺序、认证过滤、顺逆时针和显式 `data:null` | SDK/Compose/RPC 三宿主一致性测试和完整 Pi Markdown/highlight/theme fidelity 仍待补 |
 
 当前的 `PiAgentRuntime`、`AgentClient`、`WorkbenchAgentController` 和会话文件
 必须提供迁移兼容，但允许在新 Runtime 完成后被替换。现有
@@ -162,10 +163,11 @@ confirm、select、input、editor、权限确认和凭据登录。Compose 只负
 - 实现完整内容块、模型、用量、停止原因和稳定错误类型。
 - 定义流式 `AssistantMessageEvent`，支持增量文本、thinking 和 tool call 参数。
 - 将当前 OpenAI Chat Completions 实现迁入 Provider 接口。
-- 添加 OpenAI Responses、Anthropic Messages 和 Google Generative AI；其他
-  Provider 在相同接口上逐个补齐。
+- 添加 OpenAI Responses、OpenAI Codex Responses、Anthropic Messages 和 Google
+  Generative AI；其他 Provider 在相同接口上逐个补齐。Codex 的 JVM 公共边界先以
+  SSE 保持完整请求/事件语义，WebSocket connection reuse 作为平台优化单独收敛。
 - 复刻图片生成协议、模型目录、Provider 转换、认证与凭据解析等非排除行为。
-- 实现请求超时、取消、重试、Retry-After、上下文溢出识别和 Unicode 清理。
+- 实现请求超时、取消、重试、Retry-After、上下文溢出识别和 Unicode 清理；Provider 非 2xx 响应必须保留 status 与原始 body reason，空对象不能伪装成有效错误体，超长 body 必须带截断诊断。Codex 还必须保留 JWT account id、session affinity、429 delay cap 和 network retry 语义。
 
 验收：同一段标准消息可无损经过 Provider 转换；取消和错误只通过协议返回，
 不会破坏会话历史。
@@ -180,6 +182,11 @@ confirm、select、input、editor、权限确认和凭据登录。Compose 只负
 - 实现 steering/follow-up 的 `all` 与 `one-at-a-time` 队列模式。
 - 实现 retry、prepare-next-turn、should-stop 和 agent settled 语义。
 - Agent Core 只依赖能力接口，完全移除 Compose snapshot state。
+
+当前已落地：`ToolArgumentValidation.kt` 按 Pi 的 `prepare -> schema validation ->
+before hook -> execute` 顺序接入工具执行，覆盖 primitive coercion、嵌套 properties、
+联合 schema、required、additionalProperties 和标准错误体；复杂 TypeBox-only 关键字、
+完整 retry/compaction 仍保持未完成状态。
 
 验收：移植的 Pi Agent Loop 测试通过，事件顺序与 fixture 完全一致。
 
@@ -219,8 +226,9 @@ compaction 后可以继续对话并回看原始历史。
 - 按 Pi 路径加载 `AGENTS.md`/`CLAUDE.md`、`SYSTEM.md`、
   `APPEND_SYSTEM.md`、Skills 和 Prompt Templates。
 - 保留每项资源的 source info、diagnostic、启用状态和冲突信息。
-- 工具定义必须贡献 Pi 对应的 `promptSnippet` 和 `promptGuidelines`；Runtime 根据
-  活跃工具、Skills、项目上下文和 system/append system 资源统一重建提示词。
+- 工具定义贡献 Pi 对应的 `promptSnippet` 和 `promptGuidelines`；`AgentSession` 已在初始化和
+  `reloadResources()` 时根据活跃工具、Skills、项目上下文和 system/append system 资源统一重建提示词。
+  默认提示词包含工具元数据；自定义 `SYSTEM.md` 保持 Pi 的不注入工具段语义。
 - 复刻 `before_agent_start` 的消息注入和单轮 system prompt 替换，以及 `context`
   事件在每次模型调用前按扩展顺序改写消息的行为。
 - 实现 reload，并保证失败资源不会破坏已经可用的 Runtime。
@@ -233,10 +241,33 @@ compaction 后可以继续对话并回看原始历史。
 插件系统必须建立在阶段 1-5 的稳定协议上，分为统一 API 与多个宿主。
 详细设计见第 6 节。
 
+当前已落地 `PiExtensionApi`/`PiExtensionRunner`、AgentSession hooks（含可取消的
+`session_before_switch`/`session_before_fork`）、JVM manifest
+loader、Process JSONL handshake/tool host，以及 `AgentSessionRuntime` 的启动/替换/分叉
+生命周期。插件 discovery 已支持用户/项目/临时路径和清单校验，project trust 已按
+Pi 的首个明确决策规则工作，命令可由 Runner 执行并接入 AgentSession；Process 事件已
+携带结构化 JSON payload。Process 插件现在还可以通过 `register_provider` 注册文本
+Provider；宿主以 `provider_stream` 发送模型、Context、stream options，并将
+`AssistantMessageEvent` 按 PiJson 逐事件转发回 Runtime。图像 Provider 使用
+`register_image_provider` 和 `image_generate`，结果为 `AssistantImages`，错误和取消
+保持 `ImagesStopReason`。`PiPackageManager` 的统一
+source/manifest/资源协议已落地，Desktop Runtime 已把已解析的 package extension paths
+交给 `PiPluginDiscovery`，下一步是安装进度、Process image-provider wrapper 和 reload
+资源生命周期。
+
 验收：工具、命令、Provider、资源路径和关键生命周期钩子可以由插件注册；
 插件异常被隔离并生成诊断；reload 后旧监听器和资源全部释放。
 
 ### 阶段 7：能力包与安装管理
+
+当前已完成第一段可验证基础：`PiPackageSourceParser` 支持本地 path、git 和 Maven 坐标，
+`PiPackageManifestCodec` 支持自有 manifest 与 `package.json.pi`，Desktop manager 支持
+本地目录/JAR/Process 目录解析、用户/项目缓存目录、内容 hash、settings 持久化、project
+trust、`PI_OFFLINE` 诊断、远程 Maven 下载、文件锁、glob 资源选择，以及 git staging 的原子
+替换和失败恢复；`AgentSession` startup/reload 已消费 package skills/prompts，Desktop Runtime
+也会把 package extension paths 交给 `PiPluginDiscovery`。当前明确未完成的是完整 git 更新/
+回滚 fixture、package filter/pattern 全语义、安装进度 UI 和 package reload 时旧 classloader/
+资源的完整释放。
 
 工作项：
 
@@ -262,6 +293,25 @@ compaction 扩展等非排除行为移植为 Kotlin/Process fixture，并通过�
 - `WorkbenchAgentController` 降为 Runtime 命令适配器。
 - Compose UI 收集 StateFlow/AgentEvent，并处理 InteractionRequest；UI 不再
   直接修改会话消息或执行工具。
+
+当前已落地的阶段 8 基础设施：
+
+- `InteractionRequest`/`InteractionPort`/`InteractionRequestBroker` 位于
+  `pi-coding-agent commonMain`，支持 confirm、select、input、editor、notify、
+  类型化响应、取消和宿主无关的挂起语义。
+- `PiRpcCodec` 接受规范化 JSONL request，也兼容 Pi 风格的扁平命令对象；
+  `AgentSessionRpcHandler` 将命令和 `AgentSessionEvent` 映射到相同 Runtime；flat
+  `bash` 请求会保留业务字段 `command`，不会和协议 command 混淆。
+- `PiRpcServer` 使用 LF JSONL stdin/stdout；server-facing prompt 在 preflight 通过后
+  通过 response event 返回，AgentSession 继续异步流出 agent/message/tool 事件。
+- `AgentSessionBashExecutor` 是公共平台边界，Desktop `LocalBashExecutor` 负责 shell、
+  取消、tail 截断和完整输出临时文件；结果统一经 `recordBashResult` 进入 Session/Compose/RPC。
+- `AgentSessionHtmlExporter` 是公共导出边界；Desktop `LocalSessionHtmlExporter` 将
+  `AgentSession` 的 append-only entries 渲染为 HTML 并写入文件，核心渲染统一转义用户内容、
+  保留换行，RPC `export_html` 只返回宿主生成的路径。
+- `ProcessPiExtension` 在事件处理期间可发起 `interaction_request`，由宿主
+  `InteractionPort` 回答后继续插件调用；Compose 通过 `AgentRuntimeState` 暴露
+  同一 broker 的 StateFlow。
 
 验收：同一套集成测试可以分别驱动 SDK、RPC 和 Compose adapter，得到相同
 Runtime 状态与会话文件。
@@ -314,6 +364,14 @@ Provider 和资源，防止重复注册及 classloader 泄漏；不得为方便�
 JVM 和 Process 宿主只承载插件代码。Agent 状态机、会话、资源优先级、事件合并、
 权限判定和工具调度始终由 Kotlin Runtime 掌控，两个宿主必须通过同一套扩展
 conformance 测试。
+
+Process Provider 使用与工具请求相同的 JSONL 通道：插件初始化阶段发送
+`register_provider`（`id`、`name`、`supportedApis`），宿主在模型调用时发送
+`provider_stream`，其中包含 `Model`、结构化 `Context` 和可序列化的 stream options。
+插件用 `provider_event` 或 `provider_done` 返回由 `PiJson` 编码的
+`AssistantMessageEvent`；`provider_error` 映射为终止错误事件。API key 只在宿主已经
+解析出 `SimpleStreamOptions.stream.apiKey` 时转发，Process 宿主不自行读取凭据。
+取消请求会终止 Kotlin 侧事件流，插件应把请求视为不可继续使用。
 
 ### 6.3 JVM 插件清单
 
@@ -375,7 +433,11 @@ Compose UI 必须完整承载 Headless 行为：
 UI 接线不是复刻完成后的附加层，而是 Runtime 协议的验收宿主。阶段 2 起就必须
 让 Agent Core 的事件可被 StateFlow/Flow 订阅；阶段 3-6 的会话、资源、工具和扩展
 状态必须通过同一 Runtime 投影；阶段 8 只允许把现有 `WorkbenchAgentController`
-降为命令/状态适配器，不得保留第二套 Agent Loop 或直接修改会话。
+降为命令/状态适配器，不得保留第二套 Agent Loop 或直接修改会话。当前控制器已
+开始懒创建 `AgentSessionRuntime`，正式 Runtime 负责 prompt、steer、follow-up、工具
+事件和会话生命周期；`AgentRuntimeState` 已重新绑定 Runtime 的 StateFlow/事件流，Agent 面板
+运行态优先读取正式 StateFlow。旧 `AgentSessionState`/`WorkbenchAgentProjection` 仍作为 UI
+迁移期间的 structured-message 展示与旧数据兼容投影，待完整 Runtime 消息投影完成后删除。
 
 - 会话树、分叉、克隆、命名、compaction 和恢复；
 - 模型/Provider/thinking level、上下文用量和成本；
@@ -401,6 +463,7 @@ UI 只发送命令和呈现状态。任何会话写入、工具执行、Provider
 
 - Pi 行为 fixture：事件顺序、消息转换、队列、错误和 RPC JSON。
 - Provider mock server：SSE 分片、tool arguments、重试、取消和错误体。
+- JSON/schema fixture：partial JSON 修复、Pi primitive coercion、嵌套工具参数、联合 schema、required/additionalProperties 和验证错误格式。
 - 会话故障注入：截断 JSONL、重复 entry、崩溃恢复和迁移回滚。
 - 工具边界：symlink、路径穿越、超大输出、并发写和子进程取消。
 - 插件 conformance：注册、事件、超时、reload、崩溃、UI request 和权限。

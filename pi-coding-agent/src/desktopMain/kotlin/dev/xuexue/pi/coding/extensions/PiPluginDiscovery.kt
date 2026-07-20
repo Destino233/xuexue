@@ -1,0 +1,213 @@
+@file:Suppress("TooGenericExceptionCaught")
+
+package dev.xuexue.pi.coding.extensions
+
+import dev.xuexue.pi.coding.resources.ResourceOrigin
+import dev.xuexue.pi.coding.resources.ResourceScope
+import dev.xuexue.pi.coding.resources.syntheticResourceSourceInfo
+import dev.xuexue.pi.coding.settings.SettingsManager
+import java.io.File
+import java.util.jar.JarFile
+
+enum class PiPluginScope {
+    USER,
+    PROJECT,
+    TEMPORARY,
+}
+
+data class PiPluginCandidate(
+    val path: String,
+    val manifest: PiPluginManifest,
+    val scope: PiPluginScope,
+)
+
+data class PiPluginLoadError(
+    val path: String,
+    val message: String,
+)
+
+data class PiPluginLoadResult(
+    val candidates: List<PiPluginCandidate>,
+    val extensions: List<PiExtension>,
+    val errors: List<PiPluginLoadError>,
+)
+
+data class PiPluginDiscoveryOptions(
+    val cwd: String,
+    val agentDirectory: String,
+    val projectTrusted: Boolean,
+    val configuredUserPaths: List<String> = emptyList(),
+    val configuredProjectPaths: List<String> = emptyList(),
+    val additionalPaths: List<String> = emptyList(),
+) {
+    companion object {
+        fun fromSettings(
+            cwd: String,
+            agentDirectory: String,
+            settingsManager: SettingsManager,
+            projectTrusted: Boolean = settingsManager.isProjectTrusted(),
+            additionalPaths: List<String> = emptyList(),
+        ): PiPluginDiscoveryOptions =
+            PiPluginDiscoveryOptions(
+                cwd = cwd,
+                agentDirectory = agentDirectory,
+                projectTrusted = projectTrusted,
+                configuredUserPaths = settingsManager.getGlobalExtensionPaths(),
+                configuredProjectPaths = settingsManager.getProjectExtensionPaths(),
+                additionalPaths = additionalPaths,
+            )
+    }
+}
+
+/** Discovers manifest-bearing JVM JARs and process plugin bundles in deterministic scope order. */
+class PiPluginDiscovery(
+    private val options: PiPluginDiscoveryOptions,
+) {
+    fun discover(): Pair<List<PiPluginCandidate>, List<PiPluginLoadError>> {
+        val projectRoot = File(options.cwd, ".xuexue/pi/extensions")
+        val userRoot = File(options.agentDirectory, "extensions")
+        val roots =
+            listOf(
+                projectRoot to PiPluginScope.PROJECT,
+                userRoot to PiPluginScope.USER,
+            ) + options.configuredProjectPaths.map { resolveConfiguredPath(it) to PiPluginScope.PROJECT } +
+                options.configuredUserPaths.map { resolveConfiguredPath(it) to PiPluginScope.USER } +
+                options.additionalPaths.map { resolveConfiguredPath(it) to PiPluginScope.TEMPORARY }
+        val candidates = mutableListOf<PiPluginCandidate>()
+        val errors = mutableListOf<PiPluginLoadError>()
+        val seen = mutableSetOf<String>()
+        roots.forEach { (root, scope) ->
+            discoverRoot(root, scope, seen, candidates, errors)
+        }
+        return candidates to errors
+    }
+
+    private fun resolveConfiguredPath(path: String): File {
+        val file = File(path)
+        return if (file.isAbsolute) file else File(options.cwd, path)
+    }
+
+    private fun PiPluginCandidate.sourceInfo() =
+        syntheticResourceSourceInfo(
+            path = path,
+            source = "local",
+            scope =
+                when (scope) {
+                    PiPluginScope.USER -> ResourceScope.USER
+                    PiPluginScope.PROJECT -> ResourceScope.PROJECT
+                    PiPluginScope.TEMPORARY -> ResourceScope.TEMPORARY
+                },
+            origin = ResourceOrigin.PACKAGE,
+            baseDirectory = File(path).absoluteFile.parent,
+        )
+
+    fun loadAll(): PiPluginLoadResult {
+        val (candidates, discoveryErrors) = discover()
+        val extensions = mutableListOf<PiExtension>()
+        val errors = discoveryErrors.toMutableList()
+        candidates.forEach { candidate ->
+            if (candidate.scope == PiPluginScope.PROJECT && !options.projectTrusted) return@forEach
+            runCatching {
+                when (candidate.manifest.runtime) {
+                    PiPluginRuntime.JVM -> {
+                        JvmPiPluginLoader().load(
+                            candidate.path,
+                            trusted = options.projectTrusted || candidate.scope != PiPluginScope.PROJECT,
+                            sourceInfo = candidate.sourceInfo(),
+                        )
+                    }
+
+                    PiPluginRuntime.PROCESS -> {
+                        ProcessPiExtension.fromManifest(
+                            candidate.manifest,
+                            candidate.path,
+                            sourceInfo = candidate.sourceInfo(),
+                        )
+                    }
+                }
+            }.onSuccess(extensions::add)
+                .onFailure { error -> errors += PiPluginLoadError(candidate.path, error.message.orEmpty()) }
+        }
+        return PiPluginLoadResult(candidates, extensions, errors)
+    }
+
+    private fun discoverRoot(
+        root: File,
+        scope: PiPluginScope,
+        seen: MutableSet<String>,
+        candidates: MutableList<PiPluginCandidate>,
+        errors: MutableList<PiPluginLoadError>,
+    ) {
+        val files =
+            when {
+                !root.exists() -> {
+                    emptyList()
+                }
+
+                root.isFile -> {
+                    listOf(root)
+                }
+
+                else -> {
+                    root
+                        .listFiles()
+                        ?.sortedBy(File::getName)
+                        ?.toList()
+                        .orEmpty()
+                }
+            }
+        files.forEach { file ->
+            val candidate = readCandidate(file, scope, errors) ?: return@forEach
+            val canonicalPath = runCatching { file.canonicalPath }.getOrDefault(file.absolutePath)
+            if (seen.add(canonicalPath)) candidates += candidate
+        }
+    }
+
+    private fun readCandidate(
+        file: File,
+        scope: PiPluginScope,
+        errors: MutableList<PiPluginLoadError>,
+    ): PiPluginCandidate? =
+        when {
+            file.isFile && file.extension == "jar" -> {
+                readManifestFromJar(file, errors)?.let { PiPluginCandidate(file.path, it, scope) }
+            }
+
+            file.isDirectory -> {
+                val manifestFile =
+                    File(file, PI_PLUGIN_MANIFEST_PATH)
+                        .takeIf(File::isFile)
+                        ?: File(file, "xuexue-pi-plugin.json").takeIf(File::isFile)
+                manifestFile?.let { manifest ->
+                    readManifestFile(manifest, errors)?.let { PiPluginCandidate(file.path, it, scope) }
+                }
+            }
+
+            else -> {
+                null
+            }
+        }
+
+    private fun readManifestFromJar(
+        file: File,
+        errors: MutableList<PiPluginLoadError>,
+    ): PiPluginManifest? =
+        runCatching {
+            JarFile(file).use { jar ->
+                val entry =
+                    jar.getJarEntry(PI_PLUGIN_MANIFEST_PATH)
+                        ?: error("Missing $PI_PLUGIN_MANIFEST_PATH")
+                jar.getInputStream(entry).bufferedReader().use { reader ->
+                    PiPluginManifestCodec.decode(reader.readText())
+                }
+            }
+        }.onFailure { error -> errors += PiPluginLoadError(file.path, error.message.orEmpty()) }.getOrNull()
+
+    private fun readManifestFile(
+        file: File,
+        errors: MutableList<PiPluginLoadError>,
+    ): PiPluginManifest? =
+        runCatching {
+            PiPluginManifestCodec.decode(file.readText())
+        }.onFailure { error -> errors += PiPluginLoadError(file.path, error.message.orEmpty()) }.getOrNull()
+}

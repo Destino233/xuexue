@@ -3,27 +3,76 @@ package dev.xuexue.pi.coding
 import dev.xuexue.pi.agent.AgentState
 import dev.xuexue.pi.ai.ImageContent
 import dev.xuexue.pi.ai.Model
+import dev.xuexue.pi.ai.ModelRegistry
+import dev.xuexue.pi.ai.ModelThinkingLevel
 import dev.xuexue.pi.ai.UserContent
 import dev.xuexue.pi.coding.compaction.CompactionSettings
+import dev.xuexue.pi.coding.extensions.PiExtensionMode
+import dev.xuexue.pi.coding.extensions.PiExtensionRunner
+import dev.xuexue.pi.coding.packages.PiPackageManager
 import dev.xuexue.pi.coding.resources.DefaultResourceLoader
 import dev.xuexue.pi.coding.resources.SystemPromptDocumentation
 import dev.xuexue.pi.coding.session.SessionManager
 import kotlinx.serialization.json.JsonElement
 import kotlin.time.Clock
 
+/** Platform capability used by the headless bash command and the Pi bash tool. */
+interface AgentSessionBashExecutor {
+    suspend fun execute(
+        command: String,
+        cwd: String,
+        excludeFromContext: Boolean? = null,
+    ): BashResult
+
+    fun abort()
+}
+
 data class AgentSessionConfig(
     val agent: dev.xuexue.pi.agent.Agent,
     val sessionManager: SessionManager,
     val settingsManager: AgentSessionSettings = InMemoryAgentSessionSettings(),
     val resourceLoader: DefaultResourceLoader? = null,
+    val extensionRunner: PiExtensionRunner? = null,
+    val packageManager: PiPackageManager? = null,
+    val bashExecutor: AgentSessionBashExecutor? = null,
+    val extensionMode: PiExtensionMode = PiExtensionMode.PRINT,
+    val interactionPort: InteractionPort = NoOpInteractionPort,
     val systemPromptDocumentation: SystemPromptDocumentation =
         SystemPromptDocumentation(
             readmePath = "README.md",
             docsPath = "docs",
             examplesPath = "examples",
         ),
-    val currentDate: () -> String = { Clock.System.now().toString().take(10) },
+    val currentDate: () -> String = {
+        Clock.System
+            .now()
+            .toString()
+            .take(10)
+    },
+    val htmlExporter: AgentSessionHtmlExporter? = null,
+    /** Model registry used for authenticated model discovery and cycling. */
+    val modelRegistry: ModelRegistry? = null,
+    /** Ordered model scope used by Pi's --models/cycle-model behavior. */
+    val scopedModels: List<ScopedModel> = emptyList(),
 )
+
+/** A model in the ordered set used by `cycle_model`. */
+data class ScopedModel(
+    val model: Model,
+    val thinkingLevel: ModelThinkingLevel? = null,
+)
+
+/** Result returned after a model cycle succeeds. */
+data class ModelCycleResult(
+    val model: Model,
+    val thinkingLevel: ModelThinkingLevel,
+    val isScoped: Boolean,
+)
+
+enum class ModelCycleDirection {
+    FORWARD,
+    BACKWARD,
+}
 
 data class RetrySettings(
     val enabled: Boolean = true,

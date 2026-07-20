@@ -43,7 +43,13 @@ class SkillLoader(
 
     private fun loadLocation(location: SkillLocation): SkillsLoadResult =
         if (fileSystem.isDirectory(location.path)) {
-            loadDirectory(location.path, location.scope, includeRootFiles = true)
+            loadDirectory(
+                directory = location.path,
+                scope = location.scope,
+                includeRootFiles = true,
+                rootDirectory = location.path,
+                ignoreMatcher = ResourceIgnoreMatcher(fileSystem, location.path),
+            )
         } else {
             loadFile(location.path, location.scope)
         }
@@ -52,18 +58,37 @@ class SkillLoader(
         directory: String,
         scope: ResourceScope,
         includeRootFiles: Boolean,
+        rootDirectory: String,
+        ignoreMatcher: ResourceIgnoreMatcher,
     ): SkillsLoadResult {
+        ignoreMatcher.addRules(directory)
         val entries = fileSystem.listDirectory(directory)
-        val rootSkill = entries.firstOrNull { it.name == SKILL_FILE_NAME && it.isFile }
+        val rootSkill =
+            entries.firstOrNull { entry ->
+                entry.name == SKILL_FILE_NAME &&
+                    entry.isFile &&
+                    !ignoreMatcher.ignores(relativePath(rootDirectory, entry.path))
+            }
         if (rootSkill != null) return loadFile(rootSkill.path, scope)
 
         val result = SkillsLoadResultBuilder()
         entries.forEach { entry ->
+            val relativeEntryPath = relativePath(rootDirectory, entry.path)
             when {
                 entry.name.startsWith(".") || entry.name == "node_modules" -> {}
 
+                ignoreMatcher.ignores(relativeEntryPath) -> {}
+
                 entry.isDirectory -> {
-                    result.add(loadDirectory(entry.path, scope, includeRootFiles = false))
+                    result.add(
+                        loadDirectory(
+                            directory = entry.path,
+                            scope = scope,
+                            includeRootFiles = false,
+                            rootDirectory = rootDirectory,
+                            ignoreMatcher = ignoreMatcher,
+                        ),
+                    )
                 }
 
                 entry.isFile && includeRootFiles && entry.name.endsWith(".md") -> {
@@ -72,6 +97,15 @@ class SkillLoader(
             }
         }
         return result.build()
+    }
+
+    private fun relativePath(
+        rootDirectory: String,
+        path: String,
+    ): String {
+        val root = fileSystem.canonicalizePath(rootDirectory).trimEnd('/')
+        val normalizedPath = fileSystem.canonicalizePath(path).trimEnd('/')
+        return if (normalizedPath == root) "" else normalizedPath.removePrefix("$root/")
     }
 
     private fun loadFile(

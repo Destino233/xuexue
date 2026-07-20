@@ -142,6 +142,99 @@ class ResourceLoaderTest {
         assertFalse(loader.getPrompts().diagnostics.isNotEmpty())
     }
 
+    @Test
+    fun extensionResourcesCarrySourceMetadataAndRemainLowerPriorityThanProjectResources() {
+        val fileSystem =
+            ResourceTestFileSystem(
+                mapOf(
+                    "/workspace/.xuexue/pi/skills/review/SKILL.md" to skill("project"),
+                    "/extension/skills/review/SKILL.md" to skill("extension"),
+                    "/extension/prompts/review.md" to "Extension prompt",
+                ),
+            )
+        val loader = loader(fileSystem)
+
+        loader.reload()
+        loader.extendResources(
+            ResourceExtensionPaths(
+                skillPaths =
+                    listOf(
+                        ResourcePathContribution(
+                            path = "/extension/skills",
+                            metadata =
+                                ResourcePathMetadata(
+                                    source = "extension:review",
+                                    scope = ResourceScope.TEMPORARY,
+                                    origin = ResourceOrigin.PACKAGE,
+                                    baseDirectory = "/extension/skills",
+                                ),
+                        ),
+                    ),
+                promptPaths =
+                    listOf(
+                        ResourcePathContribution(
+                            path = "/extension/prompts/review.md",
+                            metadata =
+                                ResourcePathMetadata(
+                                    source = "extension:review",
+                                    scope = ResourceScope.TEMPORARY,
+                                    origin = ResourceOrigin.PACKAGE,
+                                    baseDirectory = "/extension/prompts",
+                                ),
+                        ),
+                    ),
+            ),
+        )
+
+        val selectedSkill = loader.getSkills().skills.single()
+        assertEquals("project", selectedSkill.description)
+        assertEquals(
+            "extension:review",
+            loader
+                .getPrompts()
+                .prompts
+                .single()
+                .sourceInfo.source,
+        )
+        assertEquals(
+            ResourceOrigin.PACKAGE,
+            loader
+                .getPrompts()
+                .prompts
+                .single()
+                .sourceInfo.origin,
+        )
+    }
+
+    @Test
+    fun skillDiscoveryHonorsNestedIgnoreFilesAndNegatedRules() {
+        val fileSystem =
+            ResourceTestFileSystem(
+                mapOf(
+                    "/extra/.gitignore" to "ignored/\n",
+                    "/extra/ignored/SKILL.md" to skill("ignored", name = "ignored"),
+                    "/extra/kept/SKILL.md" to skill("kept", name = "kept"),
+                    "/extra/nested/.ignore" to "blocked/\n!keep/\n",
+                    "/extra/nested/blocked/SKILL.md" to skill("blocked", name = "blocked"),
+                    "/extra/nested/keep/SKILL.md" to skill("keep", name = "keep"),
+                ),
+            )
+        val loader =
+            DefaultResourceLoader(
+                ResourceLoaderOptions(
+                    cwd = "/workspace",
+                    agentDirectory = "/agent",
+                    settingsManager = SettingsManager.inMemory(),
+                    additionalSkillPaths = listOf("/extra"),
+                ),
+                fileSystem,
+            )
+
+        loader.reload()
+
+        assertEquals(listOf("kept", "keep"), loader.getSkills().skills.map(Skill::description))
+    }
+
     private fun loader(
         fileSystem: ResourceTestFileSystem,
         settings: SettingsManager = SettingsManager.inMemory(),
@@ -157,10 +250,11 @@ class ResourceLoaderTest {
     private fun skill(
         description: String,
         disabled: Boolean = false,
+        name: String = "review",
     ): String =
         """
         ---
-        name: review
+        name: $name
         description: $description
         disable-model-invocation: $disabled
         ---

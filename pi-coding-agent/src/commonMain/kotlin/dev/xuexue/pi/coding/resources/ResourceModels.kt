@@ -6,12 +6,51 @@ enum class ResourceScope {
     TEMPORARY,
 }
 
+enum class ResourceOrigin {
+    PACKAGE,
+    TOP_LEVEL,
+}
+
+data class ResourcePathMetadata(
+    val source: String,
+    val scope: ResourceScope,
+    val origin: ResourceOrigin = ResourceOrigin.TOP_LEVEL,
+    val baseDirectory: String? = null,
+)
+
+data class ResourcePathContribution(
+    val path: String,
+    val metadata: ResourcePathMetadata,
+)
+
+data class ResourceExtensionPaths(
+    val skillPaths: List<ResourcePathContribution> = emptyList(),
+    val promptPaths: List<ResourcePathContribution> = emptyList(),
+)
+
 data class ResourceSourceInfo(
     val path: String,
     val source: String,
     val scope: ResourceScope,
     val baseDirectory: String? = null,
+    val origin: ResourceOrigin = ResourceOrigin.TOP_LEVEL,
 )
+
+/** Builds the metadata shape used by Pi for synthetic extension-owned resources. */
+fun syntheticResourceSourceInfo(
+    path: String,
+    source: String = "extension",
+    scope: ResourceScope = ResourceScope.TEMPORARY,
+    origin: ResourceOrigin = ResourceOrigin.TOP_LEVEL,
+    baseDirectory: String? = null,
+): ResourceSourceInfo =
+    ResourceSourceInfo(
+        path = path,
+        source = source,
+        scope = scope,
+        baseDirectory = baseDirectory,
+        origin = origin,
+    )
 
 data class ResourceDiagnostic(
     val type: ResourceDiagnosticType,

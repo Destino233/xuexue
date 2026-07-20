@@ -325,6 +325,10 @@ class SettingsManager private constructor(
 
     fun getExtensionPaths(): List<String> = effectiveSettings.stringArray("extensions")
 
+    fun getGlobalExtensionPaths(): List<String> = globalSettings.stringArray("extensions")
+
+    fun getProjectExtensionPaths(): List<String> = projectSettings.stringArray("extensions")
+
     fun setExtensionPaths(paths: List<String>) = setGlobalStringArray("extensions", paths)
 
     fun setProjectExtensionPaths(paths: List<String>) = setProjectStringArray("extensions", paths)

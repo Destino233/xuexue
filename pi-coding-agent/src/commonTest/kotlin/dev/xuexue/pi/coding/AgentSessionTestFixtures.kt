@@ -1,3 +1,5 @@
+@file:Suppress("LongParameterList")
+
 package dev.xuexue.pi.coding
 
 import dev.xuexue.pi.agent.Agent
@@ -12,6 +14,7 @@ import dev.xuexue.pi.ai.FailureStopReason
 import dev.xuexue.pi.ai.Model
 import dev.xuexue.pi.ai.ModelCost
 import dev.xuexue.pi.ai.ModelInput
+import dev.xuexue.pi.ai.ModelRegistry
 import dev.xuexue.pi.ai.StopReason
 import dev.xuexue.pi.ai.SuccessfulStopReason
 import dev.xuexue.pi.ai.TextContent
@@ -21,6 +24,9 @@ import dev.xuexue.pi.ai.UserBlocks
 import dev.xuexue.pi.ai.UserMessage
 import dev.xuexue.pi.ai.UserText
 import dev.xuexue.pi.ai.createAssistantMessageEventStream
+import dev.xuexue.pi.coding.extensions.PiExtensionRunner
+import dev.xuexue.pi.coding.resources.DefaultResourceLoader
+import dev.xuexue.pi.coding.resources.SystemPromptDocumentation
 import dev.xuexue.pi.coding.session.SessionManager
 import dev.xuexue.pi.coding.session.convertToLlm
 
@@ -32,6 +38,14 @@ internal class AgentSessionHarness(
     sessionManager: SessionManager = SessionManager.inMemory("/tmp"),
     settingsManager: AgentSessionSettings = InMemoryAgentSessionSettings(),
     streamFunction: StreamFunction? = null,
+    resourceLoader: DefaultResourceLoader? = null,
+    extensionRunner: PiExtensionRunner? = null,
+    modelRegistry: ModelRegistry? = null,
+    scopedModels: List<ScopedModel> = emptyList(),
+    bashExecutor: AgentSessionBashExecutor? = null,
+    systemPromptDocumentation: SystemPromptDocumentation =
+        SystemPromptDocumentation("README.md", "docs", "examples"),
+    currentDate: () -> String = { "2026-07-16" },
 ) {
     private val pendingResponses = responses.toMutableList()
     val agent =
@@ -52,7 +66,21 @@ internal class AgentSessionHarness(
                         },
             ),
         )
-    val session = AgentSession(AgentSessionConfig(agent, sessionManager, settingsManager))
+    val session =
+        AgentSession(
+            AgentSessionConfig(
+                agent = agent,
+                sessionManager = sessionManager,
+                settingsManager = settingsManager,
+                modelRegistry = modelRegistry,
+                scopedModels = scopedModels,
+                resourceLoader = resourceLoader,
+                extensionRunner = extensionRunner,
+                bashExecutor = bashExecutor,
+                systemPromptDocumentation = systemPromptDocumentation,
+                currentDate = currentDate,
+            ),
+        )
     val manager = sessionManager
 
     val pendingResponseCount: Int
@@ -60,14 +88,16 @@ internal class AgentSessionHarness(
 }
 
 internal fun testModel(
+    id: String = "mock",
+    provider: String = "openai",
     reasoning: Boolean = true,
     contextWindow: Long = 8_192,
 ): Model =
     Model(
-        id = "mock",
+        id = id,
         name = "mock",
         api = "openai-responses",
-        provider = "openai",
+        provider = provider,
         baseUrl = "https://example.invalid",
         reasoning = reasoning,
         input = listOf(ModelInput.TEXT),

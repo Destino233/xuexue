@@ -91,6 +91,8 @@ data class ProviderResponse(
 
 typealias PayloadTransform = suspend (payload: Any?, model: Model) -> Any?
 typealias ResponseObserver = suspend (response: ProviderResponse, model: Model) -> Unit
+typealias ImagePayloadTransform = suspend (payload: Any?, model: ImagesModel) -> Any?
+typealias ImageResponseObserver = suspend (response: ProviderResponse, model: ImagesModel) -> Unit
 
 data class StreamOptions(
     val temperature: Double? = null,
@@ -109,12 +111,42 @@ data class StreamOptions(
     val maxRetryDelayMs: Long? = null,
     val metadata: JsonObject? = null,
     val env: ProviderEnv? = null,
+    /** Azure OpenAI Responses provider overrides. Kept optional for other providers. */
+    val azureApiVersion: String? = null,
+    val azureResourceName: String? = null,
+    val azureBaseUrl: String? = null,
+    val azureDeploymentName: String? = null,
+    val azureReasoningSummary: String? = null,
+    /** Amazon Bedrock Converse provider overrides. */
+    val bedrockRegion: String? = null,
+    val bedrockProfile: String? = null,
+    val bedrockBearerToken: String? = null,
+    val bedrockToolChoice: String? = null,
+    val bedrockInterleavedThinking: Boolean? = null,
+    val bedrockThinkingDisplay: String? = null,
+    val bedrockRequestMetadata: Map<String, String>? = null,
+    /** OpenAI Codex Responses request tuning. */
+    val serviceTier: String? = null,
+    val reasoningSummary: String? = null,
+    val textVerbosity: String? = null,
 )
 
 data class SimpleStreamOptions(
     val stream: StreamOptions = StreamOptions(),
     val reasoning: ThinkingLevel? = null,
     val thinkingBudgets: ThinkingBudgets? = null,
+)
+
+data class ImagesOptions(
+    val signal: AbortSignal? = null,
+    val apiKey: String? = null,
+    val onPayload: ImagePayloadTransform? = null,
+    val onResponse: ImageResponseObserver? = null,
+    val headers: ProviderHeaders? = null,
+    val timeoutMs: Long? = null,
+    val maxRetries: Int? = null,
+    val maxRetryDelayMs: Long? = null,
+    val env: ProviderEnv? = null,
 )
 
 data class ThinkingBudgets(

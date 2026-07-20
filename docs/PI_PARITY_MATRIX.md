@@ -58,31 +58,31 @@
 | `src/types.ts` | `:pi-ai` 公共消息、内容块、模型、选项和事件协议 | JSON round-trip、类型不变量、事件终止 | `in-progress` |
 | `src/utils/event-stream.ts` | `AssistantMessageEventStream` | 队列、等待者、完成结果、结束语义 | `in-progress` |
 | `src/utils/diagnostics.ts` | Assistant diagnostic DTO 与辅助函数 | thrown value、error/code/details 保留 | `in-progress` |
-| `src/models.ts`、`models.generated.ts` | 模型查询和内置模型目录 | provider/model 查找、覆盖、排序 | `pending` |
-| `src/image-models*.ts`、`images-models.ts` | 图片模型目录和协议 | 模型查找、输入输出能力 | `pending` |
-| `src/providers/*.models.ts` | 生成的 Provider 模型元数据 | 与参考快照逐项一致 | `pending` |
+| `src/models.ts`、`models.generated.ts` | `pi-ai/ModelRegistry.kt`、`defaultModelCatalog()` | `ModelRegistryTest` 覆盖 custom `models.json`、provider/model override、URL/comment 解析、exact/canonical/ambiguous/glob/thinking suffix；脚本从 Pi 0.80.6 导入 1057 个文本模型 | `in-progress` |
+| `src/image-models*.ts`、`images-models.ts` | `ImagesModel`、`ImagesContext`、`AssistantImages` 和图像 registry | `ProviderTest.openRouterImageProviderDecodesImageAndUsage`、`ProviderErrorTest.openRouterImageErrorEventRetainsGatewayBody` 覆盖输入、data URL、usage、状态码和网关错误体；脚本导入 35 个图像模型 | `in-progress` |
+| `src/providers/*.models.ts` | `PiGeneratedModelCatalog.kt`、`PiGeneratedImageModelCatalog.kt` | 35 个 provider catalog 和图像目录的确定性生成脚本；完整元数据语义仍需逐项快照校验 | `in-progress` |
 | `src/providers/*.ts` | Provider 注册定义 | API、base URL、headers、OAuth 和模型绑定 | `pending` |
 | `src/api/lazy.ts`、`*.lazy.ts` | 延迟 Provider 装载 | 首次调用、缓存和错误传播 | `pending` |
-| `src/api/openai-completions.ts` | OpenAI Completions adapter | 对应 Pi provider tests 和 SSE fixture | `pending` |
-| `src/api/openai-responses*.ts` | OpenAI Responses adapter | payload、reasoning、tool result、终止事件 | `pending` |
-| `src/api/openai-codex-responses.ts` | Codex Responses adapter | OAuth headers、缓存 affinity、stream | `pending` |
-| `src/api/azure-openai-responses.ts` | Azure Responses adapter | URL/deployment/version/header 解析 | `pending` |
-| `src/api/anthropic-messages.ts` | Anthropic Messages adapter | thinking、cache、tool reference、SSE | `pending` |
-| `src/api/google-*.ts` | Google AI 与 Vertex adapters | message/tool 转换、签名、认证 | `pending` |
-| `src/api/bedrock-converse-stream.ts` | Bedrock adapter | endpoint、signing、thinking、stream | `pending` |
-| `src/api/mistral-conversations.ts` | Mistral adapter | schema、reasoning 和 streaming | `pending` |
-| `src/api/transform-messages.ts` | 跨 Provider 消息转换 | Pi cross-provider handoff tests | `pending` |
-| `src/api/*cache*.ts` | Prompt cache 规则 | retention、cache marker 和 usage | `pending` |
-| `src/auth/**`、`src/oauth.ts` | 凭据、OAuth 和解析上下文 | 登录、刷新、取消和持久化 fixture | `pending` |
-| `src/env-api-keys.ts` | 环境 API key 解析 | provider aliases 和 precedence | `pending` |
+| `src/api/openai-completions.ts` | `OpenAiCompletionsProvider` | SSE 文本/tool/usage/error fixture；Prompt Cache key Unicode 64 码点截断、short/long/none、代理兼容开关、session-affinity 和 Anthropic cache marker 已覆盖；同时承载 Mistral-compatible endpoint | `in-progress` |
+| `src/api/openai-responses*.ts` | `OpenAiResponsesProvider` | payload、reasoning、独立 function-call item、参数 delta/done、usage/终止 fixture；provider-neutral cache key、`store=false`、24h retention、none、session headers 和 `supportsToolSearch` 的 immediate/tool-search call/output/defer_loading 已覆盖 | `in-progress` |
+| `src/api/openai-codex-responses.ts` | `OpenAiCodexResponsesProvider` | `OpenAiCodexResponsesProviderTest` 覆盖 JWT `chatgpt-account-id`、Codex `/codex/responses` payload、低 verbosity、加密 reasoning include、tool call/usage SSE、session headers 和 429 `Retry-After` 重试；JVM 公共 transport 当前统一走 SSE，WebSocket 连接复用仍待补 | `in-progress` |
+| `src/api/azure-openai-responses.ts` | `OpenAiResponsesProvider` 的 Azure 分支 | `ProviderTest.azureResponsesUsesDeploymentBaseUrlCacheAndReasoningOptions`、`azureResponsesResolvesResourceAndDeploymentEnvironment`、`azureResponsesReportsInvalidBaseUrlAsProviderError` 覆盖 URL 规范化、deployment/version、认证、缓存键、`store=false`、reasoning 和错误 | `in-progress` |
+| `src/api/anthropic-messages.ts` | `AnthropicMessagesProvider` | thinking、tool input 分片、空初始 input、usage、SSE fixture；system/最后 user block/tool 的 cache marker、long TTL 兼容、none、deferred `defer_loading`/`tool_reference`、全 deferred immediate 回退和 OAuth 工具名标准化已覆盖 | `in-progress` |
+| `src/api/google-*.ts` | `GoogleGenerativeAiProvider` | message/tool 转换、thinking、重复 function-call 分片合并、usage fixture；Vertex API-key/project/location path 和显式 access-token env 已测试，ADC credential file/refresh 仍待补 | `in-progress` |
+| `src/api/bedrock-converse-stream.ts` | `BedrockConverseProvider`、`AwsSigV4` | `ProviderTest.bedrockConverseBuildsPayloadUsesBearerAuthAndDecodesToolStream`、`bedrockConverseSignsSigV4RequestWithScopedEnvironment`、`bedrockConverseDecodesAwsEventStreamFrames` 覆盖 Converse payload/tool、Bearer、SigV4、AWS Event Stream、usage/stop；profile 文件/完整 AWS credential chain、proxy 和 cache/deferred 细节仍待补 | `in-progress` |
+| `src/api/mistral-conversations.ts` | `OpenAiCompletionsProvider` 的 Mistral-compatible 分支 | `/v1/chat/completions` 路径、stream payload 和 SSE fixture | `in-progress` |
+| `src/api/transform-messages.ts` | `pi-ai/MessageTransform.kt` | `MessageTransformTest` 覆盖无视觉模型图片占位合并、跨模型 thinking/signature 处理、错误 assistant 清理和孤立 tool call 的 synthetic error result；五个内置 Provider 在请求边界统一调用，原始 session history 不变 | `in-progress` |
+| `src/api/*cache*.ts` | `pi-ai/PromptCache.kt` 与三类 Provider | `ProviderTest` 覆盖 `PI_CACHE_RETENTION` 默认值、none/short/long、OpenAI key Unicode 截断、兼容代理和 Anthropic marker；Bedrock cache point、跨 Provider cache usage 与完整 deferred-tool cache 语义仍待补 | `in-progress` |
+| `src/auth/**`、`src/oauth.ts` | `pi-ai/AuthStore.kt` | `AuthStoreTest` 覆盖 runtime/stored/environment precedence、credential-scoped env、OAuth expiry view；文件锁持久化、刷新/login/cancel OAuth 仍待补 | `in-progress` |
+| `src/env-api-keys.ts` | `findEnvironmentApiKeys()`、`InMemoryAuthStore` | `AuthStoreTest` 覆盖主要 provider aliases 和 environment source status；完整 ambient AWS/Vertex credential discovery待补 | `in-progress` |
 | `src/images.ts`、`images-api-registry.ts` | 图片生成调度 | abort、error、结果和用量 | `pending` |
 | `src/session-resources.ts` | 会话资源生命周期 | create/dispose 和异常清理 | `pending` |
 | `src/compat.ts`、`legacy-api-aliases.ts` | 公共兼容 facade | stream/complete/model aliases | `pending` |
 | `src/utils/abort-signals.ts` | 取消信号组合 | 原因、竞态和资源清理 | `pending` |
-| `src/utils/deferred-tools.ts` | 延迟工具规则 | tool reference load points | `pending` |
+| `src/utils/deferred-tools.ts` | `DeferredTools.kt`、Anthropic/OpenAI Responses/Codex payload 分支 | `DeferredToolsTest`、`ProviderTest.openAiResponsesUsesNativeDeferredToolSearch`、`openAiResponsesDoesNotSearchWhenCapabilityIsDisabled`、`anthropicMessagesUsesDeferredReferencesAndMarksLateTools`、`anthropicMessagesKeepsOneImmediateToolWhenAllAreDeferred`、`anthropicOAuthNormalizesDeferredToolNames`、`OpenAiCodexResponsesProviderTest`；共享拆分、去重、已用工具保持 immediate、原生加载点和 duplicate load guard 已覆盖；deferred cache 细节与完整 Pi harness 对照仍待补 | `in-progress` |
 | `src/utils/estimate.ts`、`overflow.ts` | token 估算与溢出识别 | Pi context tests | `pending` |
-| `src/utils/retry.ts`、`error-body.ts` | 重试与错误体 | Retry-After、delay cap、body passthrough | `pending` |
-| `src/utils/json-parse.ts`、`validation.ts` | JSON/schema 解析与校验 | partial JSON、lax content、invalid schema | `pending` |
+| `src/utils/retry.ts`、`error-body.ts` | 重试与错误体 | `ProviderSupport.kt` 统一保留非 2xx status/body、空 JSON 对象处理和 4000 字符截断；`ProviderErrorTest` 覆盖 403/429、空体、超长体、OpenAI Completions 和 OpenRouter Images 网关原因；Codex adapter 已覆盖状态码、数字/毫秒/HTTP-date `Retry-After`、429 delay cap 和网络重试 | `in-progress` |
+| `src/utils/json-parse.ts`、`validation.ts` | `JsonRepair.kt`、`PartialJsonParser.kt`、`StreamingJson.kt`、`ToolArgumentValidation.kt` | `JsonParsingTest` 覆盖修复/部分 JSON；`ToolArgumentValidationTest` 覆盖 Pi primitive coercion、嵌套 properties、required、additionalProperties、allOf/anyOf/oneOf 和错误格式；复杂 TypeBox-only 关键字仍待补 | `in-progress` |
 | `src/utils/hash.ts`、`headers.ts`、`provider-env.ts` | 通用 Provider 辅助逻辑 | 对应单元测试 | `pending` |
 | `src/utils/sanitize-unicode.ts` | Unicode 清理 | surrogate fixture | `pending` |
 
@@ -91,7 +91,7 @@
 | Pi 源码 | Kotlin 目标 | 主要验证 | 状态 |
 | --- | --- | --- | --- |
 | `src/types.ts` | `:pi-agent-core` Agent 状态、工具和事件协议 | `AgentLoopTest*`、`AgentStateTest` | `verified` |
-| `src/agent-loop.ts` | Agent Loop | 原 20 项行为映射到 `AgentLoopTest*`，另含并发预检回归 | `verified` |
+| `src/agent-loop.ts` | Agent Loop、`ToolExecution.kt` | 原 20 项行为映射到 `AgentLoopTest*`，另含并发预检回归；工具执行按 `prepare -> validateToolArguments -> before hook -> execute`，schema/coercion 由 `ToolArgumentValidationTest` 覆盖 | `in-progress` |
 | `src/agent.ts` | Stateful Agent facade | 原 19 项行为映射到 `Agent*Test`，另含 StateFlow/Flow 一致性 | `verified` |
 | `src/proxy.ts` | Agent proxy 语义 | 调用转发和错误传播 | `pending` |
 | `src/harness/types.ts` | Harness 公共协议 | 与核心类型边界一致 | `pending` |
@@ -107,39 +107,39 @@
 
 | Pi 源码 | Kotlin 目标 | 主要验证 | 状态 |
 | --- | --- | --- | --- |
-| `src/core/agent-session*.ts` | `AgentSession`、runtime 和 services | 当前 `:pi-coding-agent:desktopTest` 共 112 项；覆盖 prompt/custom、两类队列、ordered persistence、settled/abort、Bash 延迟落盘、统计、指数 retry、手动/阈值/overflow compaction 与取消。`AgentSessionRuntime`、services、资源/扩展回调和原测试逐文件映射待补 | `in-progress` |
+| `src/core/agent-session*.ts` | `AgentSession`、runtime 和 services | 当前 `:pi-coding-agent:desktopTest` 共 163 项；覆盖 prompt/custom、两类队列、ordered persistence、settled/abort、Bash 延迟落盘、统计、指数 retry、手动/阈值/overflow compaction 与取消，以及资源提示词重建、`/skill:` 和模板命令展开；`AgentSessionRuntime` 已覆盖 startup/new/resume/fork/shutdown 生命周期，Compose 控制器已开始接入，旧 UI 投影待移除 | `in-progress` |
 | `src/core/session-manager.ts`、`session-cwd.ts` | `:pi-coding-agent` append-only 会话树、JSONL 存储和 cwd 校验 | 50 项 session/context/codec/messages/persistence/cwd 测试；待完成原测试逐文件映射 | `in-progress` |
 | `src/core/compaction/**` | `Compaction.kt`、`CompactionGeneration.kt`、`CompactionUtils.kt` | `CompactionTest`、`CompactionGenerationTest`、`CompactionUtilsTest`、`AgentSessionCompactionTest`、`AgentSessionAutoCompactionTest` 覆盖 token 估算、cut point、file operations、summary/reasoning、手动/阈值/overflow 与取消；extension compaction hook 待移植 | `in-progress` |
 | `src/core/messages.ts` | `:pi-coding-agent` bash/custom/branch/compaction messages | `SessionMessagesTest`、`SessionContextTest`、`AgentSessionBashPersistenceTest` | `in-progress` |
-| `src/core/system-prompt.ts` | `resources/SystemPrompt.kt` | `SystemPromptTest` 覆盖自定义/追加提示、上下文、Skills、工具可见性、guideline 去重、日期和 cwd 顺序；运行时日期注入及 AgentSession 重建仍待接线 | `in-progress` |
-| `src/core/resource-loader.ts` | `resources/ResourceLoader.kt`、`ResourceFileSystem.kt` | `ResourceLoaderTest` 覆盖 AGENTS/CLAUDE 根至 cwd 顺序、SYSTEM/APPEND_SYSTEM、项目资源覆盖、collision 诊断和 trust 边界；extensions/package 资源、metadata origin 与异步 reload lifecycle 待补 | `in-progress` |
-| `src/core/skills.ts`、`prompt-templates.ts` | `SkillLoader.kt`、`PromptTemplateLoader.kt`、`PromptTemplates.kt` | `PromptTemplatesTest`、`FrontmatterTest`、`ResourceLoaderTest` 覆盖 quoted arguments、`$1`/`$@`/默认值/slice、non-recursive replacement、frontmatter scalar/block、技能递归发现、first-win 与 XML escaping；完整 YAML、ignore 文件和 package metadata 待补 | `in-progress` |
-| `src/core/settings-manager.ts` | `settings/SettingsManager.kt`、`SettingsStorage.kt` | 8 项 SettingsManager/desktop storage 测试覆盖深合并、旧字段迁移、外部编辑保留、信任、reload 错误、AgentSession retry/compaction 映射和 `.xuexue/pi` 延迟创建；完整设置表面、跨进程文件锁与资源 reload 接线待补 | `in-progress` |
-| `src/core/model-registry.ts`、`model-resolver.ts` | 模型注册和解析 | dynamic provider、scoped model 和 auth | `pending` |
-| `src/core/auth-*.ts`、`resolve-config-value.ts` | 凭据存储和配置解析 | migration、env、command 和 OAuth | `pending` |
-| `src/core/extensions/types.ts` | Kotlin Extension API/DTO | API surface snapshot | `pending` |
-| `src/core/extensions/runner.ts` | 扩展事件运行器 | 顺序、链式修改、错误和 lifecycle | `pending` |
-| `src/core/extensions/loader.ts` | Kotlin/Process 插件发现加载 | reload、source、trust 和故障隔离 | `pending` |
-| `src/core/extensions/wrapper.ts` | 工具与 handler 包装 | context、tool events 和 errors | `pending` |
+| `src/core/system-prompt.ts` | `resources/SystemPrompt.kt` | `SystemPromptTest` 与 `AgentSessionResourcesTest` 覆盖自定义/追加提示、上下文、Skills、工具可见性、guideline 去重、日期和 cwd 顺序，以及初始化/reload 重建；自定义 `SYSTEM.md` 不注入工具段，默认提示词注入工具元数据 | `in-progress` |
+| `src/core/resource-loader.ts` | `resources/ResourceLoader.kt`、`ResourceFileSystem.kt` | `ResourceLoaderTest` 与 `AgentSessionResourcesTest` 覆盖 AGENTS/CLAUDE 根至 cwd 顺序、SYSTEM/APPEND_SYSTEM、项目资源覆盖、collision 诊断、trust 边界、`.gitignore`/`.ignore`/`.fdignore` 和 `extendResources` metadata；`PiPackageManager` 已能在 AgentSession startup/reload 时注入 package skills/prompts，异步 reload 失败隔离和完整 package precedence 待补 | `in-progress` |
+| `src/core/skills.ts`、`prompt-templates.ts` | `SkillLoader.kt`、`PromptTemplateLoader.kt`、`PromptTemplates.kt` | `PromptTemplatesTest`、`FrontmatterTest`、`ResourceLoaderTest`、`AgentSessionResourcesTest` 覆盖 quoted arguments、`$1`/`$@`/默认值/slice、non-recursive replacement、frontmatter scalar/block、技能递归发现、first-win、XML escaping 以及会话层 `/skill:`/模板展开；`PiPackageManifestCodec` 已覆盖 package metadata/filter，完整 YAML 和 package pattern 语义待补 | `in-progress` |
+| `src/core/settings-manager.ts` | `settings/SettingsManager.kt`、`SettingsStorage.kt` | 8 项 SettingsManager/desktop storage 测试覆盖深合并、旧字段迁移、外部编辑保留、信任、reload 错误、AgentSession retry/compaction 映射和 `.xuexue/pi` 延迟创建；完整设置表面与跨进程文件锁待补 | `in-progress` |
+| `src/core/model-registry.ts`、`model-resolver.ts` | `pi-ai/ModelRegistry.kt`、`AgentSession` scoped model cycle | dynamic provider、custom models、scoped exact/glob/thinking suffix、request auth、scope 顺序/认证过滤/顺逆时针/当前模型缺失和 thinking 继承已测试；完整 scoped model persistence 与 provider adapters 待补 | `in-progress` |
+| `src/core/auth-*.ts`、`resolve-config-value.ts` | `pi-ai/AuthStore.kt`、`resolveConfigValue()` | credential precedence、env template 和 OAuth expiry view 已测试；migration、command resolver、文件锁和 refresh/login OAuth 待补 | `in-progress` |
+| `src/core/extensions/types.ts` | `extensions/PiExtensionApi.kt` | `PiExtensionRunnerTest` 覆盖 Headless event/registration DTO、资源贡献、工具与命令元数据；TUI-only 类型按排除边界省略 | `in-progress` |
+| `src/core/extensions/runner.ts` | `extensions/PiExtensionRunner.kt` | `PiExtensionRunnerTest`、`AgentSessionExtensionTest` 覆盖顺序、链式 context/before-agent-start、工具冲突、错误隔离、stale dispose 和 AgentSession hooks | `in-progress` |
+| `src/core/extensions/loader.ts` | `JvmPiPluginLoader`、`ProcessPiExtension`、`PiPluginDiscovery` | `ProcessPiExtensionTest` 覆盖 JSONL handshake、工具/文本和图像 Provider 注册、调用、AssistantMessageEvent/AssistantImages 结果和 shutdown；JAR manifest/entrypoint/trust 门、用户/项目/临时 discovery、大小写归一化和清单版本校验已测试；`PiPackageResolution.extensionPaths` 已提供给 Desktop discovery，完整 package 自动加载/reload 仍待补 | `in-progress` |
+| `src/core/extensions/wrapper.ts` | `AgentSession` extension hook bridge | `AgentSessionExtensionTest` 覆盖 tool call/result、context 和 before-agent-start 接线；Kotlin extension 可注册 Provider/ImageProvider 并由 Desktop registry 合并，Process 文本和图像 Provider 已分别通过 `register_provider`/`provider_stream`、`register_image_provider`/`image_generate` 接入 | `in-progress` |
 | `src/core/event-bus.ts` | 扩展共享事件总线 | emit/on/dispose 和扩展隔离 | `pending` |
-| `src/core/package-manager.ts` | 能力包管理器 | path/git/Maven/Process、rollback、offline | `pending` |
+| `src/core/package-manager.ts` | `packages/PiPackageModels.kt`、`DefaultPiPackageManager.desktop.kt` | `PiPackageModelsTest`、`DefaultPiPackageManagerTest` 覆盖 path source、git/Maven source 解析、package.json/自有 manifest、资源路径、settings 持久化、内容 hash、project trust 和 `PI_OFFLINE` 缺包诊断；git staging 原子替换/回滚代码已落地，远程 Maven 解析、完整 update 语义和 package pattern 仍待补 | `in-progress` |
 | `src/core/project-trust.ts`、`trust-manager.ts` | 项目信任时序 | global/project load boundary | `pending` |
-| `src/core/tools/read.ts` | read 工具 | 文本、图片、offset/limit、truncate | `pending` |
-| `src/core/tools/write.ts`、`edit.ts`、`edit-diff.ts` | write/edit 工具 | exact replacement、diff、legacy args | `pending` |
-| `src/core/tools/bash.ts`、`bash-executor.ts` | bash 工具 | streaming、cancel、process tree、late output | `pending` |
-| `src/core/tools/grep.ts`、`find.ts`、`ls.ts` | 搜索与目录工具 | glob、ignore、limit 和输出格式 | `pending` |
-| `src/core/tools/file-mutation-queue.ts` | 文件修改队列 | 同路径串行、异常释放 | `pending` |
-| `src/core/tools/output-accumulator.ts`、`truncate.ts` | 输出累计与截断 | byte/line limits 和 metadata | `pending` |
+| `src/core/tools/read.ts` | Desktop `ReadTool`、`ToolOutput.kt` | head truncation、UTF-8 byte/line limits、offset/limit；图片输入和 truncation details 仍待补 | `in-progress` |
+| `src/core/tools/write.ts`、`edit.ts`、`edit-diff.ts` | Desktop `WriteTool`/`EditTool`、`FileMutationQueue.kt` | exact replacement、unified diff、同路径串行队列和异常释放；Pi diff/render details 与 legacy args 待补 | `in-progress` |
+| `src/core/tools/bash.ts`、`bash-executor.ts` | `AgentSessionBashExecutor`、Desktop `LocalBashExecutor`、Desktop `BashTool` | `PiRpcProtocolTest.handlerExecutesAndPersistsBashResults`、`LocalBashExecutorTest` 覆盖 cwd/合并输出/退出码、tail 截断和 full-output 文件；取消销毁已实现，结果经 `AgentSession.recordBashResult` 统一落盘 | `in-progress` |
+| `src/core/tools/grep.ts`、`find.ts`、`ls.ts` | Desktop `GrepTool`/`FindTool`/`LsTool` | 读取、排序、limit 和 head truncation 已接入；glob/ignore、二进制过滤和 Pi 输出格式待补 | `in-progress` |
+| `src/core/tools/file-mutation-queue.ts` | `FileMutationQueue.kt` | 同路径串行和异常释放 | `in-progress` |
+| `src/core/tools/output-accumulator.ts`、`truncate.ts` | `ToolOutput.kt` | UTF-8 byte/line head/tail 截断已测试；增量 stream accumulator、full output persistence 和 metadata 待补 | `in-progress` |
 | `src/core/tools/path-utils.ts` | 工具路径语义 | cwd、absolute、symlink 和 display path | `pending` |
 | `src/core/tools/tool-definition-wrapper.ts` | ToolDefinition 转换 | schema、prompt metadata、progress | `pending` |
 | `src/core/cache-stats.ts`、`timings.ts` | 本地统计 | token/cost/cache/timing 计算 | `pending` |
 | `src/core/diagnostics.ts`、`output-guard.ts` | 本地诊断与输出保护 | error capture、stdout cleanliness | `pending` |
 | `src/core/http-dispatcher.ts` | HTTP dispatch 平台接口 | proxy、headers、lifecycle | `pending` |
 | `src/core/exec.ts` | 进程执行协议 | cwd/env/stdout/stderr/exit/cancel | `pending` |
-| `src/core/sdk.ts` | Kotlin SDK | Runtime 创建、资源、模型、stream options | `pending` |
-| `src/modes/rpc/**`、`src/rpc-entry.ts` | JSONL RPC | command/response/event 与错误语义 | `pending` |
+| `src/core/sdk.ts` | `AgentSessionRuntimeFactory` / Kotlin SDK | Runtime 创建、资源、模型、stream options；当前已提供 Runtime 生命周期工厂与 Compose 接入骨架，完整 provider/model resolver 仍待补 | `in-progress` |
+| `src/modes/rpc/**`、`src/rpc-entry.ts` | `rpc/PiRpcProtocol.kt`、`AgentSessionRpcHandler.kt`、`PiRpcServer.desktop.kt` | `PiRpcProtocolTest` 覆盖 canonical/flat request、业务 `bash.command` 保留、response/state/message-update event 编码、Bash 持久化、命令 `sourceInfo`、`export_html`、异步 prompt response event、extension UI response 和 `cycle_model data:null`；handler/server 已覆盖 prompt/steer/follow-up/abort、model、queue、compaction、session tree/fork/clone、Bash、commands、interaction 和 JSONL stdin/stdout；三宿主一致性仍待补 | `in-progress` |
 | `src/modes/print-mode.ts` | 非交互输出模式 | stdout、错误和退出语义 | `pending` |
-| `src/core/export-html/**` | 会话 HTML 导出 | escaping、whitespace、skill block 和 XSS | `pending` |
+| `src/core/export-html/**` | `SessionHtmlExport.kt`、Desktop `LocalSessionHtmlExporter` | `PiRpcProtocolTest.htmlRendererEscapesMarkupAndKeepsWhitespace`、`LocalSessionHtmlExporterTest.writesEscapedTranscriptToRequestedPath`、`LocalSessionHtmlExporterTest.rendersStructuredMessagesSkillBlocksImagesBranchesAndSafeMarkdown` 覆盖 HTML 转义、换行、落盘、thinking/tool call/result、skill block Markdown、图片 data URL、session tree、属性转义和 Markdown URL scheme allow-list；静态导出已接入 RPC/Compose 宿主，完整 Pi Markdown/highlight/theme fidelity 仍待补 | `in-progress` |
 | `src/utils/frontmatter.ts`、`json.ts`、`mime.ts` | 资源解析工具 | Pi 单元测试 | `pending` |
 | `src/utils/image-*.ts`、`exif-orientation.ts` | 图片处理 | resize、format、orientation 和 caller tests | `pending` |
 | `src/utils/git.ts`、`fs-watch.ts`、`paths.ts` | Desktop 资源平台能力 | git refs、watch failure、目录规则 | `pending` |
@@ -154,10 +154,11 @@
 | `src/commonMain/kotlin/dev/xuexue/core/PiAgentRuntime.kt` | 最小顺序工具循环，不满足 Pi Agent 协议 | 由 `:pi-agent-core` 替换，保留迁移适配期 |
 | `src/desktopMain/kotlin/dev/xuexue/platform/AgentClient.kt` | 单一 OpenAI-compatible adapter | 迁入 `:pi-ai` Provider 边界 |
 | `src/desktopMain/kotlin/dev/xuexue/platform/DesktopAgentTools.kt` | 工具原型 | 按 Pi 工具 fixture 重写到 coding/platform 模块 |
-| `src/desktopMain/kotlin/dev/xuexue/WorkbenchAgentController.kt` | 已调用新 Agent 的 `prompt/steer/abort`，仍承担旧会话与配置投影 | 随 `AgentSession` 落地降为 Runtime command/state adapter |
+| `src/desktopMain/kotlin/dev/xuexue/WorkbenchAgentController.kt` | 已通过 `AgentSessionRuntime` 调用 `prompt/steer/abort`，并把 Runtime StateFlow/事件重新绑定给 `AgentRuntimeState`；保留旧会话 DTO 作为迁移投影 | 随 structured-message Runtime 投影完成降为 command/state adapter |
 | `src/desktopMain/kotlin/dev/xuexue/platform/DesktopPiAgentAdapter.kt` | 旧 `AgentClient`/工具到 `:pi-agent-core` 的临时平台桥 | 由正式 Provider 和 platform capability 实现替换 |
-| `src/desktopMain/kotlin/dev/xuexue/WorkbenchAgentProjection.kt` | 将 `AgentEvent` 临时投影到旧 Compose 消息列表 | `AgentSession` 成为唯一会话状态后删除 |
-| `pi-coding-agent/src/commonMain/kotlin/dev/xuexue/pi/coding/AgentSession*.kt` | 已建立正式会话 facade、状态和事件协议；已覆盖消息落盘、队列、settled、Bash 延迟、统计、retry 与 compaction | 继续移植 resources/extensions/runtime，再替换 Compose 旧会话状态 |
+| `src/desktopMain/kotlin/dev/xuexue/WorkbenchAgentProjection.kt` | 将 `AgentEvent` 临时投影到旧 Compose 消息列表，保留 assistant thinking/tool call/tool result/diff | `AgentSession` 成为唯一会话状态后删除 |
+| `pi-coding-agent/src/commonMain/kotlin/dev/xuexue/pi/coding/AgentSession*.kt` | 已建立正式会话 facade、状态和事件协议；已覆盖消息落盘、队列、settled、Bash 延迟、统计、retry、compaction、资源提示词/命令展开和插件 hooks | 继续移植 extension loader/runtime，再替换 Compose 旧会话状态 |
+| `pi-coding-agent/src/**/packages/**` | 能力包 source、manifest、缓存和资源贡献 | path/JAR/Process 目录、git staging、Maven 本地/远程下载、文件锁、glob 资源选择、hash、settings、trust/offline 测试；AgentSession startup/reload 已消费 skills/prompts，Desktop Runtime 已接入 package extension paths | 安装 UI、完整 git 更新/回滚、package filter/pattern 全语义和完整 reload/回滚 fixture |
 | `pi-coding-agent/src/**/session/**` | 已建立 Pi v3 session entry/tree/context 与 Desktop JSONL 存储 | 继续补齐原 session tests，然后接入正式 `AgentSession` |
 | `.xuexue/agent-sessions.jsonl` | 非 Pi append-only entry tree | 提供一次性迁移器，原文件失败时保留 |
 
@@ -165,10 +166,10 @@
 
 | 链路 | 必须满足的行为 | 状态 |
 | --- | --- | --- |
-| `AgentSession/Runtime -> StateFlow<AgentState>` | AgentSession 已输出包含 Agent、队列和会话元数据的 StateFlow；`AgentViews` 目前仍收集底层 AgentState，须替换 Compose 旧消息状态 | `in-progress` |
-| `AgentSession/Runtime -> Flow<AgentEvent>` | AgentSession 已输出同源会话事件和有序订阅；Compose 仍订阅底层 AgentEvent，须删除旧消息投影并接入 RPC adapter | `in-progress` |
-| `WorkbenchAgentController -> Runtime commands` | `prompt/steer/abort` 已接线；仍须迁移 follow-up、session 和 interaction response | `in-progress` |
-| `AgentViews -> InteractionRequest` | confirm/select/input/editor/notify 通过协议往返，不能在 UI 内执行工具或写会话 | `pending` |
+| `AgentSession/Runtime -> StateFlow<AgentState>` | AgentSession 已输出包含 Agent、队列和会话元数据的 StateFlow；`AgentRuntimeState` 会在 Runtime 替换时重新绑定正式 StateFlow，Agent 面板运行态已优先读取；旧投影已覆盖 thinking/tool call/tool result，完整 structured messages 仍待迁移 | `in-progress` |
+| `AgentSession/Runtime -> Flow<AgentEvent>` | AgentSession 已输出同源会话事件和有序订阅；`AgentRuntimeState` 暴露正式事件流，RPC handler 和 Compose 仍在兼容期使用旧消息投影 | `in-progress` |
+| `WorkbenchAgentController -> Runtime commands` | `prompt/steer/abort`、Runtime lifecycle、follow-up 和 interaction broker 已接线；完整 new/resume/fork UI 命令和状态投影仍待迁移 | `in-progress` |
+| `AgentViews -> InteractionRequest` | `AgentRuntimeState` 暴露 broker StateFlow；Compose 已渲染 confirm/select/input/editor 并回传类型化 response，notify 走通知 Flow | `in-progress` |
 | Compose、SDK、RPC 三宿主 | 相同输入产生相同 Runtime 状态、事件和 session entry | `pending` |
 
 ## 7. 阶段门

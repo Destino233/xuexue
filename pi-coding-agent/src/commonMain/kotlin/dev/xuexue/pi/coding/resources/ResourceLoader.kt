@@ -33,6 +33,10 @@ class DefaultResourceLoader(
     private val appendSystemPromptSources = options.appendSystemPrompt
     private val skillLoader = SkillLoader(fileSystem)
     private val promptTemplateLoader = PromptTemplateLoader(fileSystem)
+    private val extensionSkillPaths = mutableListOf<String>()
+    private val extensionPromptPaths = mutableListOf<String>()
+    private val extensionSkillMetadata = linkedMapOf<String, ResourcePathMetadata>()
+    private val extensionPromptMetadata = linkedMapOf<String, ResourcePathMetadata>()
 
     private var state =
         ResourceLoaderState(
@@ -47,23 +51,35 @@ class DefaultResourceLoader(
     fun reload() {
         settingsManager.reload()
         val diagnostics = mutableListOf<ResourceDiagnostic>()
-        val skillPaths = mergePaths(settingsManager.getSkillPaths(), additionalSkillPaths)
-        val skills =
-            skillLoader.load(
-                cwd = cwd,
-                agentDirectory = agentDirectory,
-                projectTrusted = settingsManager.isProjectTrusted(),
-                skillPaths = skillPaths,
-                includeDefaults = !noSkills,
+        val skillPaths =
+            mergePaths(
+                settingsManager.getSkillPaths(),
+                additionalSkillPaths + extensionSkillPaths,
             )
-        val promptPaths = mergePaths(settingsManager.getPromptTemplatePaths(), additionalPromptTemplatePaths)
+        val skills =
+            applySkillMetadata(
+                skillLoader.load(
+                    cwd = cwd,
+                    agentDirectory = agentDirectory,
+                    projectTrusted = settingsManager.isProjectTrusted(),
+                    skillPaths = skillPaths,
+                    includeDefaults = !noSkills,
+                ),
+            )
+        val promptPaths =
+            mergePaths(
+                settingsManager.getPromptTemplatePaths(),
+                additionalPromptTemplatePaths + extensionPromptPaths,
+            )
         val prompts =
-            promptTemplateLoader.load(
-                cwd = cwd,
-                agentDirectory = agentDirectory,
-                projectTrusted = settingsManager.isProjectTrusted(),
-                promptPaths = promptPaths,
-                includeDefaults = !noPromptTemplates,
+            applyPromptMetadata(
+                promptTemplateLoader.load(
+                    cwd = cwd,
+                    agentDirectory = agentDirectory,
+                    projectTrusted = settingsManager.isProjectTrusted(),
+                    promptPaths = promptPaths,
+                    includeDefaults = !noPromptTemplates,
+                ),
             )
         val contextFiles =
             if (noContextFiles) emptyList() else loadProjectContextFiles(cwd, agentDirectory, fileSystem)
@@ -104,7 +120,21 @@ class DefaultResourceLoader(
 
     fun getCurrentWorkingDirectory(): String = cwd
 
+    fun isProjectTrusted(): Boolean = settingsManager.isProjectTrusted()
+
+    fun setProjectTrusted(trusted: Boolean) {
+        settingsManager.setProjectTrusted(trusted)
+        reload()
+    }
+
     fun readResourceText(path: String): String? = runCatching { fileSystem.readText(path) }.getOrNull()
+
+    /** Adds resources contributed by an extension and reloads the affected resource view. */
+    fun extendResources(paths: ResourceExtensionPaths) {
+        addContributions(paths.skillPaths, extensionSkillPaths, extensionSkillMetadata)
+        addContributions(paths.promptPaths, extensionPromptPaths, extensionPromptMetadata)
+        if (paths.skillPaths.isNotEmpty() || paths.promptPaths.isNotEmpty()) reload()
+    }
 
     fun getDiagnostics(): List<ResourceDiagnostic> {
         val resourceDiagnostics = state.diagnostics
@@ -181,6 +211,81 @@ class DefaultResourceLoader(
         }
         return merged
     }
+
+    private fun addContributions(
+        contributions: List<ResourcePathContribution>,
+        paths: MutableList<String>,
+        metadata: MutableMap<String, ResourcePathMetadata>,
+    ) {
+        contributions.forEach { contribution ->
+            val path = fileSystem.resolvePath(contribution.path, cwd)
+            val canonicalPath = fileSystem.canonicalizePath(path)
+            val resolvedMetadata =
+                contribution.metadata.copy(baseDirectory = resolveBaseDirectory(contribution.metadata))
+            if (metadata.putIfAbsent(canonicalPath, resolvedMetadata) == null) {
+                paths += path
+            }
+        }
+    }
+
+    private fun resolveBaseDirectory(
+        metadata: ResourcePathMetadata,
+    ): String? = metadata.baseDirectory?.let { fileSystem.resolvePath(it, cwd) }
+
+    private fun metadataForPath(
+        path: String,
+        metadata: Map<String, ResourcePathMetadata>,
+    ): ResourcePathMetadata? {
+        val canonicalPath = fileSystem.canonicalizePath(path)
+        return metadata.entries
+            .filter { (root, _) -> canonicalPath == root || canonicalPath.startsWith("$root/") }
+            .maxByOrNull { (root, _) -> root.length }
+            ?.value
+    }
+
+    private fun applySkillMetadata(result: SkillsLoadResult): SkillsLoadResult =
+        result.copy(
+            skills =
+                result.skills.map { skill ->
+                    val contribution = metadataForPath(skill.filePath, extensionSkillMetadata)
+                    if (contribution == null) {
+                        skill
+                    } else {
+                        skill.copy(
+                            sourceInfo =
+                                ResourceSourceInfo(
+                                    path = skill.filePath,
+                                    source = contribution.source,
+                                    scope = contribution.scope,
+                                    baseDirectory = contribution.baseDirectory ?: skill.baseDirectory,
+                                    origin = contribution.origin,
+                                ),
+                        )
+                    }
+                },
+        )
+
+    private fun applyPromptMetadata(result: PromptTemplatesLoadResult): PromptTemplatesLoadResult =
+        result.copy(
+            prompts =
+                result.prompts.map { prompt ->
+                    val contribution = metadataForPath(prompt.filePath, extensionPromptMetadata)
+                    if (contribution == null) {
+                        prompt
+                    } else {
+                        prompt.copy(
+                            sourceInfo =
+                                ResourceSourceInfo(
+                                    path = prompt.filePath,
+                                    source = contribution.source,
+                                    scope = contribution.scope,
+                                    baseDirectory = contribution.baseDirectory ?: fileSystem.parent(prompt.filePath),
+                                    origin = contribution.origin,
+                                ),
+                        )
+                    }
+                },
+        )
 }
 
 fun loadProjectContextFiles(

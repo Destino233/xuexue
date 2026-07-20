@@ -6,6 +6,7 @@ import dev.xuexue.pi.ai.AbortSignal
 import dev.xuexue.pi.ai.AssistantMessage
 import dev.xuexue.pi.ai.ToolCall
 import dev.xuexue.pi.ai.ToolResultMessage
+import dev.xuexue.pi.ai.validateToolArguments
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -154,7 +155,8 @@ private suspend fun prepareToolCall(
             ?: return immediateError("Tool ${toolCall.name} not found")
     return try {
         val preparedArguments = tool.prepareArguments?.invoke(toolCall.arguments) ?: toolCall.arguments
-        val validatedArguments = tool.validateArguments(preparedArguments).toMutableMap()
+        val schemaValidated = validateToolArguments(tool.parameters, preparedArguments, tool.name)
+        val validatedArguments = tool.validateArguments(schemaValidated).toMutableMap()
         val beforeContext = BeforeToolCallContext(assistantMessage, toolCall, validatedArguments, context)
         val before = config.beforeToolCall(beforeContext, signal)
         when {

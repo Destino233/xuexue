@@ -2,9 +2,11 @@
 
 package dev.xuexue.pi.coding
 
+import dev.xuexue.pi.agent.AfterToolCallResult
 import dev.xuexue.pi.agent.Agent
 import dev.xuexue.pi.agent.AgentEvent
 import dev.xuexue.pi.agent.AgentSubscription
+import dev.xuexue.pi.agent.BeforeToolCallResult
 import dev.xuexue.pi.agent.QueueMode
 import dev.xuexue.pi.agent.UNKNOWN_AGENT_MODEL
 import dev.xuexue.pi.ai.AbortController
@@ -13,7 +15,10 @@ import dev.xuexue.pi.ai.AgentMessage
 import dev.xuexue.pi.ai.AssistantMessage
 import dev.xuexue.pi.ai.ImageContent
 import dev.xuexue.pi.ai.Model
+import dev.xuexue.pi.ai.ModelRegistry
 import dev.xuexue.pi.ai.ModelThinkingLevel
+import dev.xuexue.pi.ai.PiImageProvider
+import dev.xuexue.pi.ai.PiProvider
 import dev.xuexue.pi.ai.StopReason
 import dev.xuexue.pi.ai.TextContent
 import dev.xuexue.pi.ai.ToolCall
@@ -27,6 +32,7 @@ import dev.xuexue.pi.ai.clampThinkingLevel
 import dev.xuexue.pi.ai.getSupportedThinkingLevels
 import dev.xuexue.pi.ai.isContextOverflow
 import dev.xuexue.pi.ai.isRetryableAssistantError
+import dev.xuexue.pi.ai.modelsAreEqual
 import dev.xuexue.pi.coding.compaction.CompactionDetails
 import dev.xuexue.pi.coding.compaction.CompactionPreparation
 import dev.xuexue.pi.coding.compaction.CompactionRequest
@@ -35,6 +41,18 @@ import dev.xuexue.pi.coding.compaction.estimateContextTokens
 import dev.xuexue.pi.coding.compaction.estimateTokens
 import dev.xuexue.pi.coding.compaction.prepareCompaction
 import dev.xuexue.pi.coding.compaction.shouldCompact
+import dev.xuexue.pi.coding.extensions.PiExtensionContext
+import dev.xuexue.pi.coding.extensions.PiExtensionEvent
+import dev.xuexue.pi.coding.extensions.PiExtensionEventResult
+import dev.xuexue.pi.coding.extensions.PiExtensionEventType
+import dev.xuexue.pi.coding.extensions.PiExtensionMode
+import dev.xuexue.pi.coding.extensions.PiExtensionRunner
+import dev.xuexue.pi.coding.extensions.ProjectTrustDecision
+import dev.xuexue.pi.coding.extensions.ResourceDiscoverReason
+import dev.xuexue.pi.coding.extensions.SessionShutdownReason
+import dev.xuexue.pi.coding.extensions.SessionStartReason
+import dev.xuexue.pi.coding.packages.PiPackageManager
+import dev.xuexue.pi.coding.resources.ResourceDiagnostic
 import dev.xuexue.pi.coding.resources.SystemPromptOptions
 import dev.xuexue.pi.coding.resources.buildSystemPrompt
 import dev.xuexue.pi.coding.resources.expandPromptTemplate
@@ -58,6 +76,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -75,6 +94,11 @@ private data class ActiveSessionRun(
     val completion: CompletableDeferred<Unit>,
 )
 
+private data class ExtensionStartResult(
+    val messages: List<CustomMessage>,
+    val systemPrompt: String?,
+)
+
 /** Headless Pi coding-agent session facade. */
 @Suppress("TooManyFunctions", "LargeClass")
 class AgentSession(
@@ -83,7 +107,17 @@ class AgentSession(
     val agent: Agent = config.agent
     val sessionManager: SessionManager = config.sessionManager
     val settingsManager: AgentSessionSettings = config.settingsManager
+    val modelRegistry: ModelRegistry?
+        get() = configuredModelRegistry
+    private val configuredModelRegistry = config.modelRegistry
+    private var scopedModelEntries: List<ScopedModel> = config.scopedModels.toList()
     private val resourceLoader = config.resourceLoader
+    private val extensionRunner: PiExtensionRunner? = config.extensionRunner
+    private val packageManager: PiPackageManager? = config.packageManager
+    private val bashExecutor: AgentSessionBashExecutor? = config.bashExecutor
+    private val htmlExporter: AgentSessionHtmlExporter? = config.htmlExporter
+    private val extensionMode: PiExtensionMode = config.extensionMode
+    private val interactionPort: InteractionPort = config.interactionPort
     private val systemPromptDocumentation = config.systemPromptDocumentation
     private val currentDate = config.currentDate
 
@@ -108,8 +142,14 @@ class AgentSession(
     val state: StateFlow<AgentSessionState> = mutableState.asStateFlow()
 
     init {
-        resourceLoader?.reload()
+        resourceLoader?.let { loader ->
+            extensionRunner?.getContributedResources()?.let(loader::extendResources)
+            loader.reload()
+        }
+        installExtensionTools()
+        installExtensionHooks()
         rebuildSystemPrompt()
+        refreshState()
         reconnectToAgent()
     }
 
@@ -170,6 +210,10 @@ class AgentSession(
     val autoCompactionEnabled: Boolean
         get() = settingsManager.getCompactionSettings().enabled
 
+    /** Models cycled by Pi's scoped model selector, in the configured order. */
+    val scopedModels: List<ScopedModel>
+        get() = scopedModelEntries
+
     fun subscribe(listener: AgentSessionEventListener): AgentSessionSubscription {
         addListener(listener)
         return AgentSessionSubscription { removeListener(listener) }
@@ -200,14 +244,22 @@ class AgentSession(
             error("No model selected.")
         }
         findLastAssistantMessage()?.let { checkCompaction(it, skipAbortedCheck = false) }
+        val extensionStart = extensionBeforeAgentStart(expandedText)
+        val baseSystemPrompt = agent.currentState.systemPrompt
         val messages =
             buildList<AgentMessage> {
                 add(userMessage(expandedText, options.images))
                 addAll(drainPendingNextTurnMessages())
+                addAll(extensionStart.messages)
             }
 
         options.preflightResult?.invoke(true)
-        runAgentPrompt(messages)
+        if (extensionStart.systemPrompt != null) agent.setSystemPrompt(extensionStart.systemPrompt)
+        try {
+            runAgentPrompt(messages)
+        } finally {
+            if (extensionStart.systemPrompt != null) agent.setSystemPrompt(baseSystemPrompt)
+        }
     }
 
     fun steer(
@@ -336,6 +388,22 @@ class AgentSession(
         retryAbortController.load()?.abort()
     }
 
+    suspend fun executeBash(
+        command: String,
+        excludeFromContext: Boolean? = null,
+    ): BashResult {
+        val normalized = command.trim()
+        require(normalized.isNotEmpty()) { "Bash command cannot be empty" }
+        val executor = bashExecutor ?: error("Bash execution is not configured for this session")
+        val result = executor.execute(normalized, sessionManager.getCwd(), excludeFromContext)
+        recordBashResult(normalized, result, excludeFromContext)
+        return result
+    }
+
+    fun abortBash() {
+        bashExecutor?.abort()
+    }
+
     fun setAutoRetryEnabled(enabled: Boolean) {
         settingsManager.setRetryEnabled(enabled)
         refreshState()
@@ -353,11 +421,79 @@ class AgentSession(
 
     fun reloadResources(): List<dev.xuexue.pi.coding.resources.ResourceDiagnostic> {
         val loader = resourceLoader ?: return emptyList()
+        extensionRunner?.getContributedResources()?.let(loader::extendResources)
         loader.reload()
+        installExtensionTools()
         rebuildSystemPrompt()
         refreshState()
         return loader.getDiagnostics()
     }
+
+    /** Runs extension resource discovery and reloads the shared resource view. */
+    suspend fun reloadResourcesFromExtensions(): List<ResourceDiagnostic> = reloadExt(ResourceDiscoverReason.RELOAD)
+
+    suspend fun startExtensions(
+        reason: SessionStartReason = SessionStartReason.STARTUP,
+        previousSessionFile: String? = null,
+    ) {
+        loadPackageResources()
+        extensionRunner?.emit(
+            PiExtensionEvent.SessionStart(reason, previousSessionFile),
+            extensionContext(),
+        )
+        reloadExt(ResourceDiscoverReason.STARTUP)
+    }
+
+    suspend fun shutdown(
+        reason: SessionShutdownReason = SessionShutdownReason.QUIT,
+        targetSessionFile: String? = null,
+    ) {
+        if (!disposed.compareAndSet(false, true)) return
+        extensionRunner?.dispose(reason, targetSessionFile)
+        runCatching { agent.abort() }
+        disconnectFromAgent()
+        listeners.store(emptyList())
+    }
+
+    suspend fun beforeSessionSwitch(
+        reason: String,
+        targetSessionFile: String? = null,
+    ): Boolean = extensionRunner?.emitBeforeSwitch(reason, targetSessionFile, extensionContext()) ?: false
+
+    suspend fun beforeSessionFork(
+        entryId: String,
+        position: String,
+    ): Boolean = extensionRunner?.emitBeforeFork(entryId, position, extensionContext()) ?: false
+
+    suspend fun resolveProjectTrust(): PiExtensionEventResult.ProjectTrust? {
+        val runner = extensionRunner ?: return null
+        val result = runner.emitProjectTrust(extensionContext())
+        when (result?.trusted) {
+            ProjectTrustDecision.YES -> resourceLoader?.setProjectTrusted(true)
+            ProjectTrustDecision.NO -> resourceLoader?.setProjectTrusted(false)
+            null, ProjectTrustDecision.UNDECIDED -> Unit
+        }
+        return result
+    }
+
+    suspend fun executeExtensionCommand(
+        invocationName: String,
+        args: String = "",
+    ): Boolean = extensionRunner?.executeCommand(invocationName, args, extensionContext()) ?: false
+
+    fun getRegisteredExtensionCommands() = extensionRunner?.getRegisteredCommands().orEmpty()
+
+    fun getRegisteredExtensionProviders(): List<PiProvider> = extensionRunner?.getAllRegisteredProviders().orEmpty()
+
+    fun getRegisteredExtensionImageProviders(): List<PiImageProvider> =
+        extensionRunner
+            ?.getAllRegisteredImageProviders()
+            .orEmpty()
+
+    /** Resources exposed by Pi's get_commands RPC without leaking the loader implementation. */
+    fun getPromptTemplatesForRpc() = resourceLoader?.getPrompts()?.prompts.orEmpty()
+
+    fun getSkillsForRpc() = resourceLoader?.getSkills()?.skills.orEmpty()
 
     @Suppress("TooGenericExceptionCaught")
     suspend fun compact(customInstructions: String? = null): CompactionResult {
@@ -452,6 +588,52 @@ class AgentSession(
         sessionManager.appendModelChange(model.provider, model.id)
         setThinkingLevel(previousThinkingLevel)
         refreshState()
+    }
+
+    /** Replace the ordered model scope used by [cycleModel]. */
+    fun setScopedModels(scopedModels: List<ScopedModel>) {
+        scopedModelEntries = scopedModels.toList()
+    }
+
+    /**
+     * Cycle to the next or previous authenticated model.
+     *
+     * When a scope is configured, its order is authoritative and models without configured
+     * authentication are omitted. With no scope, the registry's authenticated model order is
+     * used. A missing current model starts from scope index zero, matching Pi's behavior.
+     */
+    fun cycleModel(
+        direction: ModelCycleDirection = ModelCycleDirection.FORWARD,
+        modelRegistryOverride: ModelRegistry? = null,
+    ): ModelCycleResult? {
+        val registry = modelRegistryOverride ?: configuredModelRegistry
+        val candidates =
+            if (scopedModelEntries.isNotEmpty()) {
+                scopedModelEntries.filter { scoped ->
+                    registry?.hasConfiguredAuth(scoped.model) != false
+                }
+            } else {
+                registry?.getAvailable()?.map { model -> ScopedModel(model) }.orEmpty()
+            }
+        if (candidates.size <= 1) return null
+
+        val currentModel = model
+        var currentIndex = candidates.indexOfFirst { scoped -> modelsAreEqual(scoped.model, currentModel) }
+        if (currentIndex == -1) currentIndex = 0
+        val nextIndex =
+            when (direction) {
+                ModelCycleDirection.FORWARD -> (currentIndex + 1).mod(candidates.size)
+                ModelCycleDirection.BACKWARD -> (currentIndex - 1 + candidates.size).mod(candidates.size)
+            }
+        val next = candidates[nextIndex]
+        val requestedThinkingLevel = next.thinkingLevel ?: thinkingLevel
+        setModel(next.model)
+        setThinkingLevel(requestedThinkingLevel)
+        return ModelCycleResult(
+            model = next.model,
+            thinkingLevel = thinkingLevel,
+            isScoped = scopedModelEntries.isNotEmpty(),
+        )
     }
 
     fun setThinkingLevel(level: ModelThinkingLevel) {
@@ -616,10 +798,15 @@ class AgentSession(
             .ifEmpty { null }
     }
 
+    suspend fun exportToHtml(outputPath: String? = null): String =
+        requireNotNull(htmlExporter) { "HTML export is not configured for this host" }
+            .export(this, outputPath)
+
     fun dispose() {
         if (!disposed.compareAndSet(false, true)) return
         abortRetry()
         abortCompaction()
+        abortBash()
         runCatching { agent.abort() }
         disconnectFromAgent()
         listeners.store(emptyList())
@@ -640,13 +827,14 @@ class AgentSession(
             refreshState()
             try {
                 emitEvent(AgentSessionEvent.AgentSettled)
+                extensionRunner?.emit(PiExtensionEvent.AgentSettled, extensionContext())
             } finally {
                 run.completion.complete(Unit)
             }
         }
     }
 
-    private fun handleAgentEvent(event: AgentEvent) {
+    private suspend fun handleAgentEvent(event: AgentEvent) {
         if (event is AgentEvent.MessageStart) {
             val message = event.message
             if (message is UserMessage) {
@@ -654,6 +842,7 @@ class AgentSession(
                 removeDeliveredQueueMessage(userMessageText(message))
             }
         }
+        extensionRunner?.emit(event.toExtensionEvent(), extensionContext())
         refreshState()
         emitEvent(event.toSessionEvent())
         if (event is AgentEvent.MessageEnd) {
@@ -966,6 +1155,203 @@ class AgentSession(
         }
     }
 
+    private fun installExtensionTools() {
+        val runner = extensionRunner ?: return
+        val currentTools = agent.currentState.tools
+        val currentNames = currentTools.mapTo(mutableSetOf(), dev.xuexue.pi.agent.AgentTool::name)
+        val extensionTools = runner.getAllRegisteredTools().filter { it.name !in currentNames }
+        if (extensionTools.isNotEmpty()) agent.setTools(currentTools + extensionTools)
+    }
+
+    private suspend fun reloadExt(
+        reason: ResourceDiscoverReason,
+    ): List<ResourceDiagnostic> {
+        loadPackageResources()
+        val discovered = extensionRunner?.emitResourcesDiscover(reason, extensionContext())
+        val loader = resourceLoader ?: return emptyList()
+        discovered?.let(loader::extendResources)
+        return reloadResources()
+    }
+
+    private suspend fun loadPackageResources() {
+        val loader = resourceLoader
+        val manager = packageManager
+        if (loader != null && manager != null) {
+            try {
+                loader.extendResources(manager.resolve().resources)
+            } catch (_: Throwable) {
+                // Package diagnostics are reported by the manager; an unavailable package must not break a session.
+            }
+        }
+    }
+
+    private fun installExtensionHooks() {
+        val runner = extensionRunner ?: return
+        val previousBeforeToolCall = agent.beforeToolCall
+        val previousAfterToolCall = agent.afterToolCall
+        val previousTransformContext = agent.transformContext
+
+        agent.transformContext = { messages, signal ->
+            val transformed = previousTransformContext?.invoke(messages, signal) ?: messages
+            if (runner.hasHandlers(PiExtensionEventType.CONTEXT)) {
+                runner.emitContext(transformed, extensionContext())
+            } else {
+                transformed
+            }
+        }
+        agent.beforeToolCall = { context, signal ->
+            val previous = previousBeforeToolCall?.invoke(context, signal)
+            if (previous?.block == true || !runner.hasHandlers(PiExtensionEventType.TOOL_CALL)) {
+                previous
+            } else {
+                val result =
+                    runner.emitToolCall(
+                        PiExtensionEvent.ToolCall(
+                            toolCallId = context.toolCall.id,
+                            toolName = context.toolCall.name,
+                            args = JsonObject(context.args.toMap()),
+                        ),
+                        extensionContext(),
+                    )
+                if (result?.block == true) {
+                    BeforeToolCallResult(block = true, reason = result.reason)
+                } else {
+                    previous
+                }
+            }
+        }
+        agent.afterToolCall = { context, signal ->
+            val previous = previousAfterToolCall?.invoke(context, signal)
+            if (!runner.hasHandlers(PiExtensionEventType.TOOL_RESULT)) {
+                previous
+            } else {
+                val modified =
+                    runner.emitToolResult(
+                        PiExtensionEvent.ToolResult(
+                            toolCallId = context.toolCall.id,
+                            toolName = context.toolCall.name,
+                            content = context.result.content,
+                            details = context.result.details,
+                            isError = context.isError,
+                        ),
+                        extensionContext(),
+                    )
+                previous?.copy(
+                    content = previous.content ?: modified.content,
+                    details = previous.details ?: modified.details,
+                    isError = previous.isError ?: modified.isError,
+                ) ?: AfterToolCallResult(
+                    content = modified.content,
+                    details = modified.details,
+                    isError = modified.isError,
+                )
+            }
+        }
+    }
+
+    private fun extensionContext(): PiExtensionContext =
+        PiExtensionContext(
+            cwd = resourceLoader?.getCurrentWorkingDirectory() ?: sessionManager.getCwd(),
+            mode = extensionMode,
+            isProjectTrusted = { resourceLoader?.isProjectTrusted() ?: true },
+            isIdle = { isIdle },
+            abort = { agent.abort() },
+            hasPendingMessages = { pendingMessageCount > 0 },
+            getSystemPrompt = { systemPrompt },
+            getSessionState = { currentState },
+            reload = { reloadResources() },
+            interaction = interactionPort,
+        )
+
+    private suspend fun extensionBeforeAgentStart(prompt: String): ExtensionStartResult {
+        val runner = extensionRunner
+        if (runner == null || !runner.hasHandlers(PiExtensionEventType.BEFORE_AGENT_START)) {
+            return ExtensionStartResult(emptyList(), null)
+        }
+        val result = runner.emitBeforeAgentStart(prompt, systemPrompt, extensionContext())
+        val messages =
+            result.messages.map { message ->
+                CustomMessage(
+                    customType = message.customType,
+                    content = message.content,
+                    display = message.display,
+                    details = message.details,
+                    timestamp = Clock.System.now().toEpochMilliseconds(),
+                )
+            }
+        return ExtensionStartResult(messages, result.systemPrompt)
+    }
+
+    private fun expandPromptText(text: String): String {
+        val loader = resourceLoader ?: return text
+        val skillExpanded = expandSkillCommand(text, loader)
+        return expandPromptTemplate(skillExpanded, loader.getPrompts().prompts)
+    }
+
+    private fun expandSkillCommand(
+        text: String,
+        loader: dev.xuexue.pi.coding.resources.DefaultResourceLoader,
+    ): String {
+        val command =
+            text.takeIf { it.startsWith(SKILL_COMMAND_PREFIX) }?.substringAfter(SKILL_COMMAND_PREFIX)
+                ?: return text
+        return expandSkillCommandContent(command, loader) ?: text
+    }
+
+    private fun expandSkillCommandContent(
+        command: String,
+        loader: dev.xuexue.pi.coding.resources.DefaultResourceLoader,
+    ): String? {
+        val name = command.substringBefore(' ')
+        val arguments = command.substringAfter(' ', missingDelimiterValue = "").trim()
+        return loader.getSkills().skills.firstOrNull { it.name == name }?.let { skill ->
+            loader.readResourceText(skill.filePath)?.let { content ->
+                val block =
+                    "<skill name=\"${skill.name}\" location=\"${skill.filePath}\">\n" +
+                        "References are relative to ${skill.baseDirectory}.\n\n" +
+                        "${stripFrontmatter(content).trim()}\n</skill>"
+                if (arguments.isEmpty()) block else "$block\n\n$arguments"
+            }
+        }
+    }
+
+    private fun rebuildSystemPrompt() {
+        val loader = resourceLoader ?: return
+        val tools = agent.currentState.tools
+        val snippets = tools.mapNotNull { tool -> normalizedToolSnippet(tool)?.let { tool.name to it } }.toMap()
+        val guidelines = tools.flatMap { tool -> normalizedToolGuidelines(tool.promptGuidelines) }
+        val appendSystemPrompt = loader.getAppendSystemPrompt().joinToString("\n\n").ifEmpty { null }
+        agent.setSystemPrompt(
+            buildSystemPrompt(
+                SystemPromptOptions(
+                    customPrompt = loader.getSystemPrompt(),
+                    selectedTools = tools.map { it.name },
+                    toolSnippets = snippets,
+                    promptGuidelines = guidelines,
+                    appendSystemPrompt = appendSystemPrompt,
+                    cwd = loader.getCurrentWorkingDirectory(),
+                    currentDate = currentDate(),
+                    documentation = systemPromptDocumentation,
+                    contextFiles = loader.getAgentsFiles(),
+                    skills = loader.getSkills().skills,
+                ),
+            ),
+        )
+    }
+
+    private fun normalizedToolSnippet(tool: dev.xuexue.pi.agent.AgentTool): String? =
+        tool.promptSnippet
+            ?.replace(Regex("[\\r\\n]+"), " ")
+            ?.replace(Regex("\\s+"), " ")
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+
+    private fun normalizedToolGuidelines(guidelines: List<String>): List<String> =
+        guidelines
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .distinct()
+
     private fun findLastAssistantMessage(): AssistantMessage? {
         val reversedMessages = messages.asReversed()
         return reversedMessages.firstNotNullOfOrNull { it as? AssistantMessage }
@@ -1125,6 +1511,49 @@ class AgentSession(
             }
         }
 
+    private fun AgentEvent.toExtensionEvent(): PiExtensionEvent =
+        when (this) {
+            AgentEvent.AgentStart -> {
+                PiExtensionEvent.AgentStart
+            }
+
+            is AgentEvent.AgentEnd -> {
+                PiExtensionEvent.AgentEnd(messages)
+            }
+
+            AgentEvent.TurnStart -> {
+                PiExtensionEvent.TurnStart
+            }
+
+            is AgentEvent.TurnEnd -> {
+                PiExtensionEvent.TurnEnd(message)
+            }
+
+            is AgentEvent.MessageStart -> {
+                PiExtensionEvent.MessageStart(message)
+            }
+
+            is AgentEvent.MessageUpdate -> {
+                PiExtensionEvent.MessageUpdate(message)
+            }
+
+            is AgentEvent.MessageEnd -> {
+                PiExtensionEvent.MessageEnd(message)
+            }
+
+            is AgentEvent.ToolExecutionStart -> {
+                PiExtensionEvent.ToolExecutionStart(toolCallId, toolName, args)
+            }
+
+            is AgentEvent.ToolExecutionUpdate -> {
+                PiExtensionEvent.ToolExecutionUpdate(toolCallId, toolName, args, partialResult)
+            }
+
+            is AgentEvent.ToolExecutionEnd -> {
+                PiExtensionEvent.ToolExecutionEnd(toolCallId, toolName, result, isError)
+            }
+        }
+
     private fun willRetryAfterAgentEnd(messages: List<AgentMessage>): Boolean {
         val settings = settingsManager.getRetrySettings()
         if (!settings.enabled || retryAttempt >= settings.maxRetries) return false
@@ -1134,6 +1563,7 @@ class AgentSession(
 
     private companion object {
         const val EVENT_BUFFER_CAPACITY = 1_024
+        const val SKILL_COMMAND_PREFIX = "/skill:"
         const val PERCENT_MULTIPLIER = 100.0
         const val RETRY_MULTIPLIER = 2.0
         const val OVERFLOW_RECOVERY_EXHAUSTED =
