@@ -308,7 +308,7 @@ class ProcessPiExtensionTest {
         }
 
     @Test
-    fun processProviderTimeoutEndsTheStreamAndAllowsShutdown() =
+    fun processProviderTimeoutTerminatesTheChannelBeforeTheNextRequest() =
         runTest {
             val directory = Files.createTempDirectory("xuexue-process-provider-timeout").toFile()
             val script = directory.resolve("provider.sh")
@@ -345,6 +345,21 @@ class ProcessPiExtensionTest {
 
                 val error = assertIs<AssistantMessageEvent.Error>(events.single())
                 assertEquals(FailureStopReason.ERROR, error.reason)
+
+                val startedAt = System.nanoTime()
+                val nextEvents =
+                    runner
+                        .getAllRegisteredProviders()
+                        .single()
+                        .stream(
+                            model(),
+                            Context(messages = listOf(UserMessage(UserText("next"), timestamp = 2))),
+                            SimpleStreamOptions(),
+                        ).asFlow()
+                        .toList()
+                val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
+                assertIs<AssistantMessageEvent.Error>(nextEvents.single())
+                assertTrue(elapsedMs < 1_000, "Request after timeout remained blocked for $elapsedMs ms")
                 runner.dispose()
             } finally {
                 directory.deleteRecursively()

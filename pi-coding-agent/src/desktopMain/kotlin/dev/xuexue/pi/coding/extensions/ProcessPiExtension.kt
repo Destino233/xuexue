@@ -277,6 +277,7 @@ private class ProcessPluginBridge(
         }
         val requestId = UUID.randomUUID().toString()
         val started = AtomicBoolean(false)
+        val terminalReceived = AtomicBoolean(false)
         val cancelSent = AtomicBoolean(false)
         val subscription =
             options.stream.signal?.onAbort {
@@ -286,7 +287,7 @@ private class ProcessPluginBridge(
             streamScope.launch {
                 try {
                     withOptionalTimeout(options.stream.timeoutMs) {
-                        requestMutex.withLock {
+                        withSerializedRequest(started, terminalReceived) {
                             if (options.stream.signal?.isAborted == true) {
                                 throw CancellationException("Operation aborted")
                             }
@@ -295,7 +296,7 @@ private class ProcessPluginBridge(
                             }
                             started.set(true)
                             if (options.stream.signal?.isAborted == true) sendCancellation(requestId, cancelSent)
-                            readProviderResponses(requestId, model, options.stream.signal, stream)
+                            readProviderResponses(requestId, model, options.stream.signal, stream, terminalReceived)
                             acknowledgeCancellation(requestId)
                         }
                     }
@@ -323,19 +324,42 @@ private class ProcessPluginBridge(
         model: Model,
         signal: AbortSignal?,
         stream: AssistantMessageEventStream,
+        terminalReceived: AtomicBoolean,
     ) {
         var terminal = false
         while (!terminal) {
             val message = messageObject()
             if (matchesRequest(message, requestId)) {
                 if (signal?.isAborted == true) {
-                    acknowledgeCancellation(requestId)
-                    throw CancellationException("Operation aborted")
+                    if (isProviderTerminalResponse(message)) {
+                        terminalReceived.set(true)
+                        acknowledgeCancellation(requestId)
+                        throw CancellationException("Operation aborted")
+                    }
+                } else {
+                    terminal = forwardProviderResponse(message, model, stream)
+                    if (terminal) terminalReceived.set(true)
                 }
-                terminal = forwardProviderResponse(message, model, stream)
             }
         }
     }
+
+    private fun isProviderTerminalResponse(message: JsonObject): Boolean =
+        when (message["type"]?.jsonPrimitive?.contentOrNull) {
+            "provider_done", "provider_error" -> {
+                true
+            }
+
+            "provider_event" -> {
+                parseProviderEvent(message).isTerminal()
+            }
+
+            else -> {
+                false
+            }
+        }
+
+    private fun AssistantMessageEvent.isTerminal(): Boolean = this is AssistantMessageEvent.Done || this is AssistantMessageEvent.Error
 
     private fun forwardProviderResponse(
         message: JsonObject,
@@ -383,7 +407,7 @@ private class ProcessPluginBridge(
         return try {
             withOptionalTimeout(options.timeoutMs) {
                 withContext(Dispatchers.IO) {
-                    requestMutex.withLock {
+                    withSerializedRequest(started) {
                         if (options.signal?.isAborted == true) {
                             imageError(model, "Operation aborted", aborted = true)
                         } else {
@@ -964,9 +988,7 @@ private class ProcessPluginBridge(
                 PiExtensionEvent.AgentStart,
                 PiExtensionEvent.AgentSettled,
                 PiExtensionEvent.TurnStart,
-                -> {
-                    Unit
-                }
+                -> {}
 
                 is PiExtensionEvent.AgentEnd -> {
                     put("messages", messagesPayload(event.messages))
@@ -1089,13 +1111,14 @@ private class ProcessPluginBridge(
     ): JsonObject {
         val requestId = message["requestId"]?.jsonPrimitive?.contentOrNull
         val started = AtomicBoolean(false)
+        val terminalReceived = AtomicBoolean(false)
         val cancelSent = AtomicBoolean(false)
         val subscription =
             signal?.onAbort {
                 if (started.get() && requestId != null) sendCancellation(requestId, cancelSent)
             }
         try {
-            return requestMutex.withLock {
+            return withSerializedRequest(started, terminalReceived) {
                 if (signal?.isAborted == true) throw CancellationException("Operation aborted")
                 synchronized(writerLock) {
                     sendLocked(message)
@@ -1105,7 +1128,7 @@ private class ProcessPluginBridge(
                 var terminal: JsonObject? = null
                 while (terminal == null) {
                     val response = messageObject()
-                    terminal = handleRequestResponse(response, requestId, context, signal)
+                    terminal = handleRequestResponse(response, requestId, context, signal, terminalReceived)
                 }
                 requireNotNull(terminal).also { requestId?.let(::acknowledgeCancellation) }
             }
@@ -1115,6 +1138,22 @@ private class ProcessPluginBridge(
             subscription?.dispose()
         }
     }
+
+    private suspend fun <T> withSerializedRequest(
+        started: AtomicBoolean,
+        terminalReceived: AtomicBoolean = AtomicBoolean(false),
+        block: suspend () -> T,
+    ): T =
+        requestMutex.withLock {
+            var completed = false
+            try {
+                block().also { completed = true }
+            } finally {
+                if (started.get() && !completed && !terminalReceived.get()) {
+                    terminateProcessHandles("Process plugin request ended without a terminal response")
+                }
+            }
+        }
 
     private fun rethrowRequestError(
         error: Throwable,
@@ -1129,6 +1168,7 @@ private class ProcessPluginBridge(
         requestId: String?,
         context: PiExtensionContext?,
         signal: AbortSignal?,
+        terminalReceived: AtomicBoolean,
     ): JsonObject? =
         when (response["type"]?.jsonPrimitive?.contentOrNull) {
             "interaction_request" -> {
@@ -1149,6 +1189,7 @@ private class ProcessPluginBridge(
                     null
                 } else {
                     if (signal?.isAborted == true) {
+                        terminalReceived.set(true)
                         requestId?.let(::acknowledgeCancellation)
                         throw CancellationException("Operation aborted")
                     }
