@@ -18,9 +18,9 @@ object PaddleOcrTestSidecarMain {
             val body =
                 (
                     "{\"version\":\"$version\",\"ready\":true," +
-                    "\"runtime\":{\"requested_device\":\"auto\",\"device\":\"cpu\"," +
-                    "\"backend\":\"cpu\",\"compiled_backends\":[\"cpu\"]," +
-                    "\"available_devices\":[],\"device_available\":true}}"
+                        "\"runtime\":{\"requested_device\":\"auto\",\"device\":\"cpu\"," +
+                        "\"backend\":\"cpu\",\"compiled_backends\":[\"cpu\"]," +
+                        "\"available_devices\":[],\"device_available\":true}}"
                 ).encodeToByteArray()
             exchange.responseHeaders.add("Content-Type", "application/json")
             exchange.sendResponseHeaders(200, body.size.toLong())

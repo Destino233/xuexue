@@ -261,9 +261,15 @@ internal class PdfDocumentAnalysisRunner(
     ): PdfPageLayout {
         val selected =
             when {
-                native != null && native.isTrustedNativeText() -> native
-                engine is NativePdfLayoutEngine -> native ?: emptyLayout(request, engine.descriptor.engineVersion)
-                else ->
+                native != null && native.isTrustedNativeText() -> {
+                    native
+                }
+
+                engine is NativePdfLayoutEngine -> {
+                    native ?: emptyLayout(request, engine.descriptor.engineVersion)
+                }
+
+                else -> {
                     analyzeWithRaster(
                         path,
                         pageIndex,
@@ -275,6 +281,7 @@ internal class PdfDocumentAnalysisRunner(
                         metadata,
                         runtimeFingerprint,
                     )
+                }
             }
         return if (settings.allowLowConfidenceVlFallback &&
             engine.descriptor.engineId == PpStructureV3Engine.ENGINE_ID &&

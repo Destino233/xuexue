@@ -184,9 +184,12 @@ private fun paddleDeviceBackend(device: String): String {
     val normalized = device.trim().lowercase()
     return when {
         normalized == "cpu" -> "cpu"
+
         normalized == "gpu" || normalized.startsWith("gpu:") || normalized == "cuda" ||
             normalized.startsWith("cuda:") -> "cuda"
+
         normalized == "xpu" || normalized.startsWith("xpu:") -> "xpu"
+
         else -> "custom:${normalized.removePrefix("custom_device:").removePrefix("custom:").substringBefore(':')}"
     }
 }
@@ -205,15 +208,15 @@ private fun paddleDevicesMatch(
     return identity(expected) == identity(actual)
 }
 
-private fun isPaddleAcceleratedDevice(device: String): Boolean =
-    device.isNotBlank() && paddleDeviceBackend(device) != "cpu"
+private fun isPaddleAcceleratedDevice(device: String): Boolean = device.isNotBlank() && paddleDeviceBackend(device) != "cpu"
 
 private fun runtimePreferenceFailure(
     runtime: PaddleOcrRuntime,
     requestedDevice: String,
 ): String? {
-    val actualDevice = runtime.device
-        ?: return "PaddleOCR sidecar health did not report the selected device."
+    val actualDevice =
+        runtime.device
+            ?: return "PaddleOCR sidecar health did not report the selected device."
     if (runtime.deviceAvailable == null) {
         return "PaddleOCR sidecar health did not confirm device availability."
     }
@@ -237,7 +240,9 @@ private fun runtimePreferenceFailure(
             "PaddleOCR requested $requested but sidecar selected $actualDevice."
         }
 
-        else -> null
+        else -> {
+            null
+        }
     }
 }
 
@@ -324,11 +329,12 @@ class PaddleOcrServiceManager(
     private suspend fun startProcessAndWait(command: List<String>): PaddleOcrHealth {
         process =
             withContext(ioDispatcher) {
-                ProcessBuilder(command).apply {
-                    environment()["XUEXUE_PADDLEOCR_DEVICE"] = config.requestedDevice
-                    redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                    redirectError(ProcessBuilder.Redirect.DISCARD)
-                }.start()
+                ProcessBuilder(command)
+                    .apply {
+                        environment()["XUEXUE_PADDLEOCR_DEVICE"] = config.requestedDevice
+                        redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                        redirectError(ProcessBuilder.Redirect.DISCARD)
+                    }.start()
             }
         return try {
             val deadline = System.nanoTime() + config.startupTimeout.toNanos()
