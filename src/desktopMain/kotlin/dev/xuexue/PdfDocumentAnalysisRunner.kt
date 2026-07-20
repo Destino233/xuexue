@@ -193,6 +193,14 @@ internal class PdfDocumentAnalysisRunner(
         val path = resolvePdfPath(services.workspaceService, root, document)
         val fingerprint = services.repository.fingerprint(path)
         val metadata = services.backend.inspect(path)
+        val context =
+            PdfAnalysisContext(
+                path = path,
+                metadata = metadata,
+                settings = settings,
+                fingerprint = fingerprint,
+                runtimeFingerprint = runtimeFingerprint,
+            )
         val nativeEngine = NativePdfLayoutEngine()
         PdfPageLayoutStore().use { layoutStore ->
             repeat(metadata.pageCount) { pageIndex ->
@@ -210,25 +218,18 @@ internal class PdfDocumentAnalysisRunner(
                     )
                 val native =
                     nativeLayout(
-                        path,
+                        context,
                         pageIndex,
                         request,
                         nativeEngine,
-                        settings,
-                        fingerprint,
-                        metadata,
                     )
                 val layout =
                     selectLayout(
-                        path,
+                        context,
                         pageIndex,
                         request,
                         native,
                         engine,
-                        settings,
-                        fingerprint,
-                        metadata,
-                        runtimeFingerprint,
                     )
                 layoutStore.write(layout)
                 currentCoroutineContext().ensureActive()
@@ -249,15 +250,11 @@ internal class PdfDocumentAnalysisRunner(
     }
 
     private suspend fun selectLayout(
-        path: Path,
+        context: PdfAnalysisContext,
         pageIndex: Int,
         request: DocumentAnalysisRequest,
         native: PdfPageLayout?,
         engine: DocumentAnalysisEngine,
-        settings: DocumentAnalysisSettings,
-        fingerprint: String,
-        metadata: PdfDocumentMetadata,
-        runtimeFingerprint: String,
     ): PdfPageLayout {
         val selected =
             when {
@@ -271,34 +268,26 @@ internal class PdfDocumentAnalysisRunner(
 
                 else -> {
                     analyzeWithRaster(
-                        path,
+                        context,
                         pageIndex,
                         request,
                         native,
                         engine,
-                        settings,
-                        fingerprint,
-                        metadata,
-                        runtimeFingerprint,
                     )
                 }
             }
-        return if (settings.allowLowConfidenceVlFallback &&
+        return if (context.settings.allowLowConfidenceVlFallback &&
             engine.descriptor.engineId == PpStructureV3Engine.ENGINE_ID &&
             selected.needsVlFallback()
         ) {
             services.engineRegistry.engineOrNull(PaddleOcrVlEngine.ENGINE_ID)?.let { vlEngine ->
                 val vl =
                     analyzeWithRaster(
-                        path,
+                        context,
                         pageIndex,
                         request,
                         native,
                         vlEngine,
-                        settings,
-                        fingerprint,
-                        metadata,
-                        runtimeFingerprint,
                     )
                 mergeVlLayout(selected, vl)
             } ?: selected
@@ -308,20 +297,17 @@ internal class PdfDocumentAnalysisRunner(
     }
 
     private suspend fun nativeLayout(
-        path: Path,
+        context: PdfAnalysisContext,
         pageIndex: Int,
         request: DocumentAnalysisRequest,
         engine: NativePdfLayoutEngine,
-        settings: DocumentAnalysisSettings,
-        fingerprint: String,
-        metadata: PdfDocumentMetadata,
     ): PdfPageLayout? {
-        val key = cacheKey(path, metadata, engine.descriptor, settings, fingerprint)
+        val key = cacheKey(context, engine.descriptor)
         val cached = services.cache.loadPage(key, pageIndex)
         return if (cached != null) {
             cached
         } else {
-            val structured = services.backend.structuredText(path, pageIndex)
+            val structured = services.backend.structuredText(context.path, pageIndex)
             if (structured == null) {
                 null
             } else {
@@ -333,19 +319,15 @@ internal class PdfDocumentAnalysisRunner(
     }
 
     private suspend fun analyzeWithRaster(
-        path: Path,
+        context: PdfAnalysisContext,
         pageIndex: Int,
         request: DocumentAnalysisRequest,
         native: PdfPageLayout?,
         engine: DocumentAnalysisEngine,
-        settings: DocumentAnalysisSettings,
-        fingerprint: String,
-        metadata: PdfDocumentMetadata,
-        runtimeFingerprint: String,
     ): PdfPageLayout {
-        val key = cacheKey(path, metadata, engine.descriptor, settings, fingerprint, runtimeFingerprint)
+        val key = cacheKey(context, engine.descriptor)
         services.cache.loadPage(key, pageIndex)?.let { return it }
-        val renderedImage = renderAnalysisImage(path, pageIndex, settings.dpi)
+        val renderedImage = renderAnalysisImage(context.path, pageIndex, context.settings.dpi)
         val renderedInkCoverage = renderedImage.inkCoverage
         val imagePng = renderedImage.png
         currentCoroutineContext().ensureActive()
@@ -415,24 +397,20 @@ internal class PdfDocumentAnalysisRunner(
     }
 
     private fun cacheKey(
-        path: Path,
-        metadata: PdfDocumentMetadata,
+        context: PdfAnalysisContext,
         descriptor: DocumentAnalysisEngineDescriptor,
-        settings: DocumentAnalysisSettings,
-        fingerprint: String,
-        runtimeFingerprint: String = "",
     ): PdfAnalysisCacheKey =
         PdfAnalysisCacheKey(
-            documentFingerprint = fingerprint,
-            fileSize = Files.size(path),
-            pageCount = metadata.pageCount,
+            documentFingerprint = context.fingerprint,
+            fileSize = Files.size(context.path),
+            pageCount = context.metadata.pageCount,
             engineId = descriptor.engineId,
             engineVersion = descriptor.engineVersion,
             modelVersion = descriptor.modelVersion,
-            dpi = settings.dpi,
-            language = settings.language,
-            optionsFingerprint = "vlFallback=${settings.allowLowConfidenceVlFallback}",
-            runtimeFingerprint = runtimeFingerprint,
+            dpi = context.settings.dpi,
+            language = context.settings.language,
+            optionsFingerprint = "vlFallback=${context.settings.allowLowConfidenceVlFallback}",
+            runtimeFingerprint = context.runtimeFingerprint,
         )
 
     private companion object {
@@ -583,6 +561,14 @@ private fun isInkPixel(
     if (alpha <= 8) return false
     return red < 245 || green < 245 || blue < 245
 }
+
+private data class PdfAnalysisContext(
+    val path: Path,
+    val metadata: PdfDocumentMetadata,
+    val settings: DocumentAnalysisSettings,
+    val fingerprint: String,
+    val runtimeFingerprint: String,
+)
 
 private data class RenderedAnalysisImage(
     val png: ByteArray,

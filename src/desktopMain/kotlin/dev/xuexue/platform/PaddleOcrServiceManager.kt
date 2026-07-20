@@ -208,40 +208,48 @@ private fun paddleDevicesMatch(
     return identity(expected) == identity(actual)
 }
 
-private fun isPaddleAcceleratedDevice(device: String): Boolean = device.isNotBlank() && paddleDeviceBackend(device) != "cpu"
+private fun isPaddleAcceleratedDevice(device: String): Boolean {
+    return device.isNotBlank() && paddleDeviceBackend(device) != "cpu"
+}
 
 private fun runtimePreferenceFailure(
     runtime: PaddleOcrRuntime,
     requestedDevice: String,
 ): String? {
-    val actualDevice =
-        runtime.device
-            ?: return "PaddleOCR sidecar health did not report the selected device."
-    if (runtime.deviceAvailable == null) {
-        return "PaddleOCR sidecar health did not confirm device availability."
-    }
-    val requested = canonicalPaddleDevice(requestedDevice)
+    val actualDevice = runtime.device
     return when {
-        requested.equals("auto", ignoreCase = true) -> {
-            val acceleratorReported =
-                isPaddleAcceleratedDevice(actualDevice) || runtime.availableDevices.any(::isPaddleAcceleratedDevice)
-            if (acceleratorReported && !isPaddleAcceleratedDevice(actualDevice)) {
-                "GPU-first policy rejected CPU sidecar: an accelerated Paddle device is available."
-            } else {
-                null
-            }
+        actualDevice == null -> {
+            "PaddleOCR sidecar health did not report the selected device."
         }
 
-        requested.equals("cpu", ignoreCase = true) && !actualDevice.equals("cpu", ignoreCase = true) -> {
-            "PaddleOCR requested CPU but sidecar selected $actualDevice."
-        }
-
-        !requested.equals("cpu", ignoreCase = true) && !paddleDevicesMatch(requested, actualDevice) -> {
-            "PaddleOCR requested $requested but sidecar selected $actualDevice."
+        runtime.deviceAvailable == null -> {
+            "PaddleOCR sidecar health did not confirm device availability."
         }
 
         else -> {
-            null
+            val requested = canonicalPaddleDevice(requestedDevice)
+            when {
+                requested.equals("auto", ignoreCase = true) -> {
+                    val acceleratorReported =
+                        isPaddleAcceleratedDevice(actualDevice) ||
+                            runtime.availableDevices.any(::isPaddleAcceleratedDevice)
+                    if (acceleratorReported && !isPaddleAcceleratedDevice(actualDevice)) {
+                        "GPU-first policy rejected CPU sidecar: an accelerated Paddle device is available."
+                    } else {
+                        null
+                    }
+                }
+
+                requested.equals("cpu", ignoreCase = true) && !actualDevice.equals("cpu", ignoreCase = true) -> {
+                    "PaddleOCR requested CPU but sidecar selected $actualDevice."
+                }
+
+                !requested.equals("cpu", ignoreCase = true) && !paddleDevicesMatch(requested, actualDevice) -> {
+                    "PaddleOCR requested $requested but sidecar selected $actualDevice."
+                }
+
+                else -> null
+            }
         }
     }
 }
