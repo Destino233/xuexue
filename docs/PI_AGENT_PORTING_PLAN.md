@@ -279,8 +279,9 @@ dispose 自动注销）和 `SessionResources`（Provider 资源注册、按 sess
 继承、子目录清除、严格 JSON 校验、跨进程文件锁和原子写入；`resolveProjectTrusted()` 按
 override、项目资源门、扩展、持久化、默认策略、交互选择的顺序解析，Compose/RPC 可注入同一
 选择回调。下一步仍是把该解析放到 Runtime 创建前，使全局插件先参与 `project_trust`，再加载
-项目 settings/packages/extensions；此外还有安装进度、Process image-provider wrapper、exec
-的超时/取消协议和 package reload 资源生命周期。
+项目 settings/packages/extensions；此外还有安装进度、Process image-provider wrapper、Process
+JSONL 请求生命周期和 package reload 资源生命周期。JVM `exec` 已补齐 timeout/AbortSignal、部分
+输出、spawn 失败和进程树终止语义。
 
 验收：工具、命令、Provider、资源路径和关键生命周期钩子可以由插件注册；
 插件异常被隔离并生成诊断；reload 后旧监听器和资源全部释放。
