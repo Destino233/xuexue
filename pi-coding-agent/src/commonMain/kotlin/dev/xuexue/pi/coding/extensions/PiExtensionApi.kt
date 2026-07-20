@@ -9,6 +9,7 @@ import dev.xuexue.pi.ai.ToolResultContent
 import dev.xuexue.pi.coding.AgentSessionState
 import dev.xuexue.pi.coding.InteractionPort
 import dev.xuexue.pi.coding.NoOpInteractionPort
+import dev.xuexue.pi.coding.exec.PiCommandExecutor
 import dev.xuexue.pi.coding.resources.ResourceExtensionPaths
 import dev.xuexue.pi.coding.resources.ResourceSourceInfo
 import dev.xuexue.pi.coding.resources.syntheticResourceSourceInfo
@@ -322,6 +323,9 @@ interface PiExtensionApi {
 
     /** Shared custom event channels; subscriptions are scoped to this extension. */
     val events: PiEventBus
+
+    /** Executes a program without implicitly invoking a shell. */
+    val exec: PiCommandExecutor
 }
 
 fun interface PiExtensionHandle {

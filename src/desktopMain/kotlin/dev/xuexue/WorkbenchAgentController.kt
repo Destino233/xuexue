@@ -26,6 +26,7 @@ import dev.xuexue.pi.coding.InteractionResponse
 import dev.xuexue.pi.coding.LocalBashExecutor
 import dev.xuexue.pi.coding.LocalSessionHtmlExporter
 import dev.xuexue.pi.coding.ScopedModel
+import dev.xuexue.pi.coding.exec.LocalPiCommandExecutor
 import dev.xuexue.pi.coding.extensions.PiExtensionRunner
 import dev.xuexue.pi.coding.extensions.PiPluginDiscovery
 import dev.xuexue.pi.coding.extensions.PiPluginDiscoveryOptions
@@ -527,7 +528,7 @@ class WorkbenchAgentController(
                 ),
             )
         val discoveredPlugins = pluginDiscovery.loadAll()
-        val extensionRunner = PiExtensionRunner(cwd)
+        val extensionRunner = PiExtensionRunner(cwd, commandExecutor = LocalPiCommandExecutor())
         discoveredPlugins.extensions.forEach { extension -> extensionRunner.load(extension) }
         val resourceLoader =
             DefaultResourceLoader(

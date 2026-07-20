@@ -15,6 +15,9 @@ import dev.xuexue.pi.ai.SimpleStreamOptions
 import dev.xuexue.pi.ai.TextContent
 import dev.xuexue.pi.ai.UserMessage
 import dev.xuexue.pi.ai.UserText
+import dev.xuexue.pi.coding.exec.PiCommandExecutor
+import dev.xuexue.pi.coding.exec.PiExecOptions
+import dev.xuexue.pi.coding.exec.PiExecResult
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.buildJsonObject
 import kotlin.test.Test
@@ -186,6 +189,28 @@ class PiExtensionRunnerTest {
             bus.emit("custom", "after")
 
             assertEquals(listOf<Any?>("before"), received)
+        }
+
+    @Test
+    fun extensionReceivesTheInjectedExecCapability() =
+        runTest {
+            var capturedApi: PiExtensionApi? = null
+            val executor =
+                PiCommandExecutor { command, args, _ ->
+                    PiExecResult("$command ${args.joinToString()}", "", 0, killed = false)
+                }
+            val runner = PiExtensionRunner("/workspace", commandExecutor = executor)
+            runner.load(
+                KotlinPiExtension("exec") {
+                    capturedApi = this
+                    null
+                },
+            )
+
+            val result = capturedApi!!.exec.execute("tool", listOf("--check"), PiExecOptions())
+
+            assertEquals("tool --check", result.stdout)
+            assertEquals(0, result.code)
         }
 
     private fun extension(

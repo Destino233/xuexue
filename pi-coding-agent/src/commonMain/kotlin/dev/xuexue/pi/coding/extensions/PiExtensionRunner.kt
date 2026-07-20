@@ -6,6 +6,8 @@ import dev.xuexue.pi.agent.AgentTool
 import dev.xuexue.pi.ai.AgentMessage
 import dev.xuexue.pi.ai.PiImageProvider
 import dev.xuexue.pi.ai.PiProvider
+import dev.xuexue.pi.coding.exec.PiCommandExecutor
+import dev.xuexue.pi.coding.exec.UnavailablePiCommandExecutor
 import dev.xuexue.pi.coding.resources.ResourceExtensionPaths
 
 private class LoadedExtension(
@@ -28,6 +30,7 @@ class PiExtensionRunner(
     private val cwd: String,
     private val mode: PiExtensionMode = PiExtensionMode.PRINT,
     val events: PiEventBusController = PiEventBusController(),
+    private val commandExecutor: PiCommandExecutor = UnavailablePiCommandExecutor,
 ) {
     private val extensions = mutableListOf<LoadedExtension>()
     private val errors = mutableListOf<PiExtensionError>()
@@ -388,6 +391,12 @@ class PiExtensionRunner(
                             loaded.eventUnsubscribers.remove(unsubscribe)
                         }
                     }
+                }
+
+            override val exec: PiCommandExecutor
+                get() {
+                    assertActive()
+                    return commandExecutor
                 }
         }
 

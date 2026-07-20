@@ -135,7 +135,7 @@
 | `src/core/cache-stats.ts`、`timings.ts` | 本地统计 | token/cost/cache/timing 计算 | `pending` |
 | `src/core/diagnostics.ts`、`output-guard.ts` | 本地诊断与输出保护 | error capture、stdout cleanliness | `pending` |
 | `src/core/http-dispatcher.ts` | HTTP dispatch 平台接口 | proxy、headers、lifecycle | `pending` |
-| `src/core/exec.ts` | 进程执行协议 | cwd/env/stdout/stderr/exit/cancel | `pending` |
+| `src/core/exec.ts` | `exec/PiExec.kt`、Desktop `LocalPiCommandExecutor` | `LocalPiCommandExecutorTest` 覆盖非 shell argv、分离 stdout/stderr 和退出码；Kotlin/JVM extension API 已注入 `exec`，超时/AbortSignal/Process JSONL 请求仍待补 | `in-progress` |
 | `src/core/sdk.ts` | `AgentSessionRuntimeFactory` / Kotlin SDK | Runtime 创建、资源、模型、stream options；当前已提供 Runtime 生命周期工厂与 Compose 接入骨架，完整 provider/model resolver 仍待补 | `in-progress` |
 | `src/modes/rpc/**`、`src/rpc-entry.ts` | `rpc/PiRpcProtocol.kt`、`AgentSessionRpcHandler.kt`、`PiRpcServer.desktop.kt` | `PiRpcProtocolTest` 覆盖 canonical/flat request、业务 `bash.command` 保留、response/state/message-update event 编码、Bash 持久化、命令 `sourceInfo`、`export_html`、异步 prompt response event、extension UI response 和 `cycle_model data:null`；handler/server 已覆盖 prompt/steer/follow-up/abort、model、queue、compaction、session tree/fork/clone、Bash、commands、interaction 和 JSONL stdin/stdout；三宿主一致性仍待补 | `in-progress` |
 | `src/modes/print-mode.ts` | 非交互输出模式 | stdout、错误和退出语义 | `pending` |
