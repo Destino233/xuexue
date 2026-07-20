@@ -44,7 +44,10 @@
   `paddlepaddle==3.3.1` CPU 包，Intel Arc/SYCL 不会被误报为 PaddleOCR GPU。
 - sidecar 打包已提供 `cpu`、`cuda118`、`cuda126` 和 `cuda129` 变体；CUDA 变体使用同版本
   `paddlepaddle-gpu==3.3.1`。Intel Arc 若要加速 PP-StructureV3，仍需另行提供 Paddle custom-device
-  或 OpenVINO/ONNX 引擎，不能仅凭操作系统显卡枚举完成。
+  `paddle_custom_intel_gpu` wheel；sidecar 的 `intel_gpu` 打包变体会把该插件与同版本 Paddle runtime
+  一起封装，也可另行接入 OpenVINO/ONNX 引擎，不能仅凭操作系统显卡枚举完成。
+- GPU-first 启动会校验已有 sidecar 的实际设备，`auto` 在健康响应报告可用加速设备时拒绝复用 CPU
+  进程；OCR 页缓存也按实际 `device/backend` 隔离，CPU 结果不会遮蔽后续 GPU 运行。
 
 当前工作区质量链中，`ktlintCheck`、`detektTestDesktop`、`desktopTest`、`koverXmlReport` 和强制重跑的
 `detektMainDesktop` 均已通过，detekt 报告为 0 findings。PI 子模块的 detekt 仍会提示分析器发现既有

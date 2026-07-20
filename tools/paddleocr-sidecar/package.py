@@ -22,13 +22,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--backend",
         default=os.getenv("XUEXUE_PADDLEOCR_BACKEND", "cpu"),
-        choices=("cpu", "cuda118", "cuda126", "cuda129"),
+        choices=("cpu", "cuda118", "cuda126", "cuda129", "intel_gpu"),
         help="Paddle wheel variant to install into the artifact",
     )
     parser.add_argument(
         "--requirements",
         type=Path,
         help="Optional requirements file override for a custom Paddle backend",
+    )
+    parser.add_argument(
+        "--custom-device-wheel",
+        type=Path,
+        action="append",
+        default=[],
+        help="A locally built Paddle custom-device wheel to install into the artifact",
     )
     return parser.parse_args()
 
@@ -55,6 +62,12 @@ def main() -> int:
     args = parse_args()
     if not args.version.strip():
         raise SystemExit("version must not be blank")
+    custom_device_wheels = [wheel.resolve() for wheel in args.custom_device_wheel]
+    missing_wheels = [wheel for wheel in custom_device_wheels if not wheel.is_file()]
+    if missing_wheels:
+        raise SystemExit(f"custom-device wheel does not exist: {missing_wheels[0]}")
+    if args.backend == "intel_gpu" and not custom_device_wheels:
+        raise SystemExit("--backend intel_gpu requires --custom-device-wheel")
     root = Path(__file__).resolve().parent
     default_requirements = root / "requirements.txt" if args.backend == "cpu" else root / f"requirements-{args.backend}.txt"
     requirements = (args.requirements or default_requirements).resolve()
@@ -80,6 +93,20 @@ def main() -> int:
             ],
             check=True,
         )
+        if custom_device_wheels:
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--no-compile",
+                    "--target",
+                    str(lib),
+                    *(str(wheel) for wheel in custom_device_wheels),
+                ],
+                check=True,
+            )
         copy_entry(root / "paddleocr_sidecar.py", stage / "paddleocr_sidecar.py")
         copy_entry(root / "bin" / "paddleocr-sidecar", stage / "bin" / "paddleocr-sidecar")
         copy_entry(root / "bin" / "paddleocr-sidecar.cmd", stage / "bin" / "paddleocr-sidecar.cmd")

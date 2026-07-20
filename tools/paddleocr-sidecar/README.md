@@ -32,6 +32,21 @@ unavailable explicit device makes health fail instead of silently falling back
 to CPU. `GET /health` reports the requested device, selected device, backend,
 compiled backends, available devices, and `device_available`.
 
+For Intel Arc, install the Paddle custom-device plugin built from
+`PaddleCustomDevice/backends/intel_gpu` for the same Paddle version. Verify it
+before starting the sidecar:
+
+```bash
+XUEXUE_PADDLEOCR_PYTHON=/path/to/python \
+  /path/to/python -c "import paddle; print(paddle.device.get_all_custom_device_type())"
+XUEXUE_PADDLEOCR_DEVICE=auto \
+  /path/to/python paddleocr_sidecar.py
+```
+
+The runtime must report `intel_gpu:0` (backend `custom:intel_gpu`) in `/health`.
+The sidecar rejects a CPU process when an accelerated device is reported, so a
+stale CPU sidecar cannot satisfy an `auto` GPU-first request.
+
 The Kotlin client checks the reported version, readiness, and runtime device
 before starting analysis. A machine GPU detected by the host is only a hardware
 hint; it is not treated as Paddle acceleration until the sidecar reports it.
@@ -46,6 +61,8 @@ on a machine compatible with the target wheel.
 cd tools/paddleocr-sidecar
 ./package.sh 3.x-sidecar "$PWD/dist/paddleocr-sidecar-linux-x86_64.zip" --backend cpu
 ./package.sh 3.x-sidecar "$PWD/dist/paddleocr-sidecar-linux-cuda12.zip" --backend cuda126
+./package.sh 3.x-sidecar "$PWD/dist/paddleocr-sidecar-linux-intel-gpu.zip" \
+  --backend intel_gpu --custom-device-wheel /path/to/paddle_custom_intel_gpu.whl
 ```
 
 The same builder also runs on Windows and macOS when invoked with their
@@ -64,6 +81,11 @@ available NVIDIA variants are `cuda118`, `cuda126`, and `cuda129`; they install
 the operating system, architecture, Python version, CUDA runtime, and Paddle
 backend that will run it. Other Paddle custom devices require a matching
 vendor-provided wheel and can be supplied with `--requirements`.
+
+The `intel_gpu` artifact uses `requirements-intel_gpu.txt` plus the compiled
+`paddle_custom_intel_gpu` wheel supplied with `--custom-device-wheel`. Build
+that plugin against the same Paddle version and oneAPI toolchain as the target
+machine; do not distribute an Intel artifact without the plugin wheel.
 
 Intel Arc/SYCL being visible to the operating system does not make the standard
 PaddleOCR PP-StructureV3 package GPU-capable. The current sidecar therefore
