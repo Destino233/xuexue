@@ -129,7 +129,8 @@ class ProjectTrustStoreTest {
             return if (index <= 0) "/" else normalized.substring(0, index)
         }
 
-        override fun exists(path: String): Boolean = canonicalizePath(path) in files || canonicalizePath(path) in directories
+        override fun exists(path: String): Boolean =
+            canonicalizePath(path) in files || canonicalizePath(path) in directories
 
         override fun isFile(path: String): Boolean = canonicalizePath(path) in files
 
@@ -137,6 +138,8 @@ class ProjectTrustStoreTest {
 
         override fun readText(path: String): String = error("not used")
 
-        override fun listDirectory(path: String): List<dev.xuexue.pi.coding.resources.ResourceDirectoryEntry> = emptyList()
+        override fun listDirectory(
+            path: String,
+        ): List<dev.xuexue.pi.coding.resources.ResourceDirectoryEntry> = emptyList()
     }
 }

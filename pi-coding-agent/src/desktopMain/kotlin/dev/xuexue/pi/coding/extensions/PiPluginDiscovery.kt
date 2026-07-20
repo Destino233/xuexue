@@ -39,6 +39,7 @@ data class PiPluginDiscoveryOptions(
     val configuredUserPaths: List<String> = emptyList(),
     val configuredProjectPaths: List<String> = emptyList(),
     val additionalPaths: List<String> = emptyList(),
+    val scopesToLoad: Set<PiPluginScope> = PiPluginScope.entries.toSet(),
 ) {
     companion object {
         fun fromSettings(
@@ -47,6 +48,7 @@ data class PiPluginDiscoveryOptions(
             settingsManager: SettingsManager,
             projectTrusted: Boolean = settingsManager.isProjectTrusted(),
             additionalPaths: List<String> = emptyList(),
+            scopesToLoad: Set<PiPluginScope> = PiPluginScope.entries.toSet(),
         ): PiPluginDiscoveryOptions =
             PiPluginDiscoveryOptions(
                 cwd = cwd,
@@ -55,6 +57,7 @@ data class PiPluginDiscoveryOptions(
                 configuredUserPaths = settingsManager.getGlobalExtensionPaths(),
                 configuredProjectPaths = settingsManager.getProjectExtensionPaths(),
                 additionalPaths = additionalPaths,
+                scopesToLoad = scopesToLoad,
             )
     }
 }
@@ -107,6 +110,7 @@ class PiPluginDiscovery(
         val errors = discoveryErrors.toMutableList()
         candidates.forEach { candidate ->
             if (candidate.scope == PiPluginScope.PROJECT && !options.projectTrusted) return@forEach
+            if (candidate.scope !in options.scopesToLoad) return@forEach
             runCatching {
                 when (candidate.manifest.runtime) {
                     PiPluginRuntime.JVM -> {

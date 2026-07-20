@@ -22,14 +22,18 @@ import dev.xuexue.pi.coding.AgentSessionRuntime
 import dev.xuexue.pi.coding.AgentSessionRuntimeFactory
 import dev.xuexue.pi.coding.AgentSessionRuntimeResult
 import dev.xuexue.pi.coding.AgentSessionRuntimeServices
+import dev.xuexue.pi.coding.InteractionRequest
 import dev.xuexue.pi.coding.InteractionResponse
 import dev.xuexue.pi.coding.LocalBashExecutor
 import dev.xuexue.pi.coding.LocalSessionHtmlExporter
 import dev.xuexue.pi.coding.ScopedModel
 import dev.xuexue.pi.coding.exec.LocalPiCommandExecutor
+import dev.xuexue.pi.coding.extensions.PiExtensionContext
+import dev.xuexue.pi.coding.extensions.PiExtensionMode
 import dev.xuexue.pi.coding.extensions.PiExtensionRunner
 import dev.xuexue.pi.coding.extensions.PiPluginDiscovery
 import dev.xuexue.pi.coding.extensions.PiPluginDiscoveryOptions
+import dev.xuexue.pi.coding.extensions.PiPluginScope
 import dev.xuexue.pi.coding.extensions.SessionStartReason
 import dev.xuexue.pi.coding.packages.DefaultPiPackageManager
 import dev.xuexue.pi.coding.packages.PiPackageMissingAction
@@ -37,6 +41,10 @@ import dev.xuexue.pi.coding.resources.DefaultResourceLoader
 import dev.xuexue.pi.coding.resources.ResourceLoaderOptions
 import dev.xuexue.pi.coding.session.SessionManager
 import dev.xuexue.pi.coding.settings.SettingsManager
+import dev.xuexue.pi.coding.trust.ProjectTrustInteraction
+import dev.xuexue.pi.coding.trust.ProjectTrustResolutionOptions
+import dev.xuexue.pi.coding.trust.ProjectTrustStore
+import dev.xuexue.pi.coding.trust.resolveProjectTrusted
 import dev.xuexue.platform.AgentClient
 import dev.xuexue.platform.AgentMessage
 import dev.xuexue.platform.AgentProviderConfig
@@ -93,6 +101,9 @@ class WorkbenchAgentController(
             DesktopPiAgentAdapter(scope, client)
         }
     private var approvalDeferred: CompletableDeferred<AgentApprovalDecision>? = null
+    private var trustBootstrapCwd: String? = null
+    private var trustBootstrapSettings: SettingsManager? = null
+    private var trustBootstrapRunner: PiExtensionRunner? = null
 
     val canRestoreDeletedSession: Boolean get() = lastDeletedSession != null
 
@@ -356,8 +367,17 @@ class WorkbenchAgentController(
         persistTranscript()
         job =
             scope.launch {
+                val cwd = workspaceRoot()?.toString() ?: "."
+                val needsFormalSession = formalRuntime?.session?.sessionId != session.id
+                val trusted =
+                    if (needsFormalSession) {
+                        ensureProjectTrust(cwd, agentDirectory().toString())
+                    } else {
+                        runtime.workspaceTrusted
+                    }
+                if (!trusted) onStatus("Project resources are disabled until this workspace is trusted")
                 val attachedFiles = loadAttachedFiles()
-                val projectInstructions = loadProjectInstructions()
+                val projectInstructions = if (trusted) loadProjectInstructions() else emptyList()
                 val model = agentModel()
                 val systemPrompt = contextPrompt(attachedFiles, projectInstructions)
                 val formalSession = configureAgent(session, model, systemPrompt)
@@ -498,17 +518,14 @@ class WorkbenchAgentController(
         scopedModels: List<ScopedModel> = emptyList(),
     ): AgentSession {
         val cwd = sessionManager.getCwd()
-        val agentDirectory =
-            Path
-                .of(System.getProperty("user.home"), ".xuexue", "pi")
-                .toAbsolutePath()
-                .normalize()
+        val agentDirectory = agentDirectory()
         val settingsManager =
-            SettingsManager.create(
-                cwd = cwd,
-                agentDirectory = agentDirectory.toString(),
-                projectTrusted = runtime.workspaceTrusted,
-            )
+            trustBootstrapSettings?.takeIf { trustBootstrapCwd == cwd }
+                ?: SettingsManager.create(
+                    cwd = cwd,
+                    agentDirectory = agentDirectory.toString(),
+                    projectTrusted = runtime.workspaceTrusted,
+                )
         val packageManager =
             DefaultPiPackageManager(
                 cwd = cwd,
@@ -523,13 +540,24 @@ class WorkbenchAgentController(
                     cwd = cwd,
                     agentDirectory = agentDirectory.toString(),
                     settingsManager = settingsManager,
-                    projectTrusted = runtime.workspaceTrusted,
+                    projectTrusted = settingsManager.isProjectTrusted(),
                     additionalPaths = packageResolution.extensionPaths.map { it.path },
+                    scopesToLoad =
+                        if (trustBootstrapRunner == null) {
+                            PiPluginScope.entries.toSet()
+                        } else {
+                            setOf(PiPluginScope.PROJECT, PiPluginScope.TEMPORARY)
+                        },
                 ),
             )
         val discoveredPlugins = pluginDiscovery.loadAll()
-        val extensionRunner = PiExtensionRunner(cwd, commandExecutor = LocalPiCommandExecutor())
+        val extensionRunner =
+            trustBootstrapRunner
+                ?: PiExtensionRunner(cwd, commandExecutor = LocalPiCommandExecutor())
         discoveredPlugins.extensions.forEach { extension -> extensionRunner.load(extension) }
+        trustBootstrapCwd = null
+        trustBootstrapSettings = null
+        trustBootstrapRunner = null
         val resourceLoader =
             DefaultResourceLoader(
                 ResourceLoaderOptions(
@@ -569,6 +597,85 @@ class WorkbenchAgentController(
                 interactionPort = runtime.interactionBroker,
             ),
         )
+    }
+
+    private fun agentDirectory(): Path =
+        Path
+            .of(System.getProperty("user.home"), ".xuexue", "pi")
+            .toAbsolutePath()
+            .normalize()
+
+    private suspend fun ensureProjectTrust(
+        cwd: String,
+        agentDirectory: String,
+    ): Boolean {
+        if (!runtime.workspaceTrusted) {
+            trustBootstrapRunner?.dispose()
+            trustBootstrapCwd = null
+            trustBootstrapSettings = null
+            trustBootstrapRunner = null
+            return false
+        }
+        if (trustBootstrapCwd == cwd && trustBootstrapSettings != null && trustBootstrapRunner != null) return true
+
+        trustBootstrapRunner?.dispose()
+        val settingsManager = SettingsManager.create(cwd, agentDirectory, projectTrusted = false)
+        val discovered =
+            PiPluginDiscovery(
+                PiPluginDiscoveryOptions.fromSettings(
+                    cwd = cwd,
+                    agentDirectory = agentDirectory,
+                    settingsManager = settingsManager,
+                    projectTrusted = false,
+                    scopesToLoad = setOf(PiPluginScope.USER),
+                ),
+            ).loadAll()
+        val extensionRunner = PiExtensionRunner(cwd, commandExecutor = LocalPiCommandExecutor())
+        discovered.extensions.forEach { extension -> extensionRunner.load(extension) }
+        val trusted =
+            resolveProjectTrusted(
+                ProjectTrustResolutionOptions(
+                    cwd = cwd,
+                    trustStore = ProjectTrustStore.create(agentDirectory),
+                    defaultProjectTrust = settingsManager.getDefaultProjectTrust(),
+                    extensionRunner = extensionRunner,
+                    extensionContext =
+                        PiExtensionContext(
+                            cwd = cwd,
+                            mode = PiExtensionMode.RPC,
+                            isProjectTrusted = settingsManager::isProjectTrusted,
+                            interaction = runtime.interactionBroker,
+                        ),
+                    interaction =
+                        ProjectTrustInteraction { title, options ->
+                            val request =
+                                InteractionRequest.Select(
+                                    id = "project-trust-${System.nanoTime()}",
+                                    title = title,
+                                    message =
+                                        "Choose whether this workspace may load project resources and extensions.",
+                                    options = options,
+                                )
+                            when (val response = runtime.interactionBroker.request(request)) {
+                                is InteractionResponse.Select -> response.selectedIndex
+                                else -> null
+                            }
+                        },
+                ),
+            )
+        if (!trusted) {
+            extensionRunner.dispose()
+            runtime.workspaceTrusted = false
+            trustBootstrapCwd = null
+            trustBootstrapSettings = null
+            trustBootstrapRunner = null
+            return false
+        }
+        settingsManager.setProjectTrusted(true)
+        trustBootstrapCwd = cwd
+        trustBootstrapSettings = settingsManager
+        trustBootstrapRunner = extensionRunner
+        return true
     }
 
     private fun createFormalSessionManager(sessionId: String): SessionManager {
