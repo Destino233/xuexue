@@ -133,6 +133,57 @@ class DesktopPiCodingToolsTest {
         }
 
     @Test
+    fun findScopesNestedGitignoreRulesLikePiRegression3303() =
+        runTest {
+            root.resolve("a/deep").createDirectories()
+            root.resolve("b").createDirectories()
+            root.resolve("a/.gitignore").writeText("ignored.txt\n")
+            root.resolve("a/deep/.gitignore").writeText("secret.txt\n")
+            listOf(
+                "a/ignored.txt",
+                "a/kept.txt",
+                "a/deep/ignored.txt",
+                "a/deep/secret.txt",
+                "a/deep/kept.txt",
+                "b/ignored.txt",
+                "b/kept.txt",
+                "root.txt",
+            ).forEach { relative -> root.resolve(relative).writeText(relative) }
+
+            val result = execute("find", buildJsonObject { put("pattern", "**/*.txt") })
+            val output = assertIs<TextContent>(result.content.single()).text
+            assertEquals(
+                setOf("a/deep/kept.txt", "a/kept.txt", "b/ignored.txt", "b/kept.txt", "root.txt"),
+                output.lineSequence().filter(String::isNotBlank).toSet(),
+            )
+        }
+
+    @Test
+    fun findHonorsNegationAndNestedGitRepositoryBoundaries() =
+        runTest {
+            root.resolve(".git").createDirectories()
+            root.resolve("nested/.git").createDirectories()
+            root.resolve("nested").createDirectories()
+            root.resolve(".gitignore").writeText("*.generated\n!keep.generated\nrepo-hidden.txt\n")
+            root.resolve("drop.generated").writeText("drop")
+            root.resolve("keep.generated").writeText("keep")
+            root.resolve("nested/drop.generated").writeText("nested drop")
+            root.resolve("nested/keep.generated").writeText("nested keep")
+            root.resolve("repo-hidden.txt").writeText("hidden by parent repository")
+            root.resolve("nested/repo-hidden.txt").writeText("visible in nested repository")
+
+            val result = execute("find", buildJsonObject { put("pattern", "**") })
+            val output = assertIs<TextContent>(result.content.single()).text
+            assertContains(output, "keep.generated")
+            assertContains(output, "nested/keep.generated")
+            assertContains(output, "nested/repo-hidden.txt")
+            assertTrue(output.lineSequence().none { it == "drop.generated" })
+            assertContains(output, "nested/drop.generated")
+            assertTrue("\nrepo-hidden.txt" !in "\n$output")
+            assertTrue(".git/" !in output)
+        }
+
+    @Test
     fun grepSupportsLiteralContextAndSkipsBinaryFiles() =
         runTest {
             root.resolve("text.txt").writeText("before\nNeedle\nafter\n")

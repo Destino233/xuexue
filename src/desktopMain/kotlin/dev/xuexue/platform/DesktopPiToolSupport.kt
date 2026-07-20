@@ -10,9 +10,12 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.attribute.BasicFileAttributes
 import java.text.Normalizer
 
 private val UNICODE_SPACES = Regex("[\\u00A0\\u2000-\\u200A\\u202F\\u205F\\u3000]")
@@ -126,43 +129,91 @@ internal class PiIgnoreIndex(
     @Suppress("ReturnCount")
     fun ignores(path: Path): Boolean {
         if (path == root) return false
-        if (path.any { it.fileName.toString() in setOf(".git", "node_modules") }) return true
-        val repositoryRoot =
-            repositoryRoots
-                .filter { it != root && path.startsWith(it) }
-                .maxByOrNull(Path::getNameCount)
+        if (isAlwaysIgnored(path)) return true
+        val repositoryRoot = nestedRepositoryRoot(path)
         var ignored = false
         rules.forEach { rule ->
-            if (repositoryRoot != null && rule.scope != root && !rule.scope.startsWith(repositoryRoot)) return@forEach
+            if (!rule.appliesInside(repositoryRoot)) return@forEach
             if (rule.matches(path)) ignored = !rule.negated
         }
         return ignored
     }
 
+    /**
+     * An ignored directory can be skipped only when no applicable negation can re-include a child.
+     * This preserves Git's last-matching-rule behavior while avoiding needless walks of normal
+     * ignored trees.
+     */
+    fun shouldPrune(path: Path): Boolean =
+        when {
+            isAlwaysIgnored(path) -> {
+                true
+            }
+
+            !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS) || !ignores(path) -> {
+                false
+            }
+
+            else -> {
+                val repositoryRoot = nestedRepositoryRoot(path)
+                rules.none { rule -> rule.canReincludeDescendant(path, repositoryRoot) }
+            }
+        }
+
+    private fun isAlwaysIgnored(path: Path): Boolean = path.any(::isAlwaysIgnoredDirectoryName)
+
+    private fun isAlwaysIgnoredDirectoryName(pathPart: Path): Boolean {
+        val directoryName = pathPart.fileName.toString()
+        return directoryName in ALWAYS_IGNORED_DIRECTORY_NAMES
+    }
+
+    private fun nestedRepositoryRoot(path: Path): Path? =
+        repositoryRoots
+            .filter { path.startsWith(it) }
+            .maxByOrNull(Path::getNameCount)
+
     private fun load() {
         runCatching {
-            Files.walk(root).use { paths ->
-                paths.filter { Files.isDirectory(it, LinkOption.NOFOLLOW_LINKS) }.forEach { directory ->
-                    if (directory != root && Files.exists(directory.resolve(".git"), LinkOption.NOFOLLOW_LINKS)) {
-                        repositoryRoots.add(directory)
+            Files.walkFileTree(
+                root,
+                object : SimpleFileVisitor<Path>() {
+                    override fun preVisitDirectory(
+                        directory: Path,
+                        attributes: BasicFileAttributes,
+                    ): FileVisitResult {
+                        if (directory != root && directory.fileName.toString() in ALWAYS_IGNORED_DIRECTORY_NAMES) {
+                            return FileVisitResult.SKIP_SUBTREE
+                        }
+                        if (directory != root && Files.exists(directory.resolve(".git"), LinkOption.NOFOLLOW_LINKS)) {
+                            repositoryRoots.add(directory)
+                        }
+                        IgnoreSource.entries.forEach { source ->
+                            val ignoreFile = directory.resolve(source.fileName)
+                            if (Files.isRegularFile(ignoreFile, LinkOption.NOFOLLOW_LINKS)) {
+                                readRules(directory, ignoreFile, source)
+                            }
+                        }
+                        return FileVisitResult.CONTINUE
                     }
-                    listOf(".gitignore", ".ignore", ".fdignore").forEach { fileName ->
-                        val ignoreFile = directory.resolve(fileName)
-                        if (Files.isRegularFile(ignoreFile, LinkOption.NOFOLLOW_LINKS)) readRules(directory, ignoreFile)
-                    }
-                }
-            }
+
+                    override fun visitFileFailed(
+                        file: Path,
+                        exception: java.io.IOException,
+                    ): FileVisitResult = FileVisitResult.CONTINUE
+                },
+            )
         }
     }
 
     private fun readRules(
         scope: Path,
         file: Path,
+        source: IgnoreSource,
     ) {
         runCatching { Files.readString(file) }
             .getOrNull()
             ?.lineSequence()
-            ?.mapNotNull { line -> parseRule(scope, line) }
+            ?.mapNotNull { line -> parseRule(scope, line, source) }
             ?.forEach(rules::add)
     }
 
@@ -170,6 +221,7 @@ internal class PiIgnoreIndex(
     private fun parseRule(
         scope: Path,
         line: String,
+        source: IgnoreSource,
     ): IgnoreRule? {
         val trimmed = line.trim()
         if (trimmed.isEmpty() || (trimmed.startsWith('#') && !trimmed.startsWith("\\#"))) return null
@@ -182,24 +234,72 @@ internal class PiIgnoreIndex(
                 else -> pattern
             }
         pattern = pattern.replace("\\#", "#").trimEnd()
-        if (pattern.startsWith('/')) pattern = pattern.drop(1)
+        val anchored = pattern.startsWith('/')
+        if (anchored) pattern = pattern.drop(1)
         if (pattern.isEmpty()) return null
-        if (pattern.endsWith('/')) pattern += "**"
-        return IgnoreRule(scope, pattern, negated)
+        val directoryOnly = pattern.endsWith('/')
+        if (directoryOnly) pattern = pattern.dropLast(1)
+        if (pattern.isEmpty()) return null
+        return IgnoreRule(scope, pattern, negated, source, anchored, directoryOnly)
     }
 
     private data class IgnoreRule(
         val scope: Path,
         val pattern: String,
         val negated: Boolean,
+        val source: IgnoreSource,
+        val anchored: Boolean,
+        val directoryOnly: Boolean,
     ) {
         private val regex = compileGlob(pattern)
+        private val pathPattern = anchored || '/' in pattern
 
-        fun matches(path: Path): Boolean {
-            if (!path.startsWith(scope)) return false
-            val relative = scope.relativize(path).toPosixString()
-            return if (pattern.contains('/')) regex.matches(relative) else regex.matches(relative)
+        fun matches(path: Path): Boolean =
+            path
+                .takeIf { it.startsWith(scope) }
+                ?.let {
+                    val pathIsDirectory = Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)
+                    val parts =
+                        scope
+                            .relativize(path)
+                            .iterator()
+                            .asSequence()
+                            .map(Path::toString)
+                            .toList()
+                    parts.indices.any { index ->
+                        val relative = parts.take(index + 1).joinToString("/")
+                        val candidateIsDirectory = index < parts.lastIndex || pathIsDirectory
+                        (!directoryOnly || candidateIsDirectory) &&
+                            regex.matches(if (pathPattern) relative else parts[index])
+                    }
+                }
+                ?: false
+
+        fun appliesInside(repositoryRoot: Path?): Boolean {
+            val isParentGitIgnoreRule = source == IgnoreSource.GIT_IGNORE && repositoryRoot != null
+            val isRuleInsideNestedRepository = repositoryRoot?.let(scope::startsWith) == true
+            return !isParentGitIgnoreRule || isRuleInsideNestedRepository
         }
+
+        fun canReincludeDescendant(
+            path: Path,
+            repositoryRoot: Path?,
+        ): Boolean =
+            negated &&
+                appliesInside(repositoryRoot) &&
+                (path.startsWith(scope) || scope.startsWith(path))
+    }
+
+    private enum class IgnoreSource(
+        val fileName: String,
+    ) {
+        GIT_IGNORE(".gitignore"),
+        IGNORE(".ignore"),
+        FD_IGNORE(".fdignore"),
+    }
+
+    private companion object {
+        val ALWAYS_IGNORED_DIRECTORY_NAMES = setOf(".git", "node_modules")
     }
 }
 

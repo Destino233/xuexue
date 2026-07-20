@@ -37,9 +37,12 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import java.nio.charset.StandardCharsets
+import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.attribute.BasicFileAttributes
 import java.util.Base64
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
@@ -847,18 +850,49 @@ internal class DesktopPiCodingTools(
     ): List<Path> {
         val entries = mutableListOf<Path>()
         runCatching {
-            Files.walk(base).use { stream ->
-                stream.forEach { path ->
-                    if (signal?.isAborted == true || ignoreIndex.ignores(path)) return@forEach
-                    val isFileOrDirectory =
-                        Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) ||
-                            Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)
-                    if (path != base && isFileOrDirectory) {
-                        entries.add(path)
+            Files.walkFileTree(
+                base,
+                object : SimpleFileVisitor<Path>() {
+                    override fun preVisitDirectory(
+                        directory: Path,
+                        attributes: BasicFileAttributes,
+                    ): FileVisitResult =
+                        when {
+                            signal?.isAborted == true -> {
+                                FileVisitResult.TERMINATE
+                            }
+
+                            directory != base && ignoreIndex.ignores(directory) -> {
+                                if (ignoreIndex.shouldPrune(directory)) {
+                                    FileVisitResult.SKIP_SUBTREE
+                                } else {
+                                    FileVisitResult.CONTINUE
+                                }
+                            }
+
+                            else -> {
+                                if (directory != base) entries.add(directory)
+                                FileVisitResult.CONTINUE
+                            }
+                        }
+
+                    override fun visitFile(
+                        file: Path,
+                        attributes: BasicFileAttributes,
+                    ): FileVisitResult {
+                        if (signal?.isAborted == true) return FileVisitResult.TERMINATE
+                        if (!ignoreIndex.ignores(file)) entries.add(file)
+                        return FileVisitResult.CONTINUE
                     }
-                }
-            }
+
+                    override fun visitFileFailed(
+                        file: Path,
+                        exception: java.io.IOException,
+                    ): FileVisitResult = FileVisitResult.CONTINUE
+                },
+            )
         }
+        if (signal?.isAborted == true) error("Operation aborted")
         return entries
     }
 
