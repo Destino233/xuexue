@@ -391,6 +391,7 @@ class ProcessPiExtensionTest {
         }
 
     @Test
+    @Suppress("LongMethod")
     fun processPluginContextAndToolResultUseStructuredMessageWireFormat() =
         runTest {
             val directory = Files.createTempDirectory("xuexue-process-plugin-structured-events").toFile()

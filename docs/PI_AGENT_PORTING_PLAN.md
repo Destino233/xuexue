@@ -41,9 +41,9 @@ Headless Runtime 骨架，并开始由 XueXue Compose 作为正式宿主消费�
 | Agent Loop | `:pi-agent-core` 已复刻双层 Loop、完整事件、并行/顺序工具、两类队列、钩子和工具参数 schema 校验；`ToolExecution.kt` 固定 `prepare -> schema validation -> before hook -> execute` 顺序 | 原 Agent 核心测试已映射；仍依赖上层补齐 retry、compaction 和资源刷新；复杂 TypeBox-only schema 关键字仍待补齐 |
 | 工具 | `read/write/edit/bash/grep/find/ls` 已接入 `AgentSession`；共享 UTF-8 head/tail 截断、同路径文件修改队列、Bash cancel cleanup 和 RPC/Session Bash full-output 文件已补；`read` 已支持图片尺寸/Base64 限制、BMP 转 PNG 和长首行原路径 fallback；`write/edit` 已提供桌面 `fileDiff`/LCS unified patch details，Workbench projection 保留可读工具文案；`edit` 已保留 BOM/CRLF，支持 NFKC/智能引号/Unicode 空白/破折号/行尾空白 fuzzy matching、原始区间多编辑、重叠保护和 LCS unified diff；`grep/find/ls` 已覆盖 literal/context、二进制跳过、glob、层级 `.gitignore`、nested Git 边界、忽略否定和安全剪枝、dotfile/entry limit；桌面 Bash 已使用共享 UTF-8 流式 accumulator，支持 50KB/2000 行 tail、完整输出文件、初始/合并增量更新、timeout/abort 保留已收集输出和 descendants 回收；`DesktopPiCodingToolsTest` 当前 16 项、`PiBashOutputAccumulatorTest` 3 项通过 | 完整图片格式（Java ImageIO 不含 WebP）、detached process group 回收和全部 details 仍需逐项对齐 Pi；旧 `DesktopAgentTools` 路径仍需复用同一输出执行器 |
 | 会话 | `:pi-coding-agent` 已有 Pi v3 append-only tree/JSONL、`AgentSession`、retry 与手动/阈值/overflow compaction | branch summary、导入导出和原测试逐文件映射仍待补；`AgentSessionRuntime` 已提供统一 startup/new/resume/fork/shutdown 生命周期 |
-| 上下文 | 已有 Pi 系统提示构建器、ResourceLoader、父目录 AGENTS/CLAUDE 继承、SYSTEM/APPEND_SYSTEM、Skills 与模板发现；已补动态资源 metadata、ignore 规则、`AgentSession` 提示词重建和插件 hooks | 缺完整 YAML、package manager、JAR/Process loader、异步资源生命周期和 token 管理 |
+| 上下文 | 已有 Pi 系统提示构建器、ResourceLoader、父目录 AGENTS/CLAUDE 继承、SYSTEM/APPEND_SYSTEM、Skills 与模板发现；已补动态资源 metadata、ignore 规则、`AgentSession` 提示词重建和插件 hooks | 缺完整 YAML、package pattern/reload、异步资源生命周期和 token 管理 |
 | UI | Compose 已通过 `AgentSessionRuntime` 调用 prompt/steer/abort，收集正式 Runtime 运行态 StateFlow，并消费 Runtime 交互请求；旧 DTO/投影仍作为迁移兼容层，且已保留 thinking/tool call/tool result 的可检查投影 | 会话树和完整 structured message 投影尚未完全替换旧消息列表 |
-| 设置、扩展与包 | SettingsManager、Kotlin 扩展 API/Runner、JVM JAR/Process discovery、path/git/Maven 下载、资源贡献、ProjectTrustStore trust/offline/hash/staging、glob 资源选择和文件锁已接入 | Runtime 启动前的全局插件预加载/信任决策接线、完整 git 更新/回滚 fixture、package manifest/filter 全语义、Process image-provider wrapper、旧 classloader/资源完整释放仍待补 |
+| 设置、扩展与包 | SettingsManager、Kotlin 扩展 API/Runner、JVM JAR/Process discovery、path/git/Maven 下载、资源贡献、ProjectTrustStore trust/offline/hash/staging、glob 资源选择和文件锁已接入；`PiRuntimeBootstrap` 已统一全局插件预加载、`project_trust` 和受信后项目资源加载顺序 | 完整 git 更新/回滚 fixture、package manifest/filter 全语义、Process 超时后的请求隔离策略、旧 classloader/资源完整释放仍待补 |
 | SDK/RPC | `PiRpcCodec`、`AgentSessionRpcHandler`、`PiRpcServer` 已支持 JSONL command/response/event；prompt preflight 异步响应、steer/follow-up 图片、模型/会话/队列/compaction、Bash、带完整 `sourceInfo` 的命令查询、interaction response 和 Process 插件交互均已接入；`export_html` 已通过宿主能力导出安全静态 HTML；`cycle_model` 已支持 scoped 顺序、认证过滤、顺逆时针和显式 `data:null` | SDK/Compose/RPC 三宿主一致性测试和完整 Pi Markdown/highlight/theme fidelity 仍待补 |
 
 当前的 `PiAgentRuntime`、`AgentClient`、`WorkbenchAgentController` 和会话文件
@@ -283,9 +283,10 @@ Process 事件现在使用正式 AgentMessage wire codec，并支持 `project_tr
 同时新增 `ProjectTrustStore`/`ProjectTrustStorage`：以 `trust.json` 保存布尔决策，支持父目录
 继承、子目录清除、严格 JSON 校验、跨进程文件锁和原子写入；`resolveProjectTrusted()` 按
 override、项目资源门、扩展、持久化、默认策略、交互选择的顺序解析，Compose/RPC 可注入同一
-选择回调。下一步仍是把该解析放到 Runtime 创建前，使全局插件先参与 `project_trust`，再加载
-项目 settings/packages/extensions；此外还有安装进度、Process 请求超时后的强制宿主回收和
-package reload 资源生命周期。Process bridge 已使用独立 JSONL reader channel，支持 Provider
+选择回调。Desktop 公共 `PiRuntimeBootstrap` 现已在 Runtime 创建前完成该顺序：仅预加载 USER
+Process/JVM 插件（包括全局 packages 提供的扩展）参与 `project_trust`，信任成功后复用同一 Runner 加载项目 settings/packages/extensions，
+拒绝或异常时释放预加载 Runner；Workbench 已改用该公共路径。此外还有安装进度、Process 请求
+超时后与后续请求的隔离策略和 package reload 资源生命周期。Process bridge 已使用独立 JSONL reader channel，支持 Provider
 `timeoutMs`、取消 grace timeout 和无响应进程回收。JVM `exec` 已补齐 timeout/AbortSignal、
 部分输出、spawn 失败和进程树终止语义。
 

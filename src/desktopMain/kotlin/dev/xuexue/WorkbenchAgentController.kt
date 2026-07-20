@@ -27,10 +27,11 @@ import dev.xuexue.pi.coding.InteractionRequest
 import dev.xuexue.pi.coding.InteractionResponse
 import dev.xuexue.pi.coding.LocalBashExecutor
 import dev.xuexue.pi.coding.LocalSessionHtmlExporter
+import dev.xuexue.pi.coding.PiRuntimeBootstrap
+import dev.xuexue.pi.coding.PiRuntimeBootstrapOptions
+import dev.xuexue.pi.coding.PiRuntimeBootstrapResult
 import dev.xuexue.pi.coding.ScopedModel
 import dev.xuexue.pi.coding.exec.LocalPiCommandExecutor
-import dev.xuexue.pi.coding.extensions.PiExtensionContext
-import dev.xuexue.pi.coding.extensions.PiExtensionMode
 import dev.xuexue.pi.coding.extensions.PiExtensionRunner
 import dev.xuexue.pi.coding.extensions.PiPluginDiscovery
 import dev.xuexue.pi.coding.extensions.PiPluginDiscoveryOptions
@@ -38,14 +39,12 @@ import dev.xuexue.pi.coding.extensions.PiPluginScope
 import dev.xuexue.pi.coding.extensions.SessionStartReason
 import dev.xuexue.pi.coding.packages.DefaultPiPackageManager
 import dev.xuexue.pi.coding.packages.PiPackageMissingAction
+import dev.xuexue.pi.coding.packages.PiPackageScope
 import dev.xuexue.pi.coding.resources.DefaultResourceLoader
 import dev.xuexue.pi.coding.resources.ResourceLoaderOptions
 import dev.xuexue.pi.coding.session.SessionManager
 import dev.xuexue.pi.coding.settings.SettingsManager
 import dev.xuexue.pi.coding.trust.ProjectTrustInteraction
-import dev.xuexue.pi.coding.trust.ProjectTrustResolutionOptions
-import dev.xuexue.pi.coding.trust.ProjectTrustStore
-import dev.xuexue.pi.coding.trust.resolveProjectTrusted
 import dev.xuexue.platform.AgentClient
 import dev.xuexue.platform.AgentMessage
 import dev.xuexue.platform.AgentProviderConfig
@@ -104,8 +103,7 @@ class WorkbenchAgentController(
         }
     private var approvalDeferred: CompletableDeferred<AgentApprovalDecision>? = null
     private var trustBootstrapCwd: String? = null
-    private var trustBootstrapSettings: SettingsManager? = null
-    private var trustBootstrapRunner: PiExtensionRunner? = null
+    private var trustBootstrap: PiRuntimeBootstrapResult? = null
 
     val canRestoreDeletedSession: Boolean get() = lastDeletedSession != null
 
@@ -520,53 +518,35 @@ class WorkbenchAgentController(
     ): AgentSession {
         val cwd = sessionManager.getCwd()
         val agentDirectory = agentDirectory()
+        val prepared = trustBootstrap?.takeIf { trustBootstrapCwd == cwd }
         val settingsManager =
-            trustBootstrapSettings?.takeIf { trustBootstrapCwd == cwd }
+            prepared?.settingsManager
                 ?: SettingsManager.create(
                     cwd = cwd,
                     agentDirectory = agentDirectory.toString(),
                     projectTrusted = runtime.workspaceTrusted,
                 )
         val packageManager =
-            DefaultPiPackageManager(
-                cwd = cwd,
-                agentDirectory = agentDirectory.toString(),
-                settingsManager = settingsManager,
-            )
-        val packageResolution =
-            packageManager.resolve { PiPackageMissingAction.SKIP }
-        val pluginDiscovery =
-            PiPluginDiscovery(
-                PiPluginDiscoveryOptions.fromSettings(
+            prepared?.packageManager
+                ?: DefaultPiPackageManager(
                     cwd = cwd,
                     agentDirectory = agentDirectory.toString(),
                     settingsManager = settingsManager,
-                    projectTrusted = settingsManager.isProjectTrusted(),
-                    additionalPaths = packageResolution.extensionPaths.map { it.path },
-                    scopesToLoad =
-                        if (trustBootstrapRunner == null) {
-                            PiPluginScope.entries.toSet()
-                        } else {
-                            setOf(PiPluginScope.PROJECT, PiPluginScope.TEMPORARY)
-                        },
-                ),
-            )
-        val discoveredPlugins = pluginDiscovery.loadAll()
+                )
         val extensionRunner =
-            trustBootstrapRunner
-                ?: PiExtensionRunner(cwd, commandExecutor = LocalPiCommandExecutor())
-        discoveredPlugins.extensions.forEach { extension -> extensionRunner.load(extension) }
-        trustBootstrapCwd = null
-        trustBootstrapSettings = null
-        trustBootstrapRunner = null
+            prepared?.extensionRunner
+                ?: loadSessionExtensions(cwd, agentDirectory.toString(), settingsManager, packageManager)
         val resourceLoader =
-            DefaultResourceLoader(
-                ResourceLoaderOptions(
-                    cwd = cwd,
-                    agentDirectory = agentDirectory.toString(),
-                    settingsManager = settingsManager,
-                ),
-            )
+            prepared?.resourceLoader
+                ?: DefaultResourceLoader(
+                    ResourceLoaderOptions(
+                        cwd = cwd,
+                        agentDirectory = agentDirectory.toString(),
+                        settingsManager = settingsManager,
+                    ),
+                )
+        trustBootstrapCwd = null
+        trustBootstrap = null
         val agent =
             Agent(
                 AgentOptions(
@@ -600,6 +580,40 @@ class WorkbenchAgentController(
         )
     }
 
+    private suspend fun loadSessionExtensions(
+        cwd: String,
+        agentDirectory: String,
+        settingsManager: SettingsManager,
+        packageManager: DefaultPiPackageManager,
+    ): PiExtensionRunner {
+        val packageResolution = packageManager.resolve { PiPackageMissingAction.SKIP }
+        val discoveredPlugins =
+            PiPluginDiscovery(
+                PiPluginDiscoveryOptions.fromSettings(
+                    cwd = cwd,
+                    agentDirectory = agentDirectory,
+                    settingsManager = settingsManager,
+                    projectTrusted = settingsManager.isProjectTrusted(),
+                    additionalPaths =
+                        packageResolution.extensionPaths
+                            .filter { it.scope == PiPackageScope.TEMPORARY }
+                            .map { it.path },
+                    additionalUserPaths =
+                        packageResolution.extensionPaths
+                            .filter { it.scope == PiPackageScope.USER }
+                            .map { it.path },
+                    additionalProjectPaths =
+                        packageResolution.extensionPaths
+                            .filter { it.scope == PiPackageScope.PROJECT }
+                            .map { it.path },
+                    scopesToLoad = PiPluginScope.entries.toSet(),
+                ),
+            ).loadAll()
+        val extensionRunner = PiExtensionRunner(cwd, commandExecutor = LocalPiCommandExecutor())
+        discoveredPlugins.extensions.forEach { extension -> extensionRunner.load(extension) }
+        return extensionRunner
+    }
+
     private fun agentDirectory(): Path =
         Path
             .of(System.getProperty("user.home"), ".xuexue", "pi")
@@ -611,42 +625,21 @@ class WorkbenchAgentController(
         agentDirectory: String,
     ): Boolean {
         if (!runtime.workspaceTrusted) {
-            trustBootstrapRunner?.dispose()
+            trustBootstrap?.extensionRunner?.dispose()
             trustBootstrapCwd = null
-            trustBootstrapSettings = null
-            trustBootstrapRunner = null
+            trustBootstrap = null
             return false
         }
-        if (trustBootstrapCwd == cwd && trustBootstrapSettings != null && trustBootstrapRunner != null) return true
+        if (trustBootstrapCwd == cwd && trustBootstrap != null) return true
 
-        trustBootstrapRunner?.dispose()
-        val settingsManager = SettingsManager.create(cwd, agentDirectory, projectTrusted = false)
-        val discovered =
-            PiPluginDiscovery(
-                PiPluginDiscoveryOptions.fromSettings(
+        trustBootstrap?.extensionRunner?.dispose()
+        val prepared =
+            PiRuntimeBootstrap(
+                PiRuntimeBootstrapOptions(
                     cwd = cwd,
                     agentDirectory = agentDirectory,
-                    settingsManager = settingsManager,
-                    projectTrusted = false,
-                    scopesToLoad = setOf(PiPluginScope.USER),
-                ),
-            ).loadAll()
-        val extensionRunner = PiExtensionRunner(cwd, commandExecutor = LocalPiCommandExecutor())
-        discovered.extensions.forEach { extension -> extensionRunner.load(extension) }
-        val trusted =
-            resolveProjectTrusted(
-                ProjectTrustResolutionOptions(
-                    cwd = cwd,
-                    trustStore = ProjectTrustStore.create(agentDirectory),
-                    defaultProjectTrust = settingsManager.getDefaultProjectTrust(),
-                    extensionRunner = extensionRunner,
-                    extensionContext =
-                        PiExtensionContext(
-                            cwd = cwd,
-                            mode = PiExtensionMode.RPC,
-                            isProjectTrusted = settingsManager::isProjectTrusted,
-                            interaction = runtime.interactionBroker,
-                        ),
+                    interactionPort = runtime.interactionBroker,
+                    commandExecutor = LocalPiCommandExecutor(),
                     interaction =
                         ProjectTrustInteraction { title, options ->
                             val request =
@@ -663,19 +656,15 @@ class WorkbenchAgentController(
                             }
                         },
                 ),
-            )
-        if (!trusted) {
-            extensionRunner.dispose()
+            ).prepare()
+        if (prepared == null) {
             runtime.workspaceTrusted = false
             trustBootstrapCwd = null
-            trustBootstrapSettings = null
-            trustBootstrapRunner = null
+            trustBootstrap = null
             return false
         }
-        settingsManager.setProjectTrusted(true)
         trustBootstrapCwd = cwd
-        trustBootstrapSettings = settingsManager
-        trustBootstrapRunner = extensionRunner
+        trustBootstrap = prepared
         return true
     }
 

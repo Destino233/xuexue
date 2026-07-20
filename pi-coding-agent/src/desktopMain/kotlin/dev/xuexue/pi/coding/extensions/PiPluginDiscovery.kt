@@ -39,6 +39,8 @@ data class PiPluginDiscoveryOptions(
     val configuredUserPaths: List<String> = emptyList(),
     val configuredProjectPaths: List<String> = emptyList(),
     val additionalPaths: List<String> = emptyList(),
+    val additionalUserPaths: List<String> = emptyList(),
+    val additionalProjectPaths: List<String> = emptyList(),
     val scopesToLoad: Set<PiPluginScope> = PiPluginScope.entries.toSet(),
 ) {
     companion object {
@@ -48,6 +50,8 @@ data class PiPluginDiscoveryOptions(
             settingsManager: SettingsManager,
             projectTrusted: Boolean = settingsManager.isProjectTrusted(),
             additionalPaths: List<String> = emptyList(),
+            additionalUserPaths: List<String> = emptyList(),
+            additionalProjectPaths: List<String> = emptyList(),
             scopesToLoad: Set<PiPluginScope> = PiPluginScope.entries.toSet(),
         ): PiPluginDiscoveryOptions =
             PiPluginDiscoveryOptions(
@@ -57,6 +61,8 @@ data class PiPluginDiscoveryOptions(
                 configuredUserPaths = settingsManager.getGlobalExtensionPaths(),
                 configuredProjectPaths = settingsManager.getProjectExtensionPaths(),
                 additionalPaths = additionalPaths,
+                additionalUserPaths = additionalUserPaths,
+                additionalProjectPaths = additionalProjectPaths,
                 scopesToLoad = scopesToLoad,
             )
     }
@@ -75,6 +81,8 @@ class PiPluginDiscovery(
                 userRoot to PiPluginScope.USER,
             ) + options.configuredProjectPaths.map { resolveConfiguredPath(it) to PiPluginScope.PROJECT } +
                 options.configuredUserPaths.map { resolveConfiguredPath(it) to PiPluginScope.USER } +
+                options.additionalProjectPaths.map { resolveConfiguredPath(it) to PiPluginScope.PROJECT } +
+                options.additionalUserPaths.map { resolveConfiguredPath(it) to PiPluginScope.USER } +
                 options.additionalPaths.map { resolveConfiguredPath(it) to PiPluginScope.TEMPORARY }
         val candidates = mutableListOf<PiPluginCandidate>()
         val errors = mutableListOf<PiPluginLoadError>()
@@ -152,6 +160,10 @@ class PiPluginDiscovery(
                     listOf(root)
                 }
 
+                hasPluginManifest(root) -> {
+                    listOf(root)
+                }
+
                 else -> {
                     root
                         .listFiles()
@@ -166,6 +178,12 @@ class PiPluginDiscovery(
             if (seen.add(canonicalPath)) candidates += candidate
         }
     }
+
+    private fun hasPluginManifest(
+        directory: File,
+    ): Boolean =
+        File(directory, PI_PLUGIN_MANIFEST_PATH).isFile ||
+            File(directory, "xuexue-pi-plugin.json").isFile
 
     private fun readCandidate(
         file: File,
