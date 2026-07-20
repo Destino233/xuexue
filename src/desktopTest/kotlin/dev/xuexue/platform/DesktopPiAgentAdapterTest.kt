@@ -14,10 +14,15 @@ import dev.xuexue.pi.agent.AgentToolUpdateCallback
 import dev.xuexue.pi.ai.AbortController
 import dev.xuexue.pi.ai.AssistantMessage
 import dev.xuexue.pi.ai.AssistantMessageEvent
+import dev.xuexue.pi.ai.AssistantMessageEventStream
+import dev.xuexue.pi.ai.AuthCredential
 import dev.xuexue.pi.ai.Context
+import dev.xuexue.pi.ai.InMemoryAuthStore
 import dev.xuexue.pi.ai.Model
 import dev.xuexue.pi.ai.ModelCost
 import dev.xuexue.pi.ai.ModelInput
+import dev.xuexue.pi.ai.PiProvider
+import dev.xuexue.pi.ai.ProviderRegistry
 import dev.xuexue.pi.ai.SimpleStreamOptions
 import dev.xuexue.pi.ai.StopReason
 import dev.xuexue.pi.ai.StreamOptions
@@ -29,6 +34,7 @@ import dev.xuexue.pi.ai.Usage
 import dev.xuexue.pi.ai.UsageCost
 import dev.xuexue.pi.ai.UserMessage
 import dev.xuexue.pi.ai.UserText
+import dev.xuexue.pi.ai.createAssistantMessageEventStream
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
@@ -44,6 +50,41 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class DesktopPiAgentAdapterTest {
+    @Test
+    fun dispatchesExtensionProviderThroughRegistryAndUsesAuthStore() =
+        runTest {
+            val provider = RecordingPiProvider()
+            val registry = ProviderRegistry(emptyList()).withAdditionalProviders(listOf(provider))
+            val authStore = InMemoryAuthStore(initial = mapOf(provider.id to AuthCredential.ApiKey("stored-key")))
+            val function = DesktopPiAgentAdapter(this, registry, authStore)
+
+            val events =
+                function
+                    .stream(
+                        model().copy(
+                            id = "extension-model",
+                            api = PROVIDER_API,
+                            provider = provider.id,
+                        ),
+                        Context(messages = listOf(UserMessage(UserText("hello"), timestamp = 1))),
+                        SimpleStreamOptions(),
+                    ).asFlow()
+                    .toList()
+
+            assertEquals("stored-key", provider.apiKey)
+            assertEquals("hello", provider.prompt)
+            assertTrue(events.first() is AssistantMessageEvent.Start)
+            assertEquals(
+                "from-extension",
+                (events.last() as AssistantMessageEvent.Done)
+                    .message
+                    .content
+                    .filterIsInstance<TextContent>()
+                    .single()
+                    .text,
+            )
+        }
+
     @Test
     fun convertsLegacyStreamingResponseToPiEvents() =
         runTest {
@@ -202,6 +243,41 @@ class DesktopPiAgentAdapterTest {
             contextWindow = 8_192,
             maxTokens = 2_048,
         )
+
+    private class RecordingPiProvider : PiProvider {
+        override val id: String = "extension-provider"
+        override val name: String = "Extension provider"
+        override val supportedApis: Set<String> = setOf(PROVIDER_API)
+        var apiKey: String? = null
+        var prompt: String? = null
+
+        override suspend fun stream(
+            model: Model,
+            context: Context,
+            options: SimpleStreamOptions,
+        ): AssistantMessageEventStream {
+            apiKey = options.stream.apiKey
+            prompt = (context.messages.single() as UserMessage).content.let { it as UserText }.value
+            val message =
+                AssistantMessage(
+                    content = listOf(TextContent("from-extension")),
+                    api = model.api,
+                    provider = model.provider,
+                    model = model.id,
+                    usage = Usage(0, 0, 0, 0, totalTokens = 0, cost = UsageCost(0.0, 0.0, 0.0, 0.0, 0.0)),
+                    stopReason = StopReason.STOP,
+                    timestamp = 1,
+                )
+            return createAssistantMessageEventStream().also {
+                it.push(AssistantMessageEvent.Start(message))
+                it.push(AssistantMessageEvent.Done(dev.xuexue.pi.ai.SuccessfulStopReason.STOP, message))
+            }
+        }
+    }
+
+    private companion object {
+        const val PROVIDER_API = "extension-api"
+    }
 
     private class RecordingClient : AgentClient {
         var messages = emptyList<PiAgentMessage>()

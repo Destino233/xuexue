@@ -14,10 +14,12 @@ import dev.xuexue.pi.ai.AssistantContent
 import dev.xuexue.pi.ai.AssistantMessage
 import dev.xuexue.pi.ai.AssistantMessageEvent
 import dev.xuexue.pi.ai.AssistantMessageEventStream
+import dev.xuexue.pi.ai.AuthStore
 import dev.xuexue.pi.ai.Context
 import dev.xuexue.pi.ai.FailureStopReason
 import dev.xuexue.pi.ai.Message
 import dev.xuexue.pi.ai.Model
+import dev.xuexue.pi.ai.ProviderRegistry
 import dev.xuexue.pi.ai.SimpleStreamOptions
 import dev.xuexue.pi.ai.StopReason
 import dev.xuexue.pi.ai.SuccessfulStopReason
@@ -43,53 +45,80 @@ import kotlinx.serialization.json.put
 import kotlin.time.Clock
 import dev.xuexue.pi.ai.AgentMessage as CoreAgentMessage
 
-class DesktopPiAgentAdapter(
+class DesktopPiAgentAdapter private constructor(
     private val scope: CoroutineScope,
-    private val client: AgentClient,
+    private val client: AgentClient?,
+    private val providerRegistry: ProviderRegistry?,
+    private val authStore: AuthStore?,
 ) : StreamFunction {
+    constructor(
+        scope: CoroutineScope,
+        client: AgentClient,
+    ) : this(scope, client, null, null)
+
+    constructor(
+        scope: CoroutineScope,
+        providerRegistry: ProviderRegistry,
+        authStore: AuthStore? = null,
+    ) : this(scope, null, providerRegistry, authStore)
+
     @Suppress("TooGenericExceptionCaught")
     override suspend fun stream(
         model: Model,
         context: Context,
         options: SimpleStreamOptions,
     ): AssistantMessageEventStream {
+        providerRegistry?.let { registry ->
+            val apiKey =
+                options.stream.apiKey
+                    ?: authStore?.getApiKey(
+                        provider = model.provider,
+                        includeFallback = true,
+                        environment = options.stream.env.orEmpty(),
+                    )
+            return registry.stream(
+                model,
+                context,
+                options.copy(stream = options.stream.copy(apiKey = apiKey)),
+            )
+        }
+        val legacyClient = requireNotNull(client) { "No legacy AgentClient configured" }
         val stream = createAssistantMessageEventStream()
         val projection = StreamingAssistantProjection(model)
         stream.push(AssistantMessageEvent.Start(projection.partial()))
         val signal = options.stream.signal
         if (signal?.isAborted == true) {
             stream.push(projection.failure(aborted = true, message = "Operation aborted"))
-            return stream
-        }
-
-        val job =
-            scope.launch(start = CoroutineStart.LAZY) {
-                try {
-                    val response =
-                        client.complete(
-                            messages = context.toLegacyMessages(),
-                            tools =
-                                context.tools.orEmpty().map { tool ->
-                                    PiToolDefinition(tool.name, tool.description, tool.parameters)
-                                },
-                            config =
-                                AgentProviderConfig(
-                                    endpoint = model.baseUrl,
-                                    model = model.id,
-                                    apiKey = options.stream.apiKey.orEmpty(),
-                                ),
-                            onEvent = { event -> projection.consume(event).forEach(stream::push) },
-                        )
-                    projection.complete(response).forEach(stream::push)
-                } catch (error: CancellationException) {
-                    stream.push(projection.failure(aborted = true, message = error.message ?: "Operation aborted"))
-                } catch (error: Exception) {
-                    stream.push(projection.failure(aborted = false, message = error.message ?: error.toString()))
+        } else {
+            val job =
+                scope.launch(start = CoroutineStart.LAZY) {
+                    try {
+                        val response =
+                            legacyClient.complete(
+                                messages = context.toLegacyMessages(),
+                                tools =
+                                    context.tools.orEmpty().map { tool ->
+                                        PiToolDefinition(tool.name, tool.description, tool.parameters)
+                                    },
+                                config =
+                                    AgentProviderConfig(
+                                        endpoint = model.baseUrl,
+                                        model = model.id,
+                                        apiKey = options.stream.apiKey.orEmpty(),
+                                    ),
+                                onEvent = { event -> projection.consume(event).forEach(stream::push) },
+                            )
+                        projection.complete(response).forEach(stream::push)
+                    } catch (error: CancellationException) {
+                        stream.push(projection.failure(aborted = true, message = error.message ?: "Operation aborted"))
+                    } catch (error: Exception) {
+                        stream.push(projection.failure(aborted = false, message = error.message ?: error.toString()))
+                    }
                 }
-            }
-        val subscription = signal?.onAbort(job::cancel)
-        job.invokeOnCompletion { subscription?.dispose() }
-        if (signal?.isAborted == true) job.cancel() else job.start()
+            val subscription = signal?.onAbort(job::cancel)
+            job.invokeOnCompletion { subscription?.dispose() }
+            if (signal?.isAborted == true) job.cancel() else job.start()
+        }
         return stream
     }
 }

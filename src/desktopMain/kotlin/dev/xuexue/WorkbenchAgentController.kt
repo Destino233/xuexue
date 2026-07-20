@@ -1,3 +1,5 @@
+@file:Suppress("LongParameterList", "UnusedPrivateProperty")
+
 package dev.xuexue
 
 import dev.xuexue.core.AgentApprovalDecision
@@ -5,14 +7,41 @@ import dev.xuexue.core.AgentApprovalRequest
 import dev.xuexue.core.AgentSendAvailability
 import dev.xuexue.core.DocumentKind
 import dev.xuexue.core.requiresExplicitApproval
+import dev.xuexue.pi.agent.Agent
+import dev.xuexue.pi.agent.AgentInitialState
+import dev.xuexue.pi.agent.AgentOptions
 import dev.xuexue.pi.ai.Model
 import dev.xuexue.pi.ai.ModelCost
 import dev.xuexue.pi.ai.ModelInput
+import dev.xuexue.pi.ai.ModelRegistry
+import dev.xuexue.pi.ai.ProviderRegistry
+import dev.xuexue.pi.ai.defaultProviderRegistry
+import dev.xuexue.pi.coding.AgentSession
+import dev.xuexue.pi.coding.AgentSessionConfig
+import dev.xuexue.pi.coding.AgentSessionRuntime
+import dev.xuexue.pi.coding.AgentSessionRuntimeFactory
+import dev.xuexue.pi.coding.AgentSessionRuntimeResult
+import dev.xuexue.pi.coding.AgentSessionRuntimeServices
+import dev.xuexue.pi.coding.InteractionResponse
+import dev.xuexue.pi.coding.LocalBashExecutor
+import dev.xuexue.pi.coding.LocalSessionHtmlExporter
+import dev.xuexue.pi.coding.ScopedModel
+import dev.xuexue.pi.coding.extensions.PiExtensionRunner
+import dev.xuexue.pi.coding.extensions.PiPluginDiscovery
+import dev.xuexue.pi.coding.extensions.PiPluginDiscoveryOptions
+import dev.xuexue.pi.coding.extensions.SessionStartReason
+import dev.xuexue.pi.coding.packages.DefaultPiPackageManager
+import dev.xuexue.pi.coding.packages.PiPackageMissingAction
+import dev.xuexue.pi.coding.resources.DefaultResourceLoader
+import dev.xuexue.pi.coding.resources.ResourceLoaderOptions
+import dev.xuexue.pi.coding.session.SessionManager
+import dev.xuexue.pi.coding.settings.SettingsManager
 import dev.xuexue.platform.AgentClient
 import dev.xuexue.platform.AgentMessage
 import dev.xuexue.platform.AgentProviderConfig
 import dev.xuexue.platform.DesktopAgentTools
 import dev.xuexue.platform.DesktopPiAgentAdapter
+import dev.xuexue.platform.OpenAiCompatibleAgentClient
 import dev.xuexue.platform.WorkspaceService
 import dev.xuexue.platform.adaptDesktopAgentTools
 import dev.xuexue.platform.agentMessagesToLegacyProtocol
@@ -43,6 +72,7 @@ class WorkbenchAgentController(
     private val onStatus: (String) -> Unit,
     private val onFileMessage: (String) -> Unit,
     private val persistWorkbench: () -> Unit,
+    private val providerRegistry: ProviderRegistry = defaultProviderRegistry(),
 ) {
     private val json =
         Json {
@@ -52,8 +82,15 @@ class WorkbenchAgentController(
     private var job: Job? = null
     private var runId = 0
     private var lastDeletedSession: AgentSessionState? = null
-    private val piAgent = runtime.piAgent
-    private val streamFunction = DesktopPiAgentAdapter(scope, client)
+    private var formalRuntime: AgentSessionRuntime? = null
+    private val piAgent: Agent
+        get() = formalRuntime?.session?.agent ?: runtime.piAgent
+    private val streamFunction =
+        if (client is OpenAiCompatibleAgentClient) {
+            DesktopPiAgentAdapter(scope, providerRegistry)
+        } else {
+            DesktopPiAgentAdapter(scope, client)
+        }
     private var approvalDeferred: CompletableDeferred<AgentApprovalDecision>? = null
 
     val canRestoreDeletedSession: Boolean get() = lastDeletedSession != null
@@ -68,7 +105,7 @@ class WorkbenchAgentController(
         runtime.agentInput = ""
         if (piAgent.currentState.isStreaming) {
             runtime.agentMessages += AgentMessage("steering_queued", prompt)
-            piAgent.steer(coreUserMessage(prompt))
+            formalRuntime?.session?.steer(prompt) ?: piAgent.steer(coreUserMessage(prompt))
             onStatus("Steering queued")
             persistTranscript()
             return
@@ -80,7 +117,8 @@ class WorkbenchAgentController(
     fun stop() {
         runId++
         piAgent.abort()
-        piAgent.clearAllQueues()
+        formalRuntime?.session?.clearQueue() ?: piAgent.clearAllQueues()
+        runtime.interactionBroker.cancelAll("agent stopped")
         runtime.stop()
         approvalDeferred?.complete(AgentApprovalDecision.DENY)
         approvalDeferred = null
@@ -102,6 +140,8 @@ class WorkbenchAgentController(
         onStatus("Agent is waiting for approval")
         return true
     }
+
+    fun respondInteraction(response: InteractionResponse): Boolean = runtime.respondAgentInteraction(response)
 
     fun decideApproval(decision: AgentApprovalDecision) {
         runtime.applyApprovalDecision(decision) ?: return
@@ -134,6 +174,7 @@ class WorkbenchAgentController(
 
     fun newSession() {
         if (piAgent.currentState.isStreaming) stop()
+        resetFormalRuntime()
         runtime.newSession()
         persistTranscript()
         persistWorkbench()
@@ -173,6 +214,7 @@ class WorkbenchAgentController(
     fun selectSession(id: String) {
         if (id == runtime.activeAgentSessionId || runtime.agentSessions.none { it.id == id }) return
         if (piAgent.currentState.isStreaming) stop()
+        resetFormalRuntime()
         if (!runtime.selectSession(id)) return
         persistTranscript()
         persistWorkbench()
@@ -188,6 +230,7 @@ class WorkbenchAgentController(
 
     fun cloneSession(fork: Boolean) {
         if (piAgent.currentState.isStreaming) stop()
+        resetFormalRuntime()
         runtime.cloneSession(fork)
         persistTranscript()
         persistWorkbench()
@@ -195,7 +238,10 @@ class WorkbenchAgentController(
 
     fun deleteSession(id: String) {
         if (runtime.agentSessions.none { it.id == id }) return
-        if (piAgent.currentState.isStreaming && id == runtime.activeAgentSessionId) stop()
+        if (id == runtime.activeAgentSessionId) {
+            if (piAgent.currentState.isStreaming) stop()
+            resetFormalRuntime()
+        }
         runtime.removeSession(id)?.let { session ->
             lastDeletedSession = session
             onFileMessage("Agent session deleted")
@@ -312,10 +358,13 @@ class WorkbenchAgentController(
                 val attachedFiles = loadAttachedFiles()
                 val projectInstructions = loadProjectInstructions()
                 val model = agentModel()
-                configureAgent(session, model, contextPrompt(attachedFiles, projectInstructions))
+                val systemPrompt = contextPrompt(attachedFiles, projectInstructions)
+                val formalSession = configureAgent(session, model, systemPrompt)
+                formalRuntime?.start(SessionStartReason.STARTUP)
+                formalSession.agent.setSystemPrompt(systemPrompt)
                 val projection = WorkbenchAgentProjection(session, assistantId)
-                val subscription = piAgent.subscribe { event, _ -> projection.apply(event) }
-                runCatching { piAgent.prompt(coreUserMessage(prompt)) }.onFailure { throwable ->
+                val subscription = formalSession.subscribe { event -> projection.apply(event) }
+                runCatching { formalSession.prompt(prompt) }.onFailure { throwable ->
                     if (throwable !is CancellationException) {
                         val index = sessionMessages.indexOfFirst { it.streamId == assistantId }
                         val failure =
@@ -330,7 +379,7 @@ class WorkbenchAgentController(
                 }
                 subscription.dispose()
                 session.protocolMessages.clear()
-                session.protocolMessages += agentMessagesToLegacyProtocol(piAgent.currentState.messages)
+                session.protocolMessages += agentMessagesToLegacyProtocol(formalSession.messages)
                 if (runId == currentRunId) {
                     runtime.agentRunning = false
                     persistTranscript()
@@ -361,20 +410,189 @@ class WorkbenchAgentController(
             }
         }.joinToString("\n\n")
 
-    private fun configureAgent(
+    private suspend fun configureAgent(
         session: AgentSessionState,
         model: Model,
         systemPrompt: String,
-    ) {
+    ): AgentSession {
         val tools = DesktopAgentTools(workspaceService, workspaceRoot, ::authorizeTool, Dispatchers.IO).all()
-        piAgent.setSystemPrompt(systemPrompt)
-        piAgent.setModel(model)
-        piAgent.setTools(adaptDesktopAgentTools(tools))
-        piAgent.replaceMessages(legacyProtocolToAgentMessages(session.protocolMessages.takeLast(80), model))
-        piAgent.streamFunction = streamFunction
-        piAgent.getApiKey = { runtime.agentApiKey }
-        piAgent.afterToolCall = { context, _ -> desktopToolAfterCall(context) }
-        piAgent.sessionId = session.id
+        val adaptedTools = adaptDesktopAgentTools(tools)
+        val current = formalRuntime?.session
+        if (current == null || current.sessionId != session.id) {
+            resetFormalRuntime()
+            val sessionManager = createFormalSessionManager(session.id)
+            val initialSession =
+                createFormalSession(
+                    session = session,
+                    model = model,
+                    systemPrompt = systemPrompt,
+                    tools = adaptedTools,
+                    sessionManager = sessionManager,
+                )
+            formalRuntime =
+                AgentSessionRuntime(
+                    initial =
+                        AgentSessionRuntimeResult(
+                            session = initialSession,
+                            services =
+                                AgentSessionRuntimeServices(
+                                    cwd = sessionManager.getCwd(),
+                                    agentDirectory = workspaceRoot()?.resolve(".xuexue/pi")?.toString().orEmpty(),
+                                ),
+                        ),
+                    factory =
+                        AgentSessionRuntimeFactory { options ->
+                            val nextSession =
+                                createFormalSession(
+                                    session = session,
+                                    model = agentModel(),
+                                    systemPrompt = systemPrompt,
+                                    tools = adaptedTools,
+                                    sessionManager = options.sessionManager,
+                                    modelRegistry = options.modelRegistry,
+                                    scopedModels = options.scopedModels,
+                                )
+                            AgentSessionRuntimeResult(
+                                session = nextSession,
+                                services =
+                                    AgentSessionRuntimeServices(
+                                        cwd = options.cwd,
+                                        agentDirectory = options.agentDirectory,
+                                    ),
+                            )
+                        },
+                )
+            if (client is OpenAiCompatibleAgentClient) runtime.bindFormalRuntime(formalRuntime, scope)
+        }
+        val formalSession = requireNotNull(formalRuntime).session
+        formalSession.agent.setSystemPrompt(systemPrompt)
+        formalSession.agent.setModel(model)
+        formalSession.agent.setTools(adaptedTools)
+        formalSession.agent.replaceMessages(legacyProtocolToAgentMessages(session.protocolMessages.takeLast(80), model))
+        formalSession.agent.streamFunction =
+            if (client is OpenAiCompatibleAgentClient) {
+                DesktopPiAgentAdapter(
+                    scope,
+                    providerRegistry.withAdditionalProviders(
+                        formalSession.getRegisteredExtensionProviders(),
+                        formalSession.getRegisteredExtensionImageProviders(),
+                    ),
+                )
+            } else {
+                streamFunction
+            }
+        formalSession.agent.getApiKey = { runtime.agentApiKey }
+        formalSession.agent.afterToolCall = { context, _ -> desktopToolAfterCall(context) }
+        formalSession.agent.sessionId = session.id
+        return formalSession
+    }
+
+    private suspend fun createFormalSession(
+        session: AgentSessionState,
+        model: Model,
+        systemPrompt: String,
+        tools: List<dev.xuexue.pi.agent.AgentTool>,
+        sessionManager: SessionManager,
+        modelRegistry: ModelRegistry? = null,
+        scopedModels: List<ScopedModel> = emptyList(),
+    ): AgentSession {
+        val cwd = sessionManager.getCwd()
+        val agentDirectory =
+            Path
+                .of(System.getProperty("user.home"), ".xuexue", "pi")
+                .toAbsolutePath()
+                .normalize()
+        val settingsManager =
+            SettingsManager.create(
+                cwd = cwd,
+                agentDirectory = agentDirectory.toString(),
+                projectTrusted = runtime.workspaceTrusted,
+            )
+        val packageManager =
+            DefaultPiPackageManager(
+                cwd = cwd,
+                agentDirectory = agentDirectory.toString(),
+                settingsManager = settingsManager,
+            )
+        val packageResolution =
+            packageManager.resolve { PiPackageMissingAction.SKIP }
+        val pluginDiscovery =
+            PiPluginDiscovery(
+                PiPluginDiscoveryOptions.fromSettings(
+                    cwd = cwd,
+                    agentDirectory = agentDirectory.toString(),
+                    settingsManager = settingsManager,
+                    projectTrusted = runtime.workspaceTrusted,
+                    additionalPaths = packageResolution.extensionPaths.map { it.path },
+                ),
+            )
+        val discoveredPlugins = pluginDiscovery.loadAll()
+        val extensionRunner = PiExtensionRunner(cwd)
+        discoveredPlugins.extensions.forEach { extension -> extensionRunner.load(extension) }
+        val resourceLoader =
+            DefaultResourceLoader(
+                ResourceLoaderOptions(
+                    cwd = cwd,
+                    agentDirectory = agentDirectory.toString(),
+                    settingsManager = settingsManager,
+                ),
+            )
+        val agent =
+            Agent(
+                AgentOptions(
+                    initialState =
+                        AgentInitialState(
+                            systemPrompt = systemPrompt,
+                            model = model,
+                            tools = tools,
+                            messages = legacyProtocolToAgentMessages(session.protocolMessages.takeLast(80), model),
+                        ),
+                    streamFunction = streamFunction,
+                ),
+            )
+        agent.getApiKey = { runtime.agentApiKey }
+        agent.afterToolCall = { context, _ -> desktopToolAfterCall(context) }
+        agent.sessionId = session.id
+        return AgentSession(
+            AgentSessionConfig(
+                agent = agent,
+                sessionManager = sessionManager,
+                modelRegistry = modelRegistry,
+                scopedModels = scopedModels,
+                settingsManager = settingsManager,
+                resourceLoader = resourceLoader,
+                extensionRunner = extensionRunner,
+                packageManager = packageManager,
+                bashExecutor = LocalBashExecutor(),
+                htmlExporter = LocalSessionHtmlExporter(),
+                interactionPort = runtime.interactionBroker,
+            ),
+        )
+    }
+
+    private fun createFormalSessionManager(sessionId: String): SessionManager {
+        val root = workspaceRoot() ?: return SessionManager.inMemory(".")
+        val sessionDirectory = root.resolve(".xuexue/pi/sessions")
+        val sessionPath = sessionDirectory.resolve("$sessionId.jsonl")
+        return if (Files.isRegularFile(sessionPath)) {
+            SessionManager.open(
+                path = sessionPath.toString(),
+                sessionDir = sessionDirectory.toString(),
+                cwdOverride = root.toString(),
+            )
+        } else {
+            SessionManager.create(root.toString(), sessionDirectory.toString()).also {
+                it.setSessionFile(sessionPath.toString())
+            }
+        }
+    }
+
+    private fun resetFormalRuntime() {
+        val oldRuntime = formalRuntime ?: return
+        runtime.bindFormalRuntime(null, scope)
+        formalRuntime = null
+        runtime.interactionBroker.cancelAll("session replaced")
+        scope.launch { oldRuntime.dispose() }
     }
 
     private fun agentModel(): Model =
@@ -383,13 +601,27 @@ class WorkbenchAgentController(
             name = runtime.agentModel,
             api = "openai-completions",
             provider = "openai",
-            baseUrl = runtime.agentEndpoint,
+            baseUrl = normalizeProviderBaseUrl(runtime.agentEndpoint),
             reasoning = true,
             input = listOf(ModelInput.TEXT),
             cost = ModelCost(0.0, 0.0, 0.0, 0.0),
             contextWindow = 128_000,
             maxTokens = 16_384,
         )
+
+    private fun normalizeProviderBaseUrl(endpoint: String): String {
+        val trimmed = endpoint.trim().trimEnd('/')
+        return listOf(
+            "/chat/completions",
+            "/responses",
+            "/v1/messages",
+        ).firstNotNullOfOrNull { suffix ->
+            trimmed
+                .takeIf { it.endsWith(suffix) }
+                ?.removeSuffix(suffix)
+                ?.trimEnd('/')
+        } ?: trimmed
+    }
 
     private suspend fun authorizeTool(
         operation: dev.xuexue.core.AgentOperationKind,

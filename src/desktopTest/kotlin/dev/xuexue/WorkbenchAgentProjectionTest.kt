@@ -41,6 +41,7 @@ class WorkbenchAgentProjectionTest {
 
         assertEquals("hello", session.messages.single { it.role == "assistant" }.content)
         assertEquals("thinking", session.messages.single { it.role == "reasoning" }.content)
+        assertEquals("noop\n{}", session.messages.single { it.role == "tool_call" }.content)
         assertEquals("steering", session.messages.single { it.content == "interrupt" }.role)
         assertEquals(12, session.inputTokens)
         assertEquals(5, session.outputTokens)

@@ -1,11 +1,15 @@
 package dev.xuexue.platform
 
 import dev.xuexue.core.AgentOperationKind
+import dev.xuexue.core.FileMutationQueue
 import dev.xuexue.core.PiAgentTool
 import dev.xuexue.core.PiFileDiff
 import dev.xuexue.core.PiToolDefinition
 import dev.xuexue.core.PiToolExecution
+import dev.xuexue.core.truncateToolHead
+import dev.xuexue.core.truncateToolTail
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
@@ -25,6 +29,8 @@ internal class DesktopAgentTools(
     private val authorize: suspend (AgentOperationKind, String, String) -> Boolean,
     private val ioDispatcher: CoroutineDispatcher,
 ) {
+    private val mutationQueue = FileMutationQueue()
+
     fun all(): List<PiAgentTool> =
         listOf(
             ReadTool(),
@@ -73,9 +79,8 @@ internal class DesktopAgentTools(
                 val offset = arguments.int("offset").coerceAtLeast(1)
                 val limit = arguments.int("limit").takeIf { it > 0 }?.coerceAtMost(2_000) ?: 500
                 val shown = lines.drop(offset - 1).take(limit)
-                PiToolExecution(
-                    shown.mapIndexed { index, line -> "${offset + index}: $line" }.joinToString("\n").truncate(),
-                )
+                val output = shown.mapIndexed { index, line -> "${offset + index}: $line" }.joinToString("\n")
+                PiToolExecution(renderToolOutput(truncateToolHead(output)))
             }
     }
 
@@ -90,15 +95,17 @@ internal class DesktopAgentTools(
         ): PiToolExecution =
             withContext(ioDispatcher) {
                 val (path, relative) = path(arguments)
-                val content = arguments.string("content")
-                allowed(AgentOperationKind.WRITE_FILE, relative, "Write ${content.length} characters")
-                val before = if (Files.exists(path)) workspaceService.readText(path) else ""
-                onProgress("Writing $relative")
-                workspaceService.atomicWrite(path, content)
-                PiToolExecution(
-                    "Wrote $relative",
-                    fileDiff = PiFileDiff(relative, unifiedDiff(before, content)),
-                )
+                mutationQueue.withPath(path.toString()) {
+                    val content = arguments.string("content")
+                    allowed(AgentOperationKind.WRITE_FILE, relative, "Write ${content.length} characters")
+                    val before = if (Files.exists(path)) workspaceService.readText(path) else ""
+                    onProgress("Writing $relative")
+                    workspaceService.atomicWrite(path, content)
+                    PiToolExecution(
+                        "Wrote $relative",
+                        fileDiff = PiFileDiff(relative, unifiedDiff(before, content)),
+                    )
+                }
             }
     }
 
@@ -117,20 +124,22 @@ internal class DesktopAgentTools(
         ): PiToolExecution =
             withContext(ioDispatcher) {
                 val (path, relative) = path(arguments)
-                val oldText = arguments.string("oldText")
-                val newText = arguments.string("newText")
-                allowed(AgentOperationKind.WRITE_FILE, relative, "Edit one occurrence in workspace file")
-                if (oldText.isEmpty()) error("'oldText' must not be empty.")
-                val before = workspaceService.readText(path)
-                val occurrences = before.windowed(oldText.length, partialWindows = false).count { it == oldText }
-                if (occurrences != 1) error("Expected exactly one matching occurrence, found $occurrences.")
-                val after = before.replace(oldText, newText)
-                onProgress("Editing $relative")
-                workspaceService.atomicWrite(path, after)
-                PiToolExecution(
-                    "Edited $relative",
-                    fileDiff = PiFileDiff(relative, unifiedDiff(before, after)),
-                )
+                mutationQueue.withPath(path.toString()) {
+                    val oldText = arguments.string("oldText")
+                    val newText = arguments.string("newText")
+                    allowed(AgentOperationKind.WRITE_FILE, relative, "Edit one occurrence in workspace file")
+                    if (oldText.isEmpty()) error("'oldText' must not be empty.")
+                    val before = workspaceService.readText(path)
+                    val occurrences = before.windowed(oldText.length, partialWindows = false).count { it == oldText }
+                    if (occurrences != 1) error("Expected exactly one matching occurrence, found $occurrences.")
+                    val after = before.replace(oldText, newText)
+                    onProgress("Editing $relative")
+                    workspaceService.atomicWrite(path, after)
+                    PiToolExecution(
+                        "Edited $relative",
+                        fileDiff = PiFileDiff(relative, unifiedDiff(before, after)),
+                    )
+                }
             }
     }
 
@@ -153,10 +162,22 @@ internal class DesktopAgentTools(
                         .directory(root.toFile())
                         .redirectErrorStream(true)
                         .start()
-                val output = process.inputStream.bufferedReader().use { it.readText().truncate() }
-                coroutineContext.ensureActive()
-                val code = process.waitFor()
-                PiToolExecution("exit $code\n$output", failed = code != 0)
+                val cancellation =
+                    coroutineContext[Job]?.invokeOnCompletion {
+                        process.destroy()
+                        if (process.isAlive) process.destroyForcibly()
+                    }
+                try {
+                    val output = process.inputStream.bufferedReader().use { it.readText() }
+                    coroutineContext.ensureActive()
+                    val code = process.waitFor()
+                    PiToolExecution(
+                        "exit $code\n${renderToolOutput(truncateToolTail(output))}",
+                        failed = code != 0,
+                    )
+                } finally {
+                    cancellation?.dispose()
+                }
             }
     }
 
@@ -189,7 +210,8 @@ internal class DesktopAgentTools(
                         }
                     }
                 }
-                PiToolExecution(matches.ifEmpty { listOf("No matches.") }.joinToString("\n").truncate())
+                val output = matches.ifEmpty { listOf("No matches.") }.joinToString("\n")
+                PiToolExecution(renderToolOutput(truncateToolHead(output)))
             }
     }
 
@@ -217,7 +239,8 @@ internal class DesktopAgentTools(
                             .limit(500)
                             .toList()
                     }
-                PiToolExecution(result.ifEmpty { listOf("No files found.") }.joinToString("\n").truncate())
+                val output = result.ifEmpty { listOf("No files found.") }.joinToString("\n")
+                PiToolExecution(renderToolOutput(truncateToolHead(output)))
             }
     }
 
@@ -246,7 +269,7 @@ internal class DesktopAgentTools(
                             .limit(500)
                             .toList()
                             .joinToString("\n")
-                    PiToolExecution(output.truncate())
+                    PiToolExecution(renderToolOutput(truncateToolHead(output)))
                 }
             }
     }
@@ -280,11 +303,9 @@ private fun JsonObject.string(name: String): String = this[name]?.jsonPrimitive?
 
 private fun JsonObject.int(name: String): Int = this[name]?.jsonPrimitive?.intOrNull ?: 0
 
-private const val OUTPUT_TRUNCATED_MARKER = "\n[output truncated]"
-
-private fun String.truncate(limit: Int = 20_000): String {
-    if (length <= limit) return this
-    return take(limit) + OUTPUT_TRUNCATED_MARKER
+private fun renderToolOutput(result: dev.xuexue.core.ToolTruncationResult): String {
+    val suffix = if (result.truncated) "\n[output truncated]" else ""
+    return result.content + suffix
 }
 
 private fun unifiedDiff(

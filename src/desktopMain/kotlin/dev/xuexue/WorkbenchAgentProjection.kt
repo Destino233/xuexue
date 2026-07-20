@@ -5,9 +5,12 @@ import dev.xuexue.pi.agent.AgentToolResult
 import dev.xuexue.pi.ai.AssistantMessage
 import dev.xuexue.pi.ai.TextContent
 import dev.xuexue.pi.ai.ThinkingContent
+import dev.xuexue.pi.ai.ToolCall
 import dev.xuexue.pi.ai.ToolResultMessage
+import dev.xuexue.pi.ai.UserBlocks
 import dev.xuexue.pi.ai.UserMessage
 import dev.xuexue.pi.ai.UserText
+import dev.xuexue.pi.coding.AgentSessionEvent
 import dev.xuexue.platform.AgentMessage
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -39,6 +42,36 @@ internal class WorkbenchAgentProjection(
         }
     }
 
+    fun apply(event: AgentSessionEvent) {
+        when (event) {
+            is AgentSessionEvent.MessageStart -> applyMessage(event.message)
+
+            is AgentSessionEvent.MessageUpdate -> applyMessage(event.message)
+
+            is AgentSessionEvent.MessageEnd -> applyMessage(event.message)
+
+            is AgentSessionEvent.ToolExecutionStart -> applyToolStart(event)
+
+            is AgentSessionEvent.ToolExecutionUpdate -> applyToolUpdate(event.toolCallId, event.partialResult)
+
+            is AgentSessionEvent.ToolExecutionEnd,
+            AgentSessionEvent.AgentStart,
+            is AgentSessionEvent.AgentEnd,
+            AgentSessionEvent.AgentSettled,
+            AgentSessionEvent.TurnStart,
+            is AgentSessionEvent.TurnEnd,
+            is AgentSessionEvent.QueueUpdate,
+            is AgentSessionEvent.EntryAppended,
+            is AgentSessionEvent.SessionInfoChanged,
+            is AgentSessionEvent.ThinkingLevelChanged,
+            is AgentSessionEvent.AutoRetryStart,
+            is AgentSessionEvent.AutoRetryEnd,
+            is AgentSessionEvent.CompactionStart,
+            is AgentSessionEvent.CompactionEnd,
+            -> Unit
+        }
+    }
+
     private fun applyMessage(message: dev.xuexue.pi.ai.AgentMessage) {
         when (message) {
             is AssistantMessage -> applyAssistant(message)
@@ -52,6 +85,13 @@ internal class WorkbenchAgentProjection(
         val reasoning = message.content.filterIsInstance<ThinkingContent>().joinToString("") { it.thinking }
         upsert("assistant", assistantId, text, message.errorMessage != null)
         if (reasoning.isNotEmpty()) upsert("reasoning", "reasoning:$assistantId", reasoning)
+        message.content.filterIsInstance<ToolCall>().forEach { call ->
+            upsert(
+                role = "tool_call",
+                id = call.id,
+                content = listOf(call.name, call.arguments.toString()).joinToString("\n"),
+            )
+        }
         session.inputTokens =
             message.usage.input
                 .coerceAtMost(Int.MAX_VALUE.toLong())
@@ -66,7 +106,11 @@ internal class WorkbenchAgentProjection(
     }
 
     private fun applyQueuedUser(message: UserMessage) {
-        val text = (message.content as? UserText)?.value ?: return
+        val text =
+            when (val content = message.content) {
+                is UserText -> content.value
+                is UserBlocks -> content.value.filterIsInstance<TextContent>().joinToString("") { it.text }
+            }
         val queuedIndex = session.messages.indexOfFirst { it.role == "steering_queued" && it.content == text }
         if (queuedIndex >= 0) {
             session.messages[queuedIndex] = session.messages[queuedIndex].copy(role = "steering")
@@ -74,6 +118,18 @@ internal class WorkbenchAgentProjection(
     }
 
     private fun applyToolStart(event: AgentEvent.ToolExecutionStart) {
+        val target =
+            listOf("path", "file_path", "query", "command")
+                .firstNotNullOfOrNull { key -> event.args[key]?.jsonPrimitive?.contentOrNull }
+                .orEmpty()
+        val content =
+            listOf(event.toolName, target, event.args.toString())
+                .filter(String::isNotBlank)
+                .joinToString("\n")
+        upsert("tool_call", event.toolCallId, content)
+    }
+
+    private fun applyToolStart(event: AgentSessionEvent.ToolExecutionStart) {
         val target =
             listOf("path", "file_path", "query", "command")
                 .firstNotNullOfOrNull { key -> event.args[key]?.jsonPrimitive?.contentOrNull }

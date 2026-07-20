@@ -105,6 +105,8 @@ import dev.xuexue.core.AgentApprovalDecision
 import dev.xuexue.core.AgentOperationKind
 import dev.xuexue.core.AgentSendAvailability
 import dev.xuexue.core.DocumentKind
+import dev.xuexue.pi.coding.InteractionRequest
+import dev.xuexue.pi.coding.InteractionResponse
 
 private enum class AgentSettingsSection(
     val label: String,
@@ -136,6 +138,143 @@ internal fun AgentToolHint(
 }
 
 @Composable
+@Suppress("LongMethod") // The banner renders each typed interaction in one stable, stateful surface.
+private fun AgentInteractionBanner(
+    request: InteractionRequest,
+    onResponse: (InteractionResponse) -> Boolean,
+) {
+    var inputValue by remember(request.id) {
+        mutableStateOf(
+            when (request) {
+                is InteractionRequest.Input -> request.initialValue
+                is InteractionRequest.Editor -> request.initialValue
+                else -> ""
+            },
+        )
+    }
+    var selectedIndex by remember(request.id) {
+        mutableStateOf((request as? InteractionRequest.Select)?.selectedIndex ?: 0)
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.62f))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(request.title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+        Text(
+            request.message,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        when (request) {
+            is InteractionRequest.Confirm -> {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Button(
+                        onClick = { onResponse(InteractionResponse.Confirm(request.id, accepted = true)) },
+                        modifier = Modifier.height(31.dp),
+                    ) {
+                        Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(request.confirmLabel)
+                    }
+                    TextButton(
+                        onClick = { onResponse(InteractionResponse.Confirm(request.id, accepted = false)) },
+                        modifier = Modifier.height(31.dp),
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(request.cancelLabel)
+                    }
+                }
+            }
+
+            is InteractionRequest.Select -> {
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    request.options.forEachIndexed { index, option ->
+                        TextButton(
+                            onClick = { selectedIndex = index },
+                            modifier = Modifier.fillMaxWidth().height(30.dp),
+                        ) {
+                            Text(
+                                text = if (index == selectedIndex) "● $option" else option,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Button(
+                            onClick = { onResponse(InteractionResponse.Select(request.id, selectedIndex)) },
+                            modifier = Modifier.height(31.dp),
+                        ) {
+                            Text("选择")
+                        }
+                        if (request.allowCancel) {
+                            TextButton(
+                                onClick = { onResponse(InteractionResponse.Cancelled(request.id)) },
+                                modifier = Modifier.height(31.dp),
+                            ) {
+                                Text("取消")
+                            }
+                        }
+                    }
+                }
+            }
+
+            is InteractionRequest.Input -> {
+                OutlinedTextField(
+                    value = inputValue,
+                    onValueChange = { inputValue = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = request.placeholder?.let { hint -> ({ Text(hint) }) },
+                    singleLine = !request.multiline,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Button(
+                        onClick = { onResponse(InteractionResponse.Input(request.id, inputValue)) },
+                        modifier = Modifier.height(31.dp),
+                    ) {
+                        Text("提交")
+                    }
+                    TextButton(
+                        onClick = { onResponse(InteractionResponse.Cancelled(request.id)) },
+                        modifier = Modifier.height(31.dp),
+                    ) {
+                        Text("取消")
+                    }
+                }
+            }
+
+            is InteractionRequest.Editor -> {
+                OutlinedTextField(
+                    value = inputValue,
+                    onValueChange = { inputValue = it },
+                    modifier = Modifier.fillMaxWidth().height(120.dp),
+                    singleLine = false,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Button(
+                        onClick = { onResponse(InteractionResponse.Editor(request.id, inputValue)) },
+                        modifier = Modifier.height(31.dp),
+                    ) {
+                        Text("保存")
+                    }
+                    TextButton(
+                        onClick = { onResponse(InteractionResponse.Cancelled(request.id)) },
+                        modifier = Modifier.height(31.dp),
+                    ) {
+                        Text("取消")
+                    }
+                }
+            }
+
+            is InteractionRequest.Notify -> {}
+        }
+    }
+}
+
+@Composable
 fun AgentPanel(
     state: WorkbenchState,
     onClose: () -> Unit,
@@ -145,14 +284,15 @@ fun AgentPanel(
     modifier: Modifier = Modifier,
     outerChrome: Boolean = false,
 ) {
-    val piState by state.piAgentState.collectAsState()
-    val isAgentRunning = piState.isStreaming
+    val formalAgentState by state.formalAgentState.collectAsState()
+    val isAgentRunning = formalAgentState?.isStreaming ?: state.agentRunning
     var panelMenuOpen by remember { mutableStateOf(false) }
     var sessionMenuOpen by remember { mutableStateOf(false) }
     var renameDialog by remember { mutableStateOf(false) }
     var renameInput by remember { mutableStateOf("") }
     val messageListState = rememberLazyListState()
     val messages = state.agentMessages
+    val interactionRequests by state.agentInteractionRequests.collectAsState()
     LaunchedEffect(state.activeAgentSessionId, messages.size, messages.lastOrNull()?.content, isAgentRunning) {
         if (messages.isNotEmpty()) {
             messageListState.scrollToItem(messages.lastIndex)
@@ -378,6 +518,12 @@ fun AgentPanel(
                             }
                         }
                     }
+                }
+                interactionRequests.firstOrNull()?.let { request ->
+                    AgentInteractionBanner(
+                        request = request,
+                        onResponse = state::respondAgentInteraction,
+                    )
                 }
                 MotionVisibility(
                     visible =
