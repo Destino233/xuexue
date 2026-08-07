@@ -28,6 +28,14 @@ class CompatApiTest {
     }
 
     @Test
+    fun catalogReadsMatchTheProviderScopedPiCompatibilitySurface() {
+        val provider = getProviders().first()
+        val model = getModels(provider).first()
+
+        assertEquals(model, getModel(provider, model.id))
+    }
+
+    @Test
     fun globalCompatStreamUsesEnvironmentKeyAndCompletes() =
         runTest {
             val provider = RecordingApiProvider("compat-test")

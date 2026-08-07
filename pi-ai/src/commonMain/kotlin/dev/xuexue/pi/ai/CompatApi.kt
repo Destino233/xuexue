@@ -91,7 +91,7 @@ fun getModel(
     id: String,
 ): Model? = defaultModelCatalog().firstOrNull { it.provider == provider && it.id == id }
 
-fun getModels(): List<Model> = defaultModelCatalog()
+fun getModels(provider: ProviderId): List<Model> = defaultModelCatalog().filter { it.provider == provider }
 
 fun getProviders(): List<ProviderId> = defaultModelCatalog().map(Model::provider).distinct()
 

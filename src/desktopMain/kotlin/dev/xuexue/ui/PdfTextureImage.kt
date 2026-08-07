@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import dev.xuexue.DocumentTab
 import dev.xuexue.WorkbenchState
@@ -65,7 +66,11 @@ internal fun rememberPdfTexture(
         }
     val activeTexture =
         remember(documentPath, tab.lastKnownModified, page, purpose, viewport, layer) {
-            mutableStateOf<ActivePdfTexture?>(null)
+            mutableStateOf(
+                state.pdfTextureCache
+                    .acquireIfPresent(key, priority)
+                    ?.let { cached -> ActivePdfTexture(key, cached) },
+            )
         }
     var failed by remember(documentPath, tab.lastKnownModified, page, purpose, viewport, layer) {
         mutableStateOf(false)
@@ -89,17 +94,7 @@ internal fun rememberPdfTexture(
             loadPdfRasterWithRefinement(
                 render = { state.renderPdfPage(tab, page, dpi, purpose, viewport, priority, layer) },
                 onRaster = { raster ->
-                    val nextLease =
-                        if (raster.incomplete) {
-                            PdfTextureLease.uncached(raster.toComposeBitmap(state.pdfPerformanceMetrics))
-                        } else {
-                            state.pdfTextureCache.acquire(key, priority) {
-                                PreparedPdfTexture(
-                                    value = raster.toComposeBitmap(state.pdfPerformanceMetrics),
-                                    byteSize = raster.byteSize,
-                                )
-                            }
-                        }
+                    val nextLease = acquirePdfTextureLease(state, key, priority, raster)
                     var adopted = false
                     try {
                         currentCoroutineContext().ensureActive()
@@ -121,6 +116,29 @@ internal fun rememberPdfTexture(
     return PdfTextureImage(activeTexture.value?.lease?.value, failed)
 }
 
+private suspend fun acquirePdfTextureLease(
+    state: WorkbenchState,
+    key: PdfTextureKey,
+    priority: PdfRasterPriority,
+    raster: PdfPageRaster,
+): PdfTextureLease<ImageBitmap> =
+    if (raster.incomplete) {
+        state.pdfTextureCache.acquireUncached(
+            byteSize = raster.byteSize,
+            prepare = { raster.toComposeBitmap(state.pdfPerformanceMetrics) },
+            onClose = ImageBitmap::releaseSkiaResources,
+        )
+    } else {
+        state.pdfTextureCache.acquire(key, priority, expectedBytes = raster.byteSize) {
+            val bitmap = raster.toComposeBitmap(state.pdfPerformanceMetrics)
+            PreparedPdfTexture(
+                value = bitmap,
+                byteSize = raster.byteSize,
+                onClose = bitmap::releaseSkiaResources,
+            )
+        }
+    }
+
 private data class ActivePdfTexture(
     val key: PdfTextureKey,
     val lease: PdfTextureLease<ImageBitmap>,
@@ -128,13 +146,23 @@ private data class ActivePdfTexture(
 
 internal fun PdfPageRaster.toComposeBitmap(metrics: PdfPerformanceMetrics? = null): ImageBitmap {
     val startedAt = System.nanoTime()
-    return SkiaImage
-        .makeRaster(
-            ImageInfo(pixelWidth, pixelHeight, ColorType.RGBA_8888, ColorAlphaType.PREMUL),
-            rgbaBytes,
-            pixelWidth * RGBA_BYTES_PER_PIXEL,
-        ).toComposeImageBitmap()
-        .also { metrics?.textures?.recordPreparation(byteSize, System.nanoTime() - startedAt) }
+    val image =
+        SkiaImage
+            .makeRaster(
+                ImageInfo(pixelWidth, pixelHeight, ColorType.RGBA_8888, ColorAlphaType.PREMUL),
+                rgbaBytes,
+                pixelWidth * RGBA_BYTES_PER_PIXEL,
+            )
+    return try {
+        image.toComposeImageBitmap()
+    } finally {
+        image.close()
+        metrics?.textures?.recordPreparation(byteSize, System.nanoTime() - startedAt)
+    }
+}
+
+internal fun ImageBitmap.releaseSkiaResources() {
+    asSkiaBitmap().close()
 }
 
 private const val RGBA_BYTES_PER_PIXEL = 4

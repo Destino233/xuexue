@@ -10,10 +10,15 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.nio.charset.StandardCharsets
+import java.nio.file.AccessDeniedException
+import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.LinkOption
+import java.nio.file.NoSuchFileException
 import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
 import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.BasicFileAttributes
 import java.util.Base64
 import java.util.Properties
 import java.util.UUID
@@ -125,17 +130,35 @@ data class PersistedWorkbench(
 data class AppPreferences(
     val documentWheelZoomMultiplier: Float = DEFAULT_DOCUMENT_WHEEL_ZOOM_MULTIPLIER,
     val documentAnalysisSettings: DocumentAnalysisSettings = DocumentAnalysisSettings(),
+    val applicationMemoryLimitMiB: Int = defaultApplicationMemoryLimitMiB(),
 )
 
 const val DEFAULT_DOCUMENT_WHEEL_ZOOM_MULTIPLIER = 1f
 const val MIN_DOCUMENT_WHEEL_ZOOM_MULTIPLIER = 0.5f
 const val MAX_DOCUMENT_WHEEL_ZOOM_MULTIPLIER = 2f
+const val MIN_APPLICATION_MEMORY_MIB = 512
+const val MAX_APPLICATION_MEMORY_MIB = 16_384
+const val APPLICATION_MEMORY_STEP_MIB = 512
 
 fun normalizedDocumentWheelZoomMultiplier(value: Float): Float =
     value
         .takeIf(Float::isFinite)
         ?.coerceIn(MIN_DOCUMENT_WHEEL_ZOOM_MULTIPLIER, MAX_DOCUMENT_WHEEL_ZOOM_MULTIPLIER)
         ?: DEFAULT_DOCUMENT_WHEEL_ZOOM_MULTIPLIER
+
+fun defaultApplicationMemoryLimitMiB(): Int =
+    normalizedApplicationMemoryLimitMiB(
+        bytesToMiB(Runtime.getRuntime().maxMemory()).toInt(),
+    )
+
+fun normalizedApplicationMemoryLimitMiB(value: Int): Int {
+    val clamped = value.coerceIn(MIN_APPLICATION_MEMORY_MIB, MAX_APPLICATION_MEMORY_MIB)
+    val step =
+        ((clamped - MIN_APPLICATION_MEMORY_MIB) + APPLICATION_MEMORY_STEP_MIB / 2) /
+            APPLICATION_MEMORY_STEP_MIB
+    return (MIN_APPLICATION_MEMORY_MIB + step * APPLICATION_MEMORY_STEP_MIB)
+        .coerceIn(MIN_APPLICATION_MEMORY_MIB, MAX_APPLICATION_MEMORY_MIB)
+}
 
 // Function-count debt is already tracked in the static-analysis baseline; formatting alone should not duplicate it.
 @Suppress("LargeClass")
@@ -169,18 +192,58 @@ class WorkspaceService(
 
     fun workspaceRevision(root: Path): Long {
         val safeRoot = canonicalRoot(root)
-        return Files.walk(safeRoot).use { paths ->
-            paths
-                .filter { path -> !Files.isSymbolicLink(path) }
-                .filter { path -> !path.startsWith(safeRoot.resolve(".xuexue")) }
-                .sorted()
-                .mapToLong { path ->
+        var revision = 1_125_899_906_842_597L
+        Files.walkFileTree(
+            safeRoot,
+            object : SimpleFileVisitor<Path>() {
+                override fun preVisitDirectory(
+                    directory: Path,
+                    attributes: BasicFileAttributes,
+                ): FileVisitResult {
+                    if (directory != safeRoot && directory.fileName.toString() == ".xuexue") {
+                        return FileVisitResult.SKIP_SUBTREE
+                    }
+                    if (directory != safeRoot) {
+                        mix(directory, attributes.lastModifiedTime().toMillis(), 0L)
+                    }
+                    return FileVisitResult.CONTINUE
+                }
+
+                override fun visitFile(
+                    file: Path,
+                    attributes: BasicFileAttributes,
+                ): FileVisitResult {
+                    if (!Files.isSymbolicLink(file) && !file.fileName.toString().endsWith(".tmp")) {
+                        mix(
+                            file,
+                            attributes.lastModifiedTime().toMillis(),
+                            if (attributes.isRegularFile) attributes.size() else 0L,
+                        )
+                    }
+                    return FileVisitResult.CONTINUE
+                }
+
+                override fun visitFileFailed(
+                    file: Path,
+                    exception: java.io.IOException,
+                ): FileVisitResult =
+                    when (exception) {
+                        is NoSuchFileException, is AccessDeniedException -> FileVisitResult.SKIP_SUBTREE
+                        else -> throw exception
+                    }
+
+                private fun mix(
+                    path: Path,
+                    modified: Long,
+                    size: Long,
+                ) {
                     val relative = safeRoot.relativize(path).pathString.replace('\\', '/')
-                    val modified = runCatching { Files.getLastModifiedTime(path, LinkOption.NOFOLLOW_LINKS).toMillis() }.getOrDefault(0L)
-                    val size = runCatching { if (Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) Files.size(path) else 0L }.getOrDefault(0L)
-                    relative.hashCode().toLong() * 31L + modified * 17L + size
-                }.reduce(1_125_899_906_842_597L) { revision, value -> revision * 31L + value }
-        }
+                    val value = relative.hashCode().toLong() * 31L + modified * 17L + size
+                    revision = revision * 31L + value
+                }
+            },
+        )
+        return revision
     }
 
     private fun scanEntry(
@@ -833,8 +896,23 @@ class WorkspaceService(
                             }.getOrNull()
                         }
                         ?: DocumentAnalysisSettings(),
+                applicationMemoryLimitMiB =
+                    normalizedApplicationMemoryLimitMiB(
+                        properties.getProperty("applicationMemoryLimitMiB")?.toIntOrNull()
+                            ?: defaultApplicationMemoryLimitMiB(),
+                    ),
             )
         }.getOrDefault(AppPreferences())
+    }
+
+    fun hasConfiguredApplicationMemoryLimit(): Boolean {
+        val file = appPreferencesFile()
+        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) return false
+        return runCatching {
+            val properties = Properties()
+            Files.newInputStream(file).use(properties::load)
+            properties.getProperty("applicationMemoryLimitMiB") != null
+        }.getOrDefault(false)
     }
 
     fun saveAppPreferences(preferences: AppPreferences) {
@@ -851,6 +929,10 @@ class WorkspaceService(
                     setProperty(
                         "documentAnalysisSettings",
                         preferencesJson.encodeToString(preferences.documentAnalysisSettings),
+                    )
+                    setProperty(
+                        "applicationMemoryLimitMiB",
+                        normalizedApplicationMemoryLimitMiB(preferences.applicationMemoryLimitMiB).toString(),
                     )
                 }
             Files.newOutputStream(temp).use { properties.store(it, "XueXue application preferences") }

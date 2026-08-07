@@ -7,20 +7,25 @@
 
 package dev.xuexue.ui
 
+import androidx.compose.foundation.HorizontalScrollbar
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ScrollbarStyle
+import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -33,6 +38,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.rememberScrollbarAdapter
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -148,7 +155,12 @@ internal fun PdfDocument(
     var selectionCommitted by remember(tab.relativePath) { mutableStateOf(false) }
     var selectionGestureId by remember(tab.relativePath) { mutableStateOf(0) }
     val selectionRequests = remember(tab.relativePath) { Channel<PdfSelectionRequest>(Channel.CONFLATED) }
-    var currentPageDimensions by remember(tab.relativePath, tab.pdfPage) { mutableStateOf(DEFAULT_PAGE_DIMENSIONS) }
+    var currentPageDimensions by remember(tab.relativePath, tab.pdfPage, tab.lastKnownModified) {
+        mutableStateOf(DEFAULT_PAGE_DIMENSIONS)
+    }
+    var currentPageDimensionsReady by remember(tab.relativePath, tab.pdfPage, tab.lastKnownModified) {
+        mutableStateOf(false)
+    }
     val listState =
         rememberLazyListState(
             initialFirstVisibleItemIndex = tab.pdfPage,
@@ -161,7 +173,6 @@ internal fun PdfDocument(
     var pendingZoomAnchor by remember(tab.relativePath) { mutableStateOf<PdfZoomAnchor?>(null) }
     var zoomPersistenceSerial by remember(tab.relativePath) { mutableStateOf(0) }
     var scrollPersistenceSerial by remember(tab.relativePath) { mutableStateOf(0) }
-    val singlePageRenderDpi = rememberPdfRenderDpi("${tab.relativePath}:single", 110f * tab.pdfZoom)
     val beginTextSelection: (Int) -> Unit = { page ->
         selectionGestureId++
         selectedPage = page
@@ -312,14 +323,17 @@ internal fun PdfDocument(
             }
         }
     }
-    LaunchedEffect(tab.relativePath, tab.pdfPage, pageCount) {
+    LaunchedEffect(tab.relativePath, tab.pdfPage, tab.lastKnownModified, pageCount) {
+        currentPageDimensionsReady = false
         if (pageCount <= 0) return@LaunchedEffect
         try {
             currentPageDimensions = state.inspectPdfPage(tab, tab.pdfPage.coerceIn(0, pageCount - 1))
+            currentPageDimensionsReady = true
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: RuntimeException) {
             currentPageDimensions = DEFAULT_PAGE_DIMENSIONS
+            currentPageDimensionsReady = false
         }
     }
     LaunchedEffect(tab.pdfNavigationSerial, tab.pdfNavigationTopNormalized, viewMode, pageCount) {
@@ -384,33 +398,48 @@ internal fun PdfDocument(
     LaunchedEffect(listState, viewMode, tab.relativePath, pageCount) {
         if (viewMode != PdfViewMode.CONTINUOUS || pageCount <= 0) return@LaunchedEffect
         var previousPosition: PdfScrollPosition? = null
+        var lastDirection: PdfScrollDirection? = null
         snapshotFlow {
-            PdfScrollPosition(
-                firstVisiblePage = listState.firstVisibleItemIndex,
-                firstVisibleOffset = listState.firstVisibleItemScrollOffset,
-                lastVisiblePage =
-                    listState.layoutInfo.visibleItemsInfo
-                        .lastOrNull()
-                        ?.index
-                        ?: listState.firstVisibleItemIndex,
+            PdfPrefetchSnapshot(
+                position =
+                    PdfScrollPosition(
+                        firstVisiblePage = listState.firstVisibleItemIndex,
+                        firstVisibleOffset = listState.firstVisibleItemScrollOffset,
+                        lastVisiblePage =
+                            listState.layoutInfo.visibleItemsInfo
+                                .lastOrNull()
+                                ?.index
+                                ?: listState.firstVisibleItemIndex,
+                    ),
+                isScrollInProgress = listState.isScrollInProgress,
             )
         }.distinctUntilChanged().collectLatest { position ->
-            val targetPage = pdfPrefetchTarget(previousPosition, position, pageCount)
-            previousPosition = position
-            if (targetPage != null) {
-                delay(PDF_PREFETCH_DELAY_MILLIS)
-                try {
-                    state.renderPdfPage(
-                        tab,
-                        targetPage,
-                        PDF_PREVIEW_DPI,
-                        PdfRasterPurpose.THUMBNAIL,
-                        priority = PdfRasterPriority.ADJACENT,
+            val movementDirection = pdfScrollDirection(previousPosition, position.position)
+            if (movementDirection != null) lastDirection = movementDirection
+            previousPosition = position.position
+            if (!position.isScrollInProgress) {
+                val targetPage =
+                    pdfPrefetchTargetForDirection(
+                        current = position.position,
+                        direction = lastDirection ?: PdfScrollDirection.FORWARD,
+                        pageCount = pageCount,
                     )
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Throwable) {
-                    // Prefetch is opportunistic; visible-page rendering owns user-facing failures.
+                if (targetPage != null) {
+                    delay(PDF_PREFETCH_DELAY_MILLIS)
+                    if (listState.isScrollInProgress) return@collectLatest
+                    try {
+                        state.renderPdfPage(
+                            tab,
+                            targetPage,
+                            PDF_PREVIEW_DPI,
+                            PdfRasterPurpose.THUMBNAIL,
+                            priority = PdfRasterPriority.ADJACENT,
+                        )
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Throwable) {
+                        // Prefetch is opportunistic; visible-page rendering owns user-facing failures.
+                    }
                 }
             }
         }
@@ -688,7 +717,7 @@ internal fun PdfDocument(
                 Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .background(Color(0xFFE4E7E5))
+                    .background(pdfPageBackground(colorMode))
                     .pdfCtrlWheelZoom { scrollDelta, position ->
                         applyInteractiveZoom(
                             pdfZoomForScroll(
@@ -730,111 +759,93 @@ internal fun PdfDocument(
                     }
 
                     viewMode == PdfViewMode.CONTINUOUS && pageCount > 0 -> {
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding =
-                                androidx.compose.foundation.layout
-                                    .PaddingValues(vertical = 20.dp),
-                            verticalArrangement = Arrangement.spacedBy(16.dp),
-                        ) {
-                            items(pageCount) { page ->
-                                PdfPageItem(
-                                    state = state,
-                                    tab = tab,
-                                    page = page,
-                                    zoom = tab.pdfZoom * if (compact) 0.72f else 1f,
-                                    rotation = rotation,
-                                    selected = selectedPage == page,
-                                    searchMatch = searchMatches.any { it.pageIndex == page },
-                                    searchRegions =
-                                        searchMatches
-                                            .asSequence()
-                                            .filter { it.pageIndex == page }
-                                            .flatMap { it.regions.asSequence() }
-                                            .toList(),
-                                    selectionRegions =
-                                        textSelection
-                                            ?.takeIf { selectedTextPage == page }
-                                            ?.regions
-                                            .orEmpty(),
-                                    selectionActions = selectionActionsForPage(page),
-                                    textSelectionInteraction = textSelectionInteractionForPage(page),
-                                    onLink = openPdfLink,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) { selectedPage = page }
+                        Box(Modifier.fillMaxSize()) {
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding =
+                                    androidx.compose.foundation.layout
+                                        .PaddingValues(vertical = 20.dp),
+                                verticalArrangement = Arrangement.spacedBy(16.dp),
+                            ) {
+                                items(pageCount) { page ->
+                                    PdfPageItem(
+                                        state = state,
+                                        tab = tab,
+                                        page = page,
+                                        zoom = tab.pdfZoom * if (compact) 0.72f else 1f,
+                                        rotation = rotation,
+                                        selected = selectedPage == page,
+                                        searchMatch = searchMatches.any { it.pageIndex == page },
+                                        searchRegions =
+                                            searchMatches
+                                                .asSequence()
+                                                .filter { it.pageIndex == page }
+                                                .flatMap { it.regions.asSequence() }
+                                                .toList(),
+                                        selectionRegions =
+                                            textSelection
+                                                ?.takeIf { selectedTextPage == page }
+                                                ?.regions
+                                                .orEmpty(),
+                                        selectionActions = selectionActionsForPage(page),
+                                        textSelectionInteraction = textSelectionInteractionForPage(page),
+                                        onLink = openPdfLink,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) { selectedPage = page }
+                                }
                             }
+                            VerticalScrollbar(
+                                adapter = rememberScrollbarAdapter(listState),
+                                modifier =
+                                    Modifier
+                                        .align(Alignment.CenterEnd)
+                                        .fillMaxHeight()
+                                        .padding(vertical = 4.dp),
+                                style = pdfScrollbarStyle(),
+                            )
                         }
                     }
 
                     viewMode == PdfViewMode.DOUBLE && pageCount > 0 -> {
                         val fitWidth = fitMode == PdfFitMode.WIDTH
-                        Row(
-                            Modifier
-                                .fillMaxSize()
-                                .verticalScroll(doublePageVerticalScrollState)
-                                .then(
-                                    if (fitWidth) {
-                                        Modifier
-                                    } else {
-                                        Modifier.horizontalScroll(doublePageHorizontalScrollState)
-                                    },
-                                ).padding(12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.Top,
-                        ) {
-                            val firstPage = tab.pdfPage.coerceIn(0, pageCount - 1)
-                            PdfPageItem(
-                                state = state,
-                                tab = tab,
-                                page = firstPage,
-                                zoom = tab.pdfZoom * 0.5f,
-                                rotation = rotation,
-                                selected = selectedPage == firstPage,
-                                searchMatch = searchMatches.any { it.pageIndex == firstPage },
-                                searchRegions =
-                                    searchMatches
-                                        .asSequence()
-                                        .filter { it.pageIndex == firstPage }
-                                        .flatMap { it.regions.asSequence() }
-                                        .toList(),
-                                selectionRegions =
-                                    textSelection
-                                        ?.takeIf { selectedTextPage == firstPage }
-                                        ?.regions
-                                        .orEmpty(),
-                                selectionActions = selectionActionsForPage(firstPage),
-                                textSelectionInteraction = textSelectionInteractionForPage(firstPage),
-                                onLink = openPdfLink,
-                                modifier =
-                                    if (fitWidth) {
-                                        Modifier.weight(1f)
-                                    } else {
-                                        Modifier.width((340f * tab.pdfZoom).dp)
-                                    },
-                            ) { selectedPage = firstPage }
-                            if (firstPage + 1 < pageCount) {
+                        Box(Modifier.fillMaxSize()) {
+                            Row(
+                                Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(doublePageVerticalScrollState)
+                                    .then(
+                                        if (fitWidth) {
+                                            Modifier
+                                        } else {
+                                            Modifier.horizontalScroll(doublePageHorizontalScrollState)
+                                        },
+                                    ).padding(12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.Top,
+                            ) {
+                                val firstPage = tab.pdfPage.coerceIn(0, pageCount - 1)
                                 PdfPageItem(
                                     state = state,
                                     tab = tab,
-                                    page = firstPage + 1,
+                                    page = firstPage,
                                     zoom = tab.pdfZoom * 0.5f,
                                     rotation = rotation,
-                                    selected = selectedPage == firstPage + 1,
-                                    searchMatch = searchMatches.any { it.pageIndex == firstPage + 1 },
+                                    selected = selectedPage == firstPage,
+                                    searchMatch = searchMatches.any { it.pageIndex == firstPage },
                                     searchRegions =
                                         searchMatches
                                             .asSequence()
-                                            .filter { it.pageIndex == firstPage + 1 }
+                                            .filter { it.pageIndex == firstPage }
                                             .flatMap { it.regions.asSequence() }
                                             .toList(),
                                     selectionRegions =
                                         textSelection
-                                            ?.takeIf { selectedTextPage == firstPage + 1 }
+                                            ?.takeIf { selectedTextPage == firstPage }
                                             ?.regions
                                             .orEmpty(),
-                                    selectionActions = selectionActionsForPage(firstPage + 1),
-                                    textSelectionInteraction = textSelectionInteractionForPage(firstPage + 1),
+                                    selectionActions = selectionActionsForPage(firstPage),
+                                    textSelectionInteraction = textSelectionInteractionForPage(firstPage),
                                     onLink = openPdfLink,
                                     modifier =
                                         if (fitWidth) {
@@ -842,9 +853,60 @@ internal fun PdfDocument(
                                         } else {
                                             Modifier.width((340f * tab.pdfZoom).dp)
                                         },
-                                ) { selectedPage = firstPage + 1 }
-                            } else if (fitWidth) {
-                                Spacer(Modifier.weight(1f))
+                                ) { selectedPage = firstPage }
+                                if (firstPage + 1 < pageCount) {
+                                    PdfPageItem(
+                                        state = state,
+                                        tab = tab,
+                                        page = firstPage + 1,
+                                        zoom = tab.pdfZoom * 0.5f,
+                                        rotation = rotation,
+                                        selected = selectedPage == firstPage + 1,
+                                        searchMatch = searchMatches.any { it.pageIndex == firstPage + 1 },
+                                        searchRegions =
+                                            searchMatches
+                                                .asSequence()
+                                                .filter { it.pageIndex == firstPage + 1 }
+                                                .flatMap { it.regions.asSequence() }
+                                                .toList(),
+                                        selectionRegions =
+                                            textSelection
+                                                ?.takeIf { selectedTextPage == firstPage + 1 }
+                                                ?.regions
+                                                .orEmpty(),
+                                        selectionActions = selectionActionsForPage(firstPage + 1),
+                                        textSelectionInteraction = textSelectionInteractionForPage(firstPage + 1),
+                                        onLink = openPdfLink,
+                                        modifier =
+                                            if (fitWidth) {
+                                                Modifier.weight(1f)
+                                            } else {
+                                                Modifier.width((340f * tab.pdfZoom).dp)
+                                            },
+                                    ) { selectedPage = firstPage + 1 }
+                                } else if (fitWidth) {
+                                    Spacer(Modifier.weight(1f))
+                                }
+                            }
+                            VerticalScrollbar(
+                                adapter = rememberScrollbarAdapter(doublePageVerticalScrollState),
+                                modifier =
+                                    Modifier
+                                        .align(Alignment.CenterEnd)
+                                        .fillMaxHeight()
+                                        .padding(vertical = 4.dp),
+                                style = pdfScrollbarStyle(),
+                            )
+                            if (!fitWidth) {
+                                HorizontalScrollbar(
+                                    adapter = rememberScrollbarAdapter(doublePageHorizontalScrollState),
+                                    modifier =
+                                        Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 4.dp),
+                                    style = pdfScrollbarStyle(),
+                                )
                             }
                         }
                     }
@@ -859,21 +921,26 @@ internal fun PdfDocument(
                             }
                         val pageBorderWidth = if (selectedPage == tab.pdfPage || currentPageMatches) 2.dp else 1.dp
                         val dimensions = currentPageDimensions
-                        val originalAspectRatio = dimensions.widthPoints / dimensions.heightPoints
-                        val aspectRatio =
-                            if (rotation % 180f == 90f) 1f / originalAspectRatio else originalAspectRatio
                         if (fitMode == PdfFitMode.HEIGHT) {
-                            Box(Modifier.fillMaxSize().padding(18.dp).clickable { selectedPage = tab.pdfPage }, contentAlignment = Alignment.Center) {
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .then(pdfPageHoverModifier { selectedPage = tab.pdfPage })
+                                    .padding(18.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
                                 PdfTiledPage(
                                     state = state,
                                     tab = tab,
                                     page = tab.pdfPage,
-                                    pageDimensions = dimensions,
-                                    dpi = singlePageRenderDpi,
+                                    renderConfiguration =
+                                        PdfPageRenderConfiguration(
+                                            pageDimensions = dimensions,
+                                            renderViewport = currentPageDimensionsReady,
+                                        ),
                                     modifier =
                                         Modifier
-                                            .fillMaxHeight()
-                                            .aspectRatio(aspectRatio),
+                                            .fillMaxHeight(),
                                     decoration = PdfPageDecoration(rotation, pageBorderWidth, pageBorder),
                                     interaction =
                                         PdfPageInteraction(
@@ -895,46 +962,71 @@ internal fun PdfDocument(
                                 )
                             }
                         } else {
-                            Box(
-                                Modifier
-                                    .fillMaxSize()
-                                    .verticalScroll(singlePageVerticalScrollState)
-                                    .horizontalScroll(singlePageHorizontalScrollState)
-                                    .padding(24.dp)
-                                    .clickable { selectedPage = tab.pdfPage },
-                                contentAlignment = Alignment.TopCenter,
-                            ) {
-                                PdfTiledPage(
-                                    state = state,
-                                    tab = tab,
-                                    page = tab.pdfPage,
-                                    pageDimensions = dimensions,
-                                    dpi = singlePageRenderDpi,
+                            Box(Modifier.fillMaxSize()) {
+                                Box(
+                                    Modifier
+                                        .fillMaxSize()
+                                        .then(pdfPageHoverModifier { selectedPage = tab.pdfPage })
+                                        .verticalScroll(singlePageVerticalScrollState)
+                                        .horizontalScroll(singlePageHorizontalScrollState)
+                                        .padding(24.dp),
+                                    contentAlignment = Alignment.TopCenter,
+                                ) {
+                                    PdfTiledPage(
+                                        state = state,
+                                        tab = tab,
+                                        page = tab.pdfPage,
+                                        renderConfiguration =
+                                            PdfPageRenderConfiguration(
+                                                pageDimensions = dimensions,
+                                                renderViewport = currentPageDimensionsReady,
+                                            ),
+                                        modifier =
+                                            if (fitMode == PdfFitMode.WIDTH) {
+                                                Modifier.fillMaxWidth()
+                                            } else {
+                                                Modifier.width((680f * tab.pdfZoom).dp)
+                                            },
+                                        decoration = PdfPageDecoration(rotation, pageBorderWidth, pageBorder),
+                                        interaction =
+                                            PdfPageInteraction(
+                                                searchRegions =
+                                                    searchMatches
+                                                        .asSequence()
+                                                        .filter { it.pageIndex == tab.pdfPage }
+                                                        .flatMap { it.regions.asSequence() }
+                                                        .toList(),
+                                                selectionRegions =
+                                                    textSelection
+                                                        ?.takeIf { selectedTextPage == tab.pdfPage }
+                                                        ?.regions
+                                                        .orEmpty(),
+                                                selectionActions = selectionActionsForPage(tab.pdfPage),
+                                                textSelectionInteraction = textSelectionInteractionForPage(tab.pdfPage),
+                                                onLink = openPdfLink,
+                                            ),
+                                    )
+                                }
+                                VerticalScrollbar(
+                                    adapter = rememberScrollbarAdapter(singlePageVerticalScrollState),
                                     modifier =
-                                        if (fitMode == PdfFitMode.WIDTH) {
-                                            Modifier.fillMaxWidth().aspectRatio(aspectRatio)
-                                        } else {
-                                            Modifier.width((680f * tab.pdfZoom).dp).aspectRatio(aspectRatio)
-                                        },
-                                    decoration = PdfPageDecoration(rotation, pageBorderWidth, pageBorder),
-                                    interaction =
-                                        PdfPageInteraction(
-                                            searchRegions =
-                                                searchMatches
-                                                    .asSequence()
-                                                    .filter { it.pageIndex == tab.pdfPage }
-                                                    .flatMap { it.regions.asSequence() }
-                                                    .toList(),
-                                            selectionRegions =
-                                                textSelection
-                                                    ?.takeIf { selectedTextPage == tab.pdfPage }
-                                                    ?.regions
-                                                    .orEmpty(),
-                                            selectionActions = selectionActionsForPage(tab.pdfPage),
-                                            textSelectionInteraction = textSelectionInteractionForPage(tab.pdfPage),
-                                            onLink = openPdfLink,
-                                        ),
+                                        Modifier
+                                            .align(Alignment.CenterEnd)
+                                            .fillMaxHeight()
+                                            .padding(vertical = 4.dp),
+                                    style = pdfScrollbarStyle(),
                                 )
+                                if (fitMode != PdfFitMode.WIDTH) {
+                                    HorizontalScrollbar(
+                                        adapter = rememberScrollbarAdapter(singlePageHorizontalScrollState),
+                                        modifier =
+                                            Modifier
+                                                .align(Alignment.BottomCenter)
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 4.dp),
+                                        style = pdfScrollbarStyle(),
+                                    )
+                                }
                             }
                         }
                     }
@@ -965,6 +1057,37 @@ private fun PdfModeItem(
                 .padding(horizontal = 8.dp, vertical = 6.dp),
     )
 }
+
+@Composable
+private fun pdfPageHoverModifier(onClick: () -> Unit): Modifier {
+    val interactionSource = remember { MutableInteractionSource() }
+    val hovered by interactionSource.collectIsHoveredAsState()
+    val hoverColor =
+        if (hovered) {
+            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+        } else {
+            Color.Transparent
+        }
+    return Modifier
+        .background(hoverColor)
+        .hoverable(interactionSource)
+        .clickable(
+            interactionSource = interactionSource,
+            indication = null,
+            onClick = onClick,
+        )
+}
+
+@Composable
+private fun pdfScrollbarStyle(): ScrollbarStyle =
+    ScrollbarStyle(
+        minimalHeight = 28.dp,
+        thickness = 8.dp,
+        shape = RoundedCornerShape(4.dp),
+        hoverDurationMillis = 200,
+        unhoverColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.42f),
+        hoverColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
+    )
 
 private suspend fun <T> runTrackedPdfTask(
     state: WorkbenchState,
@@ -1228,22 +1351,28 @@ private fun PdfPageItem(
     modifier: Modifier = Modifier.fillMaxWidth(),
     onSelect: () -> Unit,
 ) {
-    var pageDimensions by remember(tab.relativePath, page) { mutableStateOf(DEFAULT_PAGE_DIMENSIONS) }
-    LaunchedEffect(tab.relativePath, page) {
+    var pageDimensions by remember(tab.relativePath, page, tab.lastKnownModified) {
+        mutableStateOf(DEFAULT_PAGE_DIMENSIONS)
+    }
+    var pageDimensionsReady by remember(tab.relativePath, page, tab.lastKnownModified) { mutableStateOf(false) }
+    LaunchedEffect(tab.relativePath, page, tab.lastKnownModified) {
+        pageDimensionsReady = false
         try {
             pageDimensions = state.inspectPdfPage(tab, page)
+            pageDimensionsReady = true
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: RuntimeException) {
             pageDimensions = DEFAULT_PAGE_DIMENSIONS
+            pageDimensionsReady = false
         }
     }
-    val renderDpi = rememberPdfRenderDpi("${tab.relativePath}:$page", 96f * zoom)
-    val originalAspectRatio = pageDimensions.widthPoints / pageDimensions.heightPoints
-    val aspectRatio = if (rotation % 180f == 90f) 1f / originalAspectRatio else originalAspectRatio
     val fitWidth = tab.pdfFitMode == PdfFitMode.WIDTH.name
     val outlineEvidenceRegions = outlineEvidenceForPage(tab.pdfOutline?.nodes.orEmpty(), page)
-    Column(modifier.clickable(onClick = onSelect), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        modifier.then(pdfPageHoverModifier(onSelect)),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         Text("${page + 1}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
         Spacer(Modifier.height(5.dp))
         Box(
@@ -1256,13 +1385,16 @@ private fun PdfPageItem(
                 state = state,
                 tab = tab,
                 page = page,
-                pageDimensions = pageDimensions,
-                dpi = renderDpi,
+                renderConfiguration =
+                    PdfPageRenderConfiguration(
+                        pageDimensions = pageDimensions,
+                        renderViewport = pageDimensionsReady,
+                    ),
                 modifier =
                     if (fitWidth) {
-                        Modifier.fillMaxWidth().aspectRatio(aspectRatio)
+                        Modifier.fillMaxWidth()
                     } else {
-                        Modifier.width((680f * zoom).dp).aspectRatio(aspectRatio)
+                        Modifier.width((680f * zoom).dp)
                     },
                 decoration =
                     PdfPageDecoration(

@@ -23,4 +23,16 @@ class PdfRenderLodTest {
             PdfRenderLod.quantizeWithHysteresis(88f, PdfRasterPurpose.VIEWPORT, currentDpi = 120f),
         )
     }
+
+    @Test
+    fun viewportLodSupportsHighDpiDisplaySurfaces() {
+        assertEquals(576f, PdfRenderLod.quantize(500f, PdfRasterPurpose.VIEWPORT))
+        assertEquals(960f, PdfRenderLod.quantize(900f, PdfRasterPurpose.VIEWPORT))
+    }
+
+    @Test
+    fun viewportLodAvoidsLargeUpwardJumpsNearCommonDisplayDpis() {
+        assertEquals(156f, PdfRenderLod.quantize(145f, PdfRasterPurpose.VIEWPORT))
+        assertEquals(216f, PdfRenderLod.quantize(193f, PdfRasterPurpose.VIEWPORT))
+    }
 }

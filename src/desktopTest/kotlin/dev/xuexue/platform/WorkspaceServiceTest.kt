@@ -166,6 +166,11 @@ class WorkspaceServiceTest {
     fun workspaceRevisionChangesForExternalStructureUpdates() =
         withWorkspace { root ->
             val before = service.workspaceRevision(root)
+            Files.createDirectories(root.resolve(".xuexue"))
+            Files.writeString(root.resolve(".xuexue/workbench.123.tmp"), "temporary state")
+            Files.writeString(root.resolve("workbench.123.tmp"), "temporary write")
+            assertEquals(before, service.workspaceRevision(root))
+
             service.atomicWrite(root.resolve("External.md"), "# External\n")
             val afterCreate = service.workspaceRevision(root)
             Files.move(root.resolve("External.md"), root.resolve("Moved.md"))

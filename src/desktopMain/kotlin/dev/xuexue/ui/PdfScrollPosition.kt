@@ -6,30 +6,56 @@ internal data class PdfScrollPosition(
     val lastVisiblePage: Int,
 )
 
+internal enum class PdfScrollDirection {
+    FORWARD,
+    BACKWARD,
+}
+
+internal data class PdfPrefetchSnapshot(
+    val position: PdfScrollPosition,
+    val isScrollInProgress: Boolean,
+)
+
+internal fun pdfScrollDirection(
+    previous: PdfScrollPosition?,
+    current: PdfScrollPosition,
+): PdfScrollDirection? =
+    when {
+        previous == null -> PdfScrollDirection.FORWARD
+        current.firstVisiblePage > previous.firstVisiblePage -> PdfScrollDirection.FORWARD
+        current.firstVisiblePage < previous.firstVisiblePage -> PdfScrollDirection.BACKWARD
+        current.firstVisibleOffset > previous.firstVisibleOffset -> PdfScrollDirection.FORWARD
+        current.firstVisibleOffset < previous.firstVisibleOffset -> PdfScrollDirection.BACKWARD
+        else -> null
+    }
+
 internal fun pdfPrefetchTarget(
     previous: PdfScrollPosition?,
     current: PdfScrollPosition,
     pageCount: Int,
 ): Int? {
+    val direction = pdfScrollDirection(previous, current)
+    return if (pageCount > 0 && direction != null) {
+        pdfPrefetchTargetForDirection(current, direction, pageCount)
+    } else {
+        null
+    }
+}
+
+internal fun pdfPrefetchTargetForDirection(
+    current: PdfScrollPosition,
+    direction: PdfScrollDirection,
+    pageCount: Int,
+): Int? {
     if (pageCount <= 0) return null
-    val direction =
-        when {
-            previous == null -> 1
-            current.firstVisiblePage > previous.firstVisiblePage -> 1
-            current.firstVisiblePage < previous.firstVisiblePage -> -1
-            current.firstVisibleOffset > previous.firstVisibleOffset -> 1
-            current.firstVisibleOffset < previous.firstVisibleOffset -> -1
-            else -> 0
-        }
     val target =
         when (direction) {
-            1 -> current.lastVisiblePage + 1
-            -1 -> current.firstVisiblePage - 1
-            else -> null
+            PdfScrollDirection.FORWARD -> current.lastVisiblePage + 1
+            PdfScrollDirection.BACKWARD -> current.firstVisiblePage - 1
         }
-    return target?.takeIf { it in 0 until pageCount }
+    return target.takeIf { it in 0 until pageCount }
 }
 
 internal const val PDF_PREVIEW_DPI = 36f
-internal const val PDF_PREFETCH_DELAY_MILLIS = 90L
+internal const val PDF_PREFETCH_DELAY_MILLIS = 140L
 internal const val PDF_SCROLL_PERSISTENCE_DELAY_MILLIS = 320L

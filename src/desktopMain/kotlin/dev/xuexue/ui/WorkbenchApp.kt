@@ -1382,6 +1382,7 @@ private fun StatusBar(state: WorkbenchState) {
         Spacer(Modifier.width(5.dp))
         StatusMessage(state.status, Modifier.weight(1f))
         StatusDocument(state)
+        MemoryStatusIndicator(Modifier.padding(start = 10.dp))
         StatusFlags(state.activeDocument?.dirty == true, state.agentRunning)
     }
 }

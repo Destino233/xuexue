@@ -1,5 +1,6 @@
 package dev.xuexue.platform
 
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
@@ -53,16 +54,30 @@ enum class PdfRasterPriority {
 object PdfRenderLod {
     private val viewportDpiLevels =
         floatArrayOf(
+            24f,
+            36f,
             48f,
+            60f,
             72f,
+            84f,
             96f,
             120f,
+            132f,
             144f,
+            156f,
+            168f,
+            180f,
             192f,
+            216f,
             240f,
             288f,
+            336f,
             384f,
+            432f,
             480f,
+            576f,
+            720f,
+            960f,
         )
 
     fun quantize(
@@ -177,6 +192,7 @@ data class PdfLink(
 )
 
 /** UI-facing boundary implemented by the MuPDF document actor and display-list render pool. */
+@Suppress("TooManyFunctions") // The backend contract keeps PDF operations and lifecycle trimming in one boundary.
 interface PdfReaderBackend : AutoCloseable {
     suspend fun inspect(path: Path): PdfDocumentMetadata
 
@@ -186,6 +202,8 @@ interface PdfReaderBackend : AutoCloseable {
     ): PdfPageDimensions
 
     suspend fun render(request: PdfRasterRequest): PdfPageRaster
+
+    suspend fun trimIdleResources() = Unit
 
     suspend fun search(
         path: Path,
@@ -242,14 +260,19 @@ class CachingPdfReaderBackend(
     private val delegate: PdfReaderBackend,
     private val maxRasterBytes: Long = DEFAULT_CACHE_BYTES,
     private val metrics: PdfPerformanceMetrics = PdfPerformanceMetrics(),
+    cacheablePurposes: Set<PdfRasterPurpose> = DEFAULT_CACHEABLE_PURPOSES,
 ) : PdfReaderBackend {
     private val mutex = Mutex()
     private val rasters = LinkedHashMap<PdfRasterCacheKey, CachedRaster>(16, 0.75f, true)
     private val inFlight = mutableMapOf<PdfRasterCacheKey, PendingRaster>()
+    private val retainedPurposes = cacheablePurposes.toSet()
     private var rasterBytes = 0L
 
     init {
         require(maxRasterBytes >= 0) { "PDF raster cache budget cannot be negative." }
+        require(PdfRasterPurpose.ANALYSIS !in retainedPurposes) {
+            "Analysis rasters must not enter the interactive PDF cache."
+        }
     }
 
     override suspend fun inspect(path: Path): PdfDocumentMetadata = delegate.inspect(path)
@@ -355,35 +378,48 @@ class CachingPdfReaderBackend(
         pageIndex: Int,
     ): List<PdfLink> = delegate.links(path, pageIndex)
 
-    override fun close() = delegate.close()
+    override suspend fun trimIdleResources() {
+        mutex.withLock {
+            rasters.clear()
+            rasterBytes = 0L
+            metrics.updateCacheBytes(0L)
+        }
+        delegate.trimIdleResources()
+    }
+
+    override fun close() {
+        runBlocking { trimIdleResources() }
+        delegate.close()
+    }
 
     private fun putRaster(
         key: PdfRasterCacheKey,
         raster: PdfPageRaster,
         priority: PdfRasterPriority,
     ) {
-        if (raster.incomplete) return
+        if (key.purpose !in retainedPurposes || raster.incomplete) return
         val newRasterBytes = raster.byteSize.toLong()
-        if (maxRasterBytes == 0L || newRasterBytes > maxRasterBytes) return
-        rasters.entries.removeAll { entry ->
-            val stale = entry.key.path == key.path && entry.key.revision != key.revision
-            if (stale) {
-                rasterBytes -= entry.value.raster.byteSize
+        if (maxRasterBytes > 0L && newRasterBytes <= maxRasterBytes) {
+            rasters.entries.removeAll { entry ->
+                val stale = entry.key.path == key.path && entry.key.revision != key.revision
+                if (stale) {
+                    rasterBytes -= entry.value.raster.byteSize
+                    metrics.recordCacheEviction()
+                }
+                stale
+            }
+            rasters.put(key, CachedRaster(raster, priority))?.let { replaced ->
+                rasterBytes -= replaced.raster.byteSize
+            }
+            rasterBytes += newRasterBytes
+            while (rasterBytes > maxRasterBytes && rasters.isNotEmpty()) {
+                val candidate = rasters.entries.minBy { entry -> entry.value.priority.ordinal }
+                rasterBytes -= candidate.value.raster.byteSize
+                rasters.remove(candidate.key)
                 metrics.recordCacheEviction()
             }
-            stale
+            metrics.updateCacheBytes(rasterBytes)
         }
-        rasters.put(key, CachedRaster(raster, priority))?.let { replaced ->
-            rasterBytes -= replaced.raster.byteSize
-        }
-        rasterBytes += newRasterBytes
-        while (rasterBytes > maxRasterBytes && rasters.isNotEmpty()) {
-            val candidate = rasters.entries.minBy { entry -> entry.value.priority.ordinal }
-            rasterBytes -= candidate.value.raster.byteSize
-            rasters.remove(candidate.key)
-            metrics.recordCacheEviction()
-        }
-        metrics.updateCacheBytes(rasterBytes)
     }
 
     private fun PdfRasterRequest.cacheKey(): PdfRasterCacheKey {
@@ -445,5 +481,10 @@ class CachingPdfReaderBackend(
 
     private companion object {
         const val DEFAULT_CACHE_BYTES = PdfMemoryBudget.RASTER_CACHE_BYTES
+        val DEFAULT_CACHEABLE_PURPOSES =
+            setOf(
+                PdfRasterPurpose.THUMBNAIL,
+                PdfRasterPurpose.VIEWPORT,
+            )
     }
 }

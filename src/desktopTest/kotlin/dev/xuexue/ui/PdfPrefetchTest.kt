@@ -12,6 +12,11 @@ class PdfPrefetchTest {
 
         assertEquals(5, pdfPrefetchTarget(previous = null, current = initial, pageCount = 10))
         assertEquals(5, pdfPrefetchTarget(previous = initial, current = scrolled, pageCount = 10))
+        assertEquals(PdfScrollDirection.FORWARD, pdfScrollDirection(initial, scrolled))
+        assertEquals(
+            5,
+            pdfPrefetchTargetForDirection(initial, PdfScrollDirection.FORWARD, pageCount = 10),
+        )
     }
 
     @Test
@@ -20,6 +25,11 @@ class PdfPrefetchTest {
         val current = PdfScrollPosition(firstVisiblePage = 3, firstVisibleOffset = 80, lastVisiblePage = 5)
 
         assertEquals(2, pdfPrefetchTarget(previous, current, pageCount = 10))
+        assertEquals(PdfScrollDirection.BACKWARD, pdfScrollDirection(previous, current))
+        assertEquals(
+            2,
+            pdfPrefetchTargetForDirection(current, PdfScrollDirection.BACKWARD, pageCount = 10),
+        )
     }
 
     @Test
@@ -30,5 +40,6 @@ class PdfPrefetchTest {
         assertNull(pdfPrefetchTarget(first, first, pageCount = 10))
         assertNull(pdfPrefetchTarget(last.copy(firstVisibleOffset = 0), last, pageCount = 10))
         assertNull(pdfPrefetchTarget(previous = null, current = last, pageCount = 10))
+        assertNull(pdfScrollDirection(first, first))
     }
 }

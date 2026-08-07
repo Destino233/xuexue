@@ -44,6 +44,7 @@ import dev.xuexue.platform.MuPdfReaderBackend
 import dev.xuexue.platform.OpenAiCompatibleAgentClient
 import dev.xuexue.platform.PdfDocumentMetadata
 import dev.xuexue.platform.PdfLink
+import dev.xuexue.platform.PdfMemoryBudget
 import dev.xuexue.platform.PdfNormalizedRect
 import dev.xuexue.platform.PdfOutlineExportStrategy
 import dev.xuexue.platform.PdfOutlineReviewState
@@ -65,6 +66,8 @@ import dev.xuexue.platform.ProgressivePdfRegistry
 import dev.xuexue.platform.RenamedEntry
 import dev.xuexue.platform.SearchHit
 import dev.xuexue.platform.WorkspaceService
+import dev.xuexue.platform.defaultApplicationMemoryLimitMiB
+import dev.xuexue.platform.normalizedApplicationMemoryLimitMiB
 import dev.xuexue.platform.normalizedDocumentWheelZoomMultiplier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -84,6 +87,8 @@ private data class NavigationLocation(
     val editorBlockIndex: Int,
     val pdfPage: Int,
 )
+
+private const val PDF_RESOURCE_TRIM_DELAY_MILLIS = 250L
 
 private data class WorkspaceEntryLoad(
     val kind: DocumentKind,
@@ -111,7 +116,13 @@ class WorkbenchState(
         pdfReaderBackend
             ?: CachingPdfReaderBackend(
                 MuPdfReaderBackend(pdfMetrics, progressivePdfSources),
+                maxRasterBytes = PdfMemoryBudget.RASTER_CACHE_BYTES,
                 metrics = pdfMetrics,
+                cacheablePurposes =
+                    setOf(
+                        PdfRasterPurpose.THUMBNAIL,
+                        PdfRasterPurpose.VIEWPORT,
+                    ),
             )
     internal val pdfTextureCache =
         PdfTextureCache<ImageBitmap>(
@@ -127,6 +138,8 @@ class WorkbenchState(
     var status by mutableStateOf("Ready")
         private set
     var documentWheelZoomMultiplier by mutableStateOf(DEFAULT_DOCUMENT_WHEEL_ZOOM_MULTIPLIER)
+        private set
+    var applicationMemoryLimitMiB by mutableStateOf(defaultApplicationMemoryLimitMiB())
         private set
     var errorMessage by mutableStateOf<String?>(null)
         private set
@@ -273,6 +286,7 @@ class WorkbenchState(
                 workspaceService.loadAppPreferences() to workspaceService.loadLastWorkspace()
             }
         documentWheelZoomMultiplier = restored.first.documentWheelZoomMultiplier
+        applicationMemoryLimitMiB = restored.first.applicationMemoryLimitMiB
         pdfOutlineController.restoreSettings(restored.first.documentAnalysisSettings)
         val root = restored.second ?: return
         openWorkspace(root, restore = true)
@@ -284,7 +298,11 @@ class WorkbenchState(
         pdfOutlineController.close()
         runCatching {
             workspaceService.saveAppPreferences(
-                AppPreferences(documentWheelZoomMultiplier, pdfOutlineController.settings),
+                AppPreferences(
+                    documentWheelZoomMultiplier = documentWheelZoomMultiplier,
+                    documentAnalysisSettings = pdfOutlineController.settings,
+                    applicationMemoryLimitMiB = applicationMemoryLimitMiB,
+                ),
             )
         }
         pdfTextureCache.close()
@@ -416,6 +434,7 @@ class WorkbenchState(
             workspaceRoot = null
             workspaceTree = null
             documents.clear()
+            schedulePdfResourceTrim()
             recentDocuments.clear()
             activePath = null
             backNavigation.clear()
@@ -872,7 +891,18 @@ class WorkbenchState(
         }
         detachedDocuments.remove(tab.relativePath)
         persistWorkbench()
+        schedulePdfResourceTrim()
         return true
+    }
+
+    private fun schedulePdfResourceTrim() {
+        scope.launch {
+            delay(PDF_RESOURCE_TRIM_DELAY_MILLIS)
+            if (documents.none { document -> document.kind == DocumentKind.PDF }) {
+                pdfTextureCache.trimIdle()
+                runCatching { resolvedPdfReaderBackend.trimIdleResources() }
+            }
+        }
     }
 
     fun updateContent(
@@ -1635,8 +1665,21 @@ class WorkbenchState(
         if (persist) persistDocumentPreferences()
     }
 
+    fun setApplicationMemoryLimitMiB(
+        value: Int,
+        persist: Boolean = true,
+    ) {
+        applicationMemoryLimitMiB = normalizedApplicationMemoryLimitMiB(value)
+        if (persist) persistDocumentPreferences()
+    }
+
     fun persistDocumentPreferences() {
-        val preferences = AppPreferences(documentWheelZoomMultiplier, pdfOutlineController.settings)
+        val preferences =
+            AppPreferences(
+                documentWheelZoomMultiplier = documentWheelZoomMultiplier,
+                documentAnalysisSettings = pdfOutlineController.settings,
+                applicationMemoryLimitMiB = applicationMemoryLimitMiB,
+            )
         scope.launch(Dispatchers.IO) { runCatching { workspaceService.saveAppPreferences(preferences) } }
     }
 

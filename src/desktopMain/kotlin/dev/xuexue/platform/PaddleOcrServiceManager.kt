@@ -208,8 +208,10 @@ private fun paddleDevicesMatch(
     return identity(expected) == identity(actual)
 }
 
-private fun isPaddleAcceleratedDevice(device: String): Boolean =
-    device.isNotBlank() && paddleDeviceBackend(device) != "cpu"
+private fun isPaddleAcceleratedDevice(device: String): Boolean {
+    if (device.isBlank()) return false
+    return paddleDeviceBackend(device) != "cpu"
+}
 
 private fun runtimePreferenceFailure(
     runtime: PaddleOcrRuntime,

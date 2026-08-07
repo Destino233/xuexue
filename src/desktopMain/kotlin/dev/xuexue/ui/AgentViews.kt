@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.FileCopy
 import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Restore
@@ -112,6 +113,7 @@ private enum class AgentSettingsSection(
     val label: String,
     val icon: ImageVector,
 ) {
+    APPLICATION("应用", Icons.Default.Memory),
     DOCUMENTS("文档", Icons.Default.PictureAsPdf),
     MODEL("模型与 Provider", Icons.Default.SmartToy),
     PERMISSIONS("工具与权限", Icons.Default.Tune),
@@ -922,6 +924,10 @@ fun AgentSettingsDialog(
                     Text(section.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(14.dp))
                     when (section) {
+                        AgentSettingsSection.APPLICATION -> {
+                            ApplicationSettingsPane(state)
+                        }
+
                         AgentSettingsSection.DOCUMENTS -> {
                             DocumentSettingsPane(state)
                         }

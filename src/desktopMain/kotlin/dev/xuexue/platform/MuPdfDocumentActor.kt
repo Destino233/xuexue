@@ -61,27 +61,30 @@ internal class MuPdfSessionManager(
     private val mutex = Mutex()
     private val current = mutableMapOf<Path, MuPdfSessionRecord>()
     private val records = mutableSetOf<MuPdfSessionRecord>()
+    private var accessSerial = 0L
 
     suspend fun acquire(path: Path): MuPdfSessionLease {
         val normalizedPath = path.toAbsolutePath().normalize()
         val progressiveSource = progressiveSources.sourceFor(normalizedPath)
         val revision = progressiveSource?.revision() ?: normalizedPath.revision()
-        var sessionToClose: MuPdfDocumentSession? = null
+        val sessionsToClose = mutableListOf<MuPdfDocumentSession>()
         val record =
             mutex.withLock {
                 val existing = current[normalizedPath]
                 if (existing != null && existing.revision == revision) {
                     existing.references++
+                    existing.lastUsedSerial = ++accessSerial
                     existing
                 } else {
                     if (existing != null) {
                         existing.retired = true
                         if (existing.references == 0) {
                             records.remove(existing)
-                            sessionToClose = existing.session
+                            sessionsToClose += existing.session
                         }
                     }
                     MuPdfSessionRecord(
+                        path = normalizedPath,
                         revision = revision,
                         session =
                             MuPdfDocumentSession(
@@ -91,27 +94,42 @@ internal class MuPdfSessionManager(
                                 progressiveScope = progressiveScope,
                             ),
                         references = 1,
+                        lastUsedSerial = ++accessSerial,
                     ).also { created ->
                         current[normalizedPath] = created
                         records += created
                     }
-                }
+                }.also { selected -> evictIdleSessionsLocked(sessionsToClose, selected) }
             }
-        sessionToClose?.close()
+        sessionsToClose.forEach { session -> session.close() }
         return MuPdfSessionLease(record.session, this, record)
     }
 
     suspend fun release(record: MuPdfSessionRecord) {
-        var sessionToClose: MuPdfDocumentSession? = null
+        val sessionsToClose = mutableListOf<MuPdfDocumentSession>()
         mutex.withLock {
             check(record.references > 0) { "MuPDF session reference count underflow." }
             record.references--
             if (record.retired && record.references == 0) {
                 records.remove(record)
-                sessionToClose = record.session
+                sessionsToClose += record.session
+            } else if (record.references == 0) {
+                record.lastUsedSerial = ++accessSerial
             }
+            evictIdleSessionsLocked(sessionsToClose)
         }
-        sessionToClose?.close()
+        sessionsToClose.forEach { session -> session.close() }
+    }
+
+    suspend fun trimIdleSessionsAndStore() {
+        mutex.withLock {
+            if (records.any { record -> record.references > 0 }) return@withLock
+            val sessionsToClose = records.toList()
+            current.clear()
+            records.clear()
+            sessionsToClose.forEach { record -> record.session.close() }
+            MuPdfNative.emptyStore()
+        }
     }
 
     suspend fun close() {
@@ -134,6 +152,27 @@ internal class MuPdfSessionManager(
             size = length,
             modifiedAtMillis = revision,
         )
+
+    private fun evictIdleSessionsLocked(
+        sessionsToClose: MutableList<MuPdfDocumentSession>,
+        keep: MuPdfSessionRecord? = null,
+    ) {
+        val idle =
+            records
+                .asSequence()
+                .filter { record -> record !== keep && record.references == 0 }
+                .sortedBy { record -> record.lastUsedSerial }
+                .toList()
+        idle.take((idle.size - MAX_IDLE_SESSIONS).coerceAtLeast(0)).forEach { record ->
+            records.remove(record)
+            if (current[record.path] === record) current.remove(record.path)
+            sessionsToClose += record.session
+        }
+    }
+
+    private companion object {
+        const val MAX_IDLE_SESSIONS = 2
+    }
 }
 
 @Suppress("TooManyFunctions") // Session operations must stay on the same MuPDF document actor.
@@ -346,10 +385,12 @@ internal class MuPdfPageEntry(
 )
 
 internal class MuPdfSessionRecord(
+    val path: Path,
     val revision: MuPdfFileRevision,
     val session: MuPdfDocumentSession,
     var references: Int,
     var retired: Boolean = false,
+    var lastUsedSerial: Long = 0L,
 )
 
 internal data class MuPdfFileRevision(

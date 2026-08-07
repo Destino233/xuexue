@@ -1,4 +1,3 @@
-import org.gradle.api.tasks.JavaExec
 import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.testing.Test
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
@@ -164,6 +163,7 @@ compose.desktop {
         dependsOn("bootstrapMuPdf", "prepareMuPdfAppResources")
         jvmArgs(
             "--enable-native-access=ALL-UNNAMED",
+            "-Djava.library.path=${muPdfDirectory.asFile.absolutePath}",
         )
 
         nativeDistributions {
@@ -181,8 +181,4 @@ compose.desktop {
             }
         }
     }
-}
-
-tasks.matching { it.name == "run" }.configureEach {
-    if (this is JavaExec) jvmArgs("-Djava.library.path=${muPdfDirectory.asFile.absolutePath}")
 }

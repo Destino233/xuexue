@@ -1731,16 +1731,14 @@ private fun ImageDocument(
     var error by remember(relativePath) { mutableStateOf<String?>(null) }
     var zoom by remember(relativePath) { mutableStateOf(1f) }
     var pan by remember(relativePath) { mutableStateOf(Offset.Zero) }
+    DisposableEffect(relativePath, bitmap) {
+        onDispose { bitmap?.releaseSkiaResources() }
+    }
     LaunchedEffect(relativePath) {
         runCatching {
             withContext(Dispatchers.IO) {
                 val path = state.resolveWorkspacePath(relativePath) ?: error("Image is no longer available.")
-                path to
-                    SkiaImage
-                        .makeFromEncoded(
-                            java.nio.file.Files
-                                .readAllBytes(path),
-                        ).toComposeImageBitmap()
+                path to loadComposeImage(path)
             }
         }.onSuccess { (path, image) ->
             resolvedPath = path
@@ -1798,6 +1796,19 @@ private fun ImageDocument(
                 }
             }
         }
+    }
+}
+
+private fun loadComposeImage(path: java.nio.file.Path): ImageBitmap {
+    val image =
+        SkiaImage.makeFromEncoded(
+            java.nio.file.Files
+                .readAllBytes(path),
+        )
+    return try {
+        image.toComposeImageBitmap()
+    } finally {
+        image.close()
     }
 }
 

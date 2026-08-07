@@ -21,6 +21,7 @@ class AppPreferencesTest {
                             perDocumentEngineIds = mapOf("scan.pdf" to PpStructureV3Engine.ENGINE_ID),
                             allowLowConfidenceVlFallback = true,
                         ),
+                    applicationMemoryLimitMiB = 4_096,
                 ),
             )
 
@@ -32,8 +33,13 @@ class AppPreferencesTest {
                 restored.documentAnalysisSettings.perDocumentEngineIds["scan.pdf"],
             )
             assertEquals(true, service.loadAppPreferences().documentAnalysisSettings.allowLowConfidenceVlFallback)
+            assertEquals(4_096, service.loadAppPreferences().applicationMemoryLimitMiB)
+            assertEquals(true, service.hasConfiguredApplicationMemoryLimit())
             assertEquals(2f, normalizedDocumentWheelZoomMultiplier(20f))
             assertEquals(1f, normalizedDocumentWheelZoomMultiplier(Float.NaN))
+            assertEquals(MIN_APPLICATION_MEMORY_MIB, normalizedApplicationMemoryLimitMiB(1))
+            assertEquals(1_024, normalizedApplicationMemoryLimitMiB(768))
+            assertEquals(MAX_APPLICATION_MEMORY_MIB, normalizedApplicationMemoryLimitMiB(Int.MAX_VALUE))
         } finally {
             Files.walk(root).use { paths ->
                 paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists)

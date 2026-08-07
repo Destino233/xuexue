@@ -9,6 +9,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.nio.ByteBuffer
@@ -25,15 +26,17 @@ internal class MuPdfReaderBackend(
     private val progressiveSources: ProgressivePdfRegistry = ProgressivePdfRegistry(),
 ) : PdfReaderBackend {
     private val documentDispatcher = newDaemonDispatcher("document", 1)
+    private val renderThreadCount = (Runtime.getRuntime().availableProcessors() - 1).coerceIn(1, MAX_RENDER_THREADS)
     private val renderDispatcher =
         newDaemonDispatcher(
             name = "render",
-            threads = (Runtime.getRuntime().availableProcessors() - 1).coerceIn(1, MAX_RENDER_THREADS),
+            threads = renderThreadCount,
         )
     private val progressiveJob = SupervisorJob()
     private val progressiveScope = CoroutineScope(progressiveJob + renderDispatcher)
     private val sessions = MuPdfSessionManager(documentDispatcher, progressiveSources, progressiveScope)
     private val pageProcessor = MuPdfPageProcessor(renderDispatcher)
+    private val renderAdmission = PdfRenderAdmission(renderThreadCount)
 
     override suspend fun inspect(path: Path): PdfDocumentMetadata =
         withSession(path) { session ->
@@ -49,18 +52,21 @@ internal class MuPdfReaderBackend(
         metrics.recordRenderStarted()
         val startedAt = System.nanoTime()
         return try {
-            withSession(request.path) { session ->
-                pageProcessor.render(session, request)
-            }.also { raster ->
-                metrics.recordRenderCompleted(
-                    durationNanos = System.nanoTime() - startedAt,
-                    rasterBytes = raster.byteSize,
-                    firstViewportCandidate =
-                        request.purpose == PdfRasterPurpose.VIEWPORT &&
-                            request.priority == PdfRasterPriority.VISIBLE &&
-                            request.layer == PdfRasterLayer.CONTENT,
-                )
-            }
+            renderAdmission
+                .withPermit {
+                    withSession(request.path) { session ->
+                        pageProcessor.render(session, request)
+                    }
+                }.also { raster ->
+                    metrics.recordRenderCompleted(
+                        durationNanos = System.nanoTime() - startedAt,
+                        rasterBytes = raster.byteSize,
+                        firstViewportCandidate =
+                            request.purpose == PdfRasterPurpose.VIEWPORT &&
+                                request.priority == PdfRasterPriority.VISIBLE &&
+                                request.layer == PdfRasterLayer.CONTENT,
+                    )
+                }
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             metrics.recordRenderCancelled(System.nanoTime() - startedAt)
             throw cancelled
@@ -147,6 +153,10 @@ internal class MuPdfReaderBackend(
             decodePdfLinks(session.loadLinks(pageIndex))
         }
 
+    override suspend fun trimIdleResources() {
+        sessions.trimIdleSessionsAndStore()
+    }
+
     override fun close() {
         runBlocking {
             progressiveJob.cancelAndJoin()
@@ -191,6 +201,25 @@ internal class MuPdfReaderBackend(
                     Thread(runnable, "xuexue-mupdf-$name-${sequence.incrementAndGet()}").apply { isDaemon = true }
                 }
             return Executors.newFixedThreadPool(threads, factory).asCoroutineDispatcher()
+        }
+    }
+}
+
+internal class PdfRenderAdmission(
+    maxInFlight: Int,
+) {
+    private val permits = Semaphore(maxInFlight)
+
+    init {
+        require(maxInFlight > 0) { "PDF render admission must allow at least one task." }
+    }
+
+    suspend fun <T> withPermit(block: suspend () -> T): T {
+        permits.acquire()
+        return try {
+            block()
+        } finally {
+            permits.release()
         }
     }
 }

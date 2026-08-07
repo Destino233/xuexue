@@ -17,7 +17,8 @@ import dev.xuexue.ui.WorkbenchApp
 import kotlinx.coroutines.launch
 import java.awt.Dimension
 
-fun main() =
+fun main() {
+    if (restartWithConfiguredMemory()) return
     application {
         val scope = rememberCoroutineScope()
         val state = remember { WorkbenchState(scope) }
@@ -79,3 +80,4 @@ fun main() =
             )
         }
     }
+}

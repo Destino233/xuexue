@@ -126,6 +126,36 @@ class PdfReaderBackendTest {
         }
 
     @Test
+    fun rasterCacheCanRetainOnlyThumbnailPurposes() =
+        runBlocking {
+            val path = Files.createTempFile("xuexue-pdf-purpose-cache", ".pdf")
+            var renderCount = 0
+            val backend =
+                CachingPdfReaderBackend(
+                    recordingBackend { request ->
+                        renderCount++
+                        testRaster(request.pageIndex, marker = renderCount.toByte())
+                    },
+                    maxRasterBytes = 1024,
+                    cacheablePurposes = setOf(PdfRasterPurpose.THUMBNAIL),
+                )
+            try {
+                val viewport = PdfRasterRequest(path, 0, 96f, PdfRasterPurpose.VIEWPORT)
+                val thumbnail = PdfRasterRequest(path, 0, 36f, PdfRasterPurpose.THUMBNAIL)
+
+                backend.render(viewport)
+                backend.render(viewport)
+                backend.render(thumbnail)
+                backend.render(thumbnail)
+
+                assertEquals(3, renderCount)
+            } finally {
+                backend.close()
+                Files.deleteIfExists(path)
+            }
+        }
+
+    @Test
     fun analysisRendersKeepRequestedDpiAndNeverEnterTheViewportCache() =
         runBlocking {
             val path = Files.createTempFile("xuexue-pdf-analysis-cache", ".pdf")

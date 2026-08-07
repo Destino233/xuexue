@@ -1,11 +1,12 @@
 package dev.xuexue.platform
 
 internal object PdfMemoryBudget {
-    const val TOTAL_BYTES = 224L * 1024L * 1024L
+    const val TOTAL_BYTES = 288L * 1024L * 1024L
     const val MUPDF_STORE_BYTES = 96L * 1024L * 1024L
     const val RASTER_CACHE_BYTES = 64L * 1024L * 1024L
-    const val TEXTURE_CACHE_BYTES = 48L * 1024L * 1024L
-    const val PIPELINE_HEADROOM_BYTES = 16L * 1024L * 1024L
+    const val THUMBNAIL_RASTER_CACHE_BYTES = 24L * 1024L * 1024L
+    const val TEXTURE_CACHE_BYTES = 80L * 1024L * 1024L
+    const val PIPELINE_HEADROOM_BYTES = 32L * 1024L * 1024L
 
     init {
         check(
