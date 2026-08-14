@@ -9,6 +9,7 @@ import dev.xuexue.pi.coding.extensions.PiExtensionProvider
 import dev.xuexue.pi.coding.trust.ProjectTrustInteraction
 import dev.xuexue.pi.coding.trust.ProjectTrustStore
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import java.io.File
 import java.io.FileOutputStream
@@ -45,8 +46,9 @@ class PiRuntimeBootstrapTest {
                     {"schemaVersion":1,"id":"bootstrap.user.package","version":"1.0.0","extensions":["extensions/user-process"]}
                     """.trimIndent(),
                 )
+                val encodedUserPackagePath = JsonPrimitive(userPackage.path)
                 agentDirectory.resolve("settings.json").writeText(
-                    """{"packages":["${userPackage.path}"]}""",
+                    """{"packages":[$encodedUserPackagePath]}""",
                 )
                 writeProjectPlugin(projectDirectory, projectMarker)
 
@@ -159,6 +161,7 @@ class PiRuntimeBootstrapTest {
         projectMarker: File,
         disposedMarker: File? = null,
     ) {
+        val projectMarkerPath = shellPath(projectMarker)
         val manifest = directory.resolve(PI_PLUGIN_MANIFEST_PATH)
         manifest.parentFile.mkdirs()
         manifest.writeText(processManifest("bootstrap.user.process"))
@@ -187,7 +190,7 @@ class PiRuntimeBootstrapTest {
                   echo '{"type":"ready"}'
                   ;;
                 *'"event":"project_trust"'*)
-                  if [ -e '${projectMarker.path}' ]; then
+                   if [ -e '$projectMarkerPath' ]; then
                     echo '{"type":"event_result","result":"project_trust","trusted":"no","remember":false}'
                   else
                     echo '{"type":"event_result","result":"project_trust","trusted":"$decision","remember":$remember}'
@@ -208,6 +211,7 @@ class PiRuntimeBootstrapTest {
         projectDirectory: File,
         projectMarker: File,
     ) {
+        val projectMarkerPath = shellPath(projectMarker)
         val directory = projectDirectory.resolve(".xuexue/pi/extensions/project-process")
         val manifest = directory.resolve(PI_PLUGIN_MANIFEST_PATH)
         manifest.parentFile.mkdirs()
@@ -219,7 +223,7 @@ class PiRuntimeBootstrapTest {
             while IFS= read -r line; do
               case "${'$'}line" in
                 *initialize*)
-                  touch '${projectMarker.path}'
+                   touch '$projectMarkerPath'
                   echo '{"type":"register_tool","name":"project-tool","description":"Project tool","parameters":{}}'
                   echo '{"type":"ready"}'
                   ;;
@@ -232,6 +236,22 @@ class PiRuntimeBootstrapTest {
         )
         check(script.setExecutable(true))
     }
+
+    private fun shellPath(file: File): String {
+        val path =
+            file.absoluteFile
+                .toPath()
+                .normalize()
+                .toString()
+                .replace('\\', '/')
+        return if (isWindows() && path.length >= 2 && path[1] == ':') {
+            "/${path[0].lowercaseChar()}${path.substring(2)}"
+        } else {
+            path
+        }
+    }
+
+    private fun isWindows(): Boolean = System.getProperty("os.name").orEmpty().contains("win", ignoreCase = true)
 
     private fun writeJvmPluginJar(jar: File) {
         val classPath = "/${BootstrapJvmPluginProvider::class.java.name.replace('.', '/')}.class"

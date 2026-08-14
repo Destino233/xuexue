@@ -157,11 +157,12 @@ internal class DesktopAgentTools(
                 val command = arguments.string("command").ifBlank { error("The 'command' argument is required.") }
                 allowed(AgentOperationKind.RUN_SHELL, command, "Run command in ${root.fileName}")
                 onProgress("Running command")
-                val process =
-                    ProcessBuilder("bash", "-lc", command)
+                val processBuilder =
+                    ProcessBuilder(DesktopShellSupport.command(command))
                         .directory(root.toFile())
                         .redirectErrorStream(true)
-                        .start()
+                DesktopShellSupport.configure(processBuilder)
+                val process = processBuilder.start()
                 val cancellation =
                     coroutineContext[Job]?.invokeOnCompletion {
                         process.destroy()

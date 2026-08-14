@@ -312,7 +312,7 @@ class PiRpcProtocolTest {
 
             assertTrue(response["success"]?.jsonPrimitive?.content == "true", response.toString())
             assertEquals(
-                "done:printf hi@/workspace",
+                "done:printf hi@${runtime.session.sessionManager.getCwd()}",
                 response["data"]
                     ?.jsonObject
                     ?.get("output")

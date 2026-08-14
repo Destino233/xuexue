@@ -41,8 +41,10 @@ class ProjectTrustStoreTest {
         )
 
         val root = Json.parseToJsonElement(requireNotNull(storage.content())).jsonObject
-        assertEquals(listOf("/a", "/z"), root.keys.toList())
-        assertEquals(true, root["/a"]?.jsonPrimitive?.content?.toBoolean())
+        val pathA = PlatformResourceFileSystem.resolvePath("/a")
+        val pathZ = PlatformResourceFileSystem.resolvePath("/z")
+        assertEquals(listOf(pathA, pathZ), root.keys.toList())
+        assertEquals(true, root[pathA]?.jsonPrimitive?.content?.toBoolean())
 
         val invalidStore = ProjectTrustStore(InMemoryProjectTrustStorage("[]"))
         kotlin.test.assertFailsWith<IllegalStateException> { invalidStore.get("/tmp/project") }

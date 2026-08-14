@@ -20,11 +20,13 @@ class LocalBashExecutor : AgentSessionBashExecutor {
         excludeFromContext: Boolean?,
     ): BashResult =
         withContext(Dispatchers.IO) {
-            val process =
-                ProcessBuilder(shellCommand(command))
+            val builder =
+                ProcessBuilder(WindowsProcessSupport.shellCommand(command))
                     .directory(Path.of(cwd).toFile())
                     .redirectErrorStream(true)
-                    .start()
+            WindowsProcessSupport.configure(builder)
+            val process =
+                builder.start()
             val activeProcess = ActiveProcess(process)
             active.set(activeProcess)
             val cancellation =
@@ -51,13 +53,6 @@ class LocalBashExecutor : AgentSessionBashExecutor {
             current.cancelled = true
             destroy(current.process)
         }
-    }
-
-    private fun shellCommand(command: String): List<String> {
-        val windows = System.getProperty("os.name").orEmpty().contains("win", ignoreCase = true)
-        if (windows) return listOf("cmd.exe", "/c", command)
-        val shell = System.getenv("SHELL")?.takeIf(String::isNotBlank) ?: "/bin/sh"
-        return listOf(shell, "-lc", command)
     }
 
     private fun readOutput(process: Process): PiBashOutputSnapshot {

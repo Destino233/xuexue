@@ -40,6 +40,7 @@ import dev.xuexue.pi.ai.createAssistantMessageEventStream
 import dev.xuexue.pi.coding.InteractionRequest
 import dev.xuexue.pi.coding.InteractionResponse
 import dev.xuexue.pi.coding.InteractionSeverity
+import dev.xuexue.pi.coding.WindowsProcessSupport
 import dev.xuexue.pi.coding.resources.ResourceExtensionPaths
 import dev.xuexue.pi.coding.resources.ResourceOrigin
 import dev.xuexue.pi.coding.resources.ResourcePathContribution
@@ -174,12 +175,13 @@ private class ProcessPluginBridge(
     private var readerJob: kotlinx.coroutines.Job? = null
 
     fun start() {
-        val builder =
-            ProcessBuilder(command)
+        val processBuilder =
+            ProcessBuilder(WindowsProcessSupport.processCommand(command))
                 .directory(File(workingDirectory))
                 .redirectError(ProcessBuilder.Redirect.INHERIT)
-        environment.forEach { (key, value) -> builder.environment()[key] = value }
-        val started = builder.start()
+        WindowsProcessSupport.configure(processBuilder)
+        environment.forEach { (key, value) -> processBuilder.environment()[key] = value }
+        val started = processBuilder.start()
         process = started
         reader = BufferedReader(InputStreamReader(started.inputStream, Charsets.UTF_8))
         writer = BufferedWriter(OutputStreamWriter(started.outputStream, Charsets.UTF_8))

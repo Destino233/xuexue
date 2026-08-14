@@ -342,18 +342,19 @@ class DesktopPiCodingToolsTest {
     @Test
     fun bashTimeoutIncludesOutputCollectedBeforeCancellation() =
         runTest {
+            val timeoutSeconds = if (isWindows()) 1.0 else 0.1
             val error =
                 assertFailsWith<IllegalStateException> {
                     execute(
                         "bash",
                         buildJsonObject {
-                            put("command", "printf before; sleep 2")
-                            put("timeout", 0.1)
+                            put("command", "printf 'before\\n'; sleep 2")
+                            put("timeout", timeoutSeconds)
                         },
                     )
                 }
             assertContains(error.message.orEmpty(), "before")
-            assertContains(error.message.orEmpty(), "Command timed out after 0.1 seconds")
+            assertContains(error.message.orEmpty(), "Command timed out after $timeoutSeconds seconds")
         }
 
     private suspend fun execute(
@@ -363,4 +364,6 @@ class DesktopPiCodingToolsTest {
         val tool = requireNotNull(tools[name])
         return tool.execute("test-$name", arguments, null, null)
     }
+
+    private fun isWindows(): Boolean = System.getProperty("os.name").orEmpty().contains("win", ignoreCase = true)
 }

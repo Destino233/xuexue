@@ -2,6 +2,7 @@
 
 package dev.xuexue.pi.coding.exec
 
+import dev.xuexue.pi.coding.WindowsProcessSupport
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -67,8 +68,8 @@ class LocalPiCommandExecutor : PiCommandExecutor {
                 }
                 val exitCode = process.exitValueOrDefault()
                 PiExecResult(
-                    stdout = stdout.await(),
-                    stderr = stderr.await(),
+                    stdout = WindowsProcessSupport.normalizeOutput(stdout.await()),
+                    stderr = WindowsProcessSupport.normalizeOutput(stderr.await()),
                     code = exitCode.takeUnless { killed.get() } ?: 0,
                     killed = killed.get(),
                 )

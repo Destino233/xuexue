@@ -424,11 +424,12 @@ internal class DesktopPiCodingTools(
             }
             val root = root()
             allowed(AgentOperationKind.RUN_SHELL, command, "Run command in ${root.fileName}")
-            val process =
-                ProcessBuilder(shellCommand(command))
+            val processBuilder =
+                ProcessBuilder(DesktopShellSupport.command(command))
                     .directory(root.toFile())
                     .redirectErrorStream(true)
-                    .start()
+            DesktopShellSupport.configure(processBuilder)
+            val process = processBuilder.start()
             activeProcess.set(process)
             val abortSubscription = signal?.onAbort { destroyProcess(process) }
             val cancellation = coroutineContext[Job]?.invokeOnCompletion { destroyProcess(process) }
@@ -516,13 +517,6 @@ internal class DesktopPiCodingTools(
                 activeProcess.compareAndSet(process, null)
             }
         }
-
-    private fun shellCommand(command: String): List<String> {
-        val windows = System.getProperty("os.name").orEmpty().contains("win", ignoreCase = true)
-        if (windows) return listOf("cmd.exe", "/c", command)
-        val shell = System.getenv("SHELL")?.takeIf(String::isNotBlank) ?: "/bin/sh"
-        return listOf(shell, "-lc", command)
-    }
 
     private fun readProcessOutput(
         process: Process,

@@ -1,6 +1,7 @@
 package dev.xuexue.pi.coding.session
 
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.nio.file.Files
@@ -121,10 +122,11 @@ class SessionPersistenceTest {
     fun openingV1SessionMigratesAndBuildsContext() =
         withTempDirectory { directory ->
             val file = directory.resolve("v1.jsonl")
+            val encodedDirectory = JsonPrimitive(directory.toString())
             Files.writeString(
                 file,
                 """
-                {"type":"session","id":"legacy","timestamp":"2025-01-01T00:00:00Z","cwd":"$directory"}
+                {"type":"session","id":"legacy","timestamp":"2025-01-01T00:00:00Z","cwd":$encodedDirectory}
                 {"type":"message","timestamp":"2025-01-01T00:00:01Z","message":{"role":"user","content":"hello","timestamp":1}}
                 {"type":"message","timestamp":"2025-01-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"hi"}],"api":"test","provider":"test","model":"test","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0},"stopReason":"stop","timestamp":2}}
                 """.trimIndent() + "\n",

@@ -111,21 +111,21 @@ class LocalPiCommandExecutorTest {
 
     private fun args(): List<String> =
         if (isWindows()) {
-            listOf("/c", "echo stdout & echo stderr 1>&2")
+            listOf("/c", "echo stdout& echo stderr>&2")
         } else {
             listOf("-c", "printf 'stdout\\n'; printf 'stderr\\n' >&2")
         }
 
     private fun slowArgs(prefix: String): List<String> =
         if (isWindows()) {
-            listOf("/c", "echo $prefix & ping -n 30 127.0.0.1 >nul")
+            listOf("/c", "echo $prefix& ping -n 30 127.0.0.1 >nul")
         } else {
             listOf("-c", "printf '$prefix\\n'; sleep 30")
         }
 
     private fun abortArgs(): List<String> =
         if (isWindows()) {
-            listOf("/c", "type nul > \"%PI_EXEC_MARKER%\" & echo before-abort & ping -n 30 127.0.0.1 >nul")
+            listOf("/c", "type nul > \"%PI_EXEC_MARKER%\"& echo before-abort& ping -n 30 127.0.0.1 >nul")
         } else {
             listOf("-c", ": > \"${'$'}PI_EXEC_MARKER\"; printf 'before-abort\\n'; sleep 30")
         }
