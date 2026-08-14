@@ -14,3 +14,7 @@ __pycache__/
 *.pyc
 参考内容/
 count_code.py
+
+experiments/graalvm-native-image/notes/smoke/*.exe
+experiments/graalvm-native-image/notes/smoke/*.class
+
