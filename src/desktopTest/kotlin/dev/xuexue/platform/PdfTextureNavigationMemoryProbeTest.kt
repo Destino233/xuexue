@@ -41,10 +41,13 @@ class PdfTextureNavigationMemoryProbeTest {
                     .mapNotNull { value -> value.trim().toFloatOrNull() }
                     .filter { it > 0f }
             metrics = PdfPerformanceMetrics()
+            // Mirror the production wiring: viewport rasters live only in the
+            // texture cache; the raster cache keeps thumbnails and previews.
             val backend =
                 CachingPdfReaderBackend(
                     MuPdfReaderBackend(metrics),
                     metrics = metrics,
+                    cacheablePurposes = setOf(PdfRasterPurpose.THUMBNAIL),
                 )
             val textureCache =
                 PdfTextureCache<ImageBitmap>(

@@ -124,11 +124,9 @@ class WorkbenchState(
                 MuPdfReaderBackend(pdfMetrics, progressivePdfSources),
                 maxRasterBytes = PdfMemoryBudget.RASTER_CACHE_BYTES,
                 metrics = pdfMetrics,
-                cacheablePurposes =
-                    setOf(
-                        PdfRasterPurpose.THUMBNAIL,
-                        PdfRasterPurpose.VIEWPORT,
-                    ),
+                // Viewport rasters are consumed by the texture cache immediately;
+                // caching them again here would duplicate every tile's pixels.
+                cacheablePurposes = setOf(PdfRasterPurpose.THUMBNAIL),
             )
     internal val pdfTextureCache =
         PdfTextureCache<ImageBitmap>(
@@ -1125,6 +1123,7 @@ class WorkbenchState(
         topNormalized: Float? = null,
     ) {
         pdfController.setPosition(document, page, scrollOffset, zoom, persist, topNormalized)
+        if (zoom != null) clearPdfIdleTextures(document)
     }
 
     fun setPdfFitMode(
@@ -1132,6 +1131,19 @@ class WorkbenchState(
         document: DocumentTab? = activeDocument,
     ) {
         pdfController.setFitMode(document, mode)
+        clearPdfIdleTextures(document)
+    }
+
+    /** Drops cached textures of the previous zoom/fit level; the visible tiles are
+     *  leased, so only the stale idle entries are released immediately. */
+    fun clearPdfIdleTextures(document: DocumentTab?) {
+        val path = pdfTextureDocumentPath(document) ?: return
+        pdfTextureCache.trimIdle(path)
+    }
+
+    private fun pdfTextureDocumentPath(document: DocumentTab?): String? {
+        val tab = document?.takeIf { it.kind == DocumentKind.PDF } ?: return null
+        return workspaceRoot?.resolve(tab.relativePath)?.normalize()?.toString()
     }
 
     suspend fun inspectPdf(document: DocumentTab): PdfDocumentMetadata = pdfController.inspect(document)

@@ -1188,6 +1188,113 @@ Java_dev_xuexue_platform_MuPdfNative_renderRgba(
     return result;
 }
 
+JNIEXPORT jlong JNICALL
+Java_dev_xuexue_platform_MuPdfNative_renderRgbaNative(
+    JNIEnv *env,
+    jobject self,
+    jlong display_list_handle,
+    jfloat scale,
+    jint x,
+    jint y,
+    jint width,
+    jint height,
+    jint crop_x,
+    jint crop_y,
+    jint crop_width,
+    jint crop_height,
+    jlong cookie_handle,
+    jboolean transparent)
+{
+    fz_context *ctx = get_context(env);
+    fz_display_list *display_list = (fz_display_list *)(intptr_t)display_list_handle;
+    fz_cookie *cookie = (fz_cookie *)(intptr_t)cookie_handle;
+    fz_pixmap *pixmap = NULL;
+    fz_device *device = NULL;
+    fz_matrix transform = fz_scale(scale, scale);
+    fz_irect pixel_bounds = {x, y, x + width, y + height};
+    size_t byte_count;
+    unsigned char *buffer = NULL;
+    jlong result = 0;
+
+    (void)self;
+    if (ctx == NULL || display_list == NULL || cookie == NULL)
+        return 0;
+    if (scale <= 0 || width <= 0 || height <= 0 ||
+        crop_x < x || crop_y < y || crop_width <= 0 || crop_height <= 0 ||
+        crop_x > x + width - crop_width || crop_y > y + height - crop_height)
+    {
+        throw_java(env, "java/lang/IllegalArgumentException", "MuPDF render/crop dimensions must be positive and nested.");
+        return 0;
+    }
+    byte_count = (size_t)crop_width * (size_t)crop_height * 4u;
+    fz_var(pixmap);
+    fz_var(device);
+    fz_var(pixel_bounds);
+    fz_var(buffer);
+    fz_try(ctx)
+    {
+        if (cookie->abort)
+            fz_throw(ctx, FZ_ERROR_ABORT, "MuPDF render was cancelled.");
+        pixmap = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx), pixel_bounds, NULL, 1);
+        if (fz_pixmap_components(ctx, pixmap) != 4)
+            fz_throw(ctx, FZ_ERROR_FORMAT, "MuPDF returned an unexpected zero-copy pixmap format.");
+        if (transparent)
+            fz_clear_pixmap(ctx, pixmap);
+        else
+            fz_clear_pixmap_with_value(ctx, pixmap, 255);
+        device = fz_new_draw_device(ctx, fz_identity, pixmap);
+        fz_run_display_list(ctx, display_list, device, transform, fz_rect_from_irect(pixel_bounds), cookie);
+        fz_close_device(ctx, device);
+        if (cookie->abort)
+            fz_throw(ctx, FZ_ERROR_ABORT, "MuPDF render was cancelled.");
+        buffer = (unsigned char *)malloc(byte_count);
+        if (buffer == NULL)
+            fz_throw(ctx, FZ_ERROR_SYSTEM, "Could not allocate the zero-copy render buffer.");
+        {
+            int stride = fz_pixmap_stride(ctx, pixmap);
+            unsigned char *samples = fz_pixmap_samples(ctx, pixmap);
+            size_t row_bytes = (size_t)crop_width * 4u;
+            size_t source_offset =
+                ((size_t)(crop_y - y) * (size_t)stride) + ((size_t)(crop_x - x) * 4u);
+            size_t row;
+            for (row = 0; row < (size_t)crop_height; ++row)
+                memcpy(buffer + row * row_bytes, samples + source_offset + row * (size_t)stride, row_bytes);
+        }
+        result = (jlong)(intptr_t)buffer;
+        buffer = NULL;
+    }
+    fz_always(ctx)
+    {
+        fz_drop_device(ctx, device);
+        fz_drop_pixmap(ctx, pixmap);
+    }
+    fz_catch(ctx)
+    {
+        if (buffer != NULL)
+            free(buffer);
+        rethrow_mupdf(env, ctx);
+        return 0;
+    }
+    return result;
+}
+
+JNIEXPORT void JNICALL
+Java_dev_xuexue_platform_MuPdfNative_freeRasterBuffer(JNIEnv *env, jobject self, jlong address)
+{
+    (void)env;
+    (void)self;
+    if (address != 0)
+        free((void *)(intptr_t)address);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_dev_xuexue_platform_MuPdfNative_nativeZeroCopyProbe(JNIEnv *env, jobject self)
+{
+    (void)env;
+    (void)self;
+    return JNI_TRUE;
+}
+
 JNIEXPORT jbyteArray JNICALL
 Java_dev_xuexue_platform_MuPdfNative_extractText(JNIEnv *env, jobject self, jlong handle, jbyteArray options_utf8)
 {

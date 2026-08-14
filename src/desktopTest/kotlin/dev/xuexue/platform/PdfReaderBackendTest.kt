@@ -187,12 +187,14 @@ class PdfReaderBackendTest {
             Files.writeString(path, testPdfWithVisibleAnnotation(), StandardCharsets.US_ASCII)
             val backend = MuPdfReaderBackend()
             try {
+                // Analysis rasters keep byte-array pixels so the overlay content
+                // can be asserted directly.
                 val request =
                     PdfRasterRequest(
                         path = path,
                         pageIndex = 0,
                         dpi = 72f,
-                        purpose = PdfRasterPurpose.VIEWPORT,
+                        purpose = PdfRasterPurpose.ANALYSIS,
                     )
                 val content = backend.render(request)
                 val overlay = backend.render(request.copy(layer = PdfRasterLayer.NATIVE_OVERLAY))

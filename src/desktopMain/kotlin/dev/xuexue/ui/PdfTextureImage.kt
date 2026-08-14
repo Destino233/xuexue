@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import dev.xuexue.DocumentTab
 import dev.xuexue.WorkbenchState
+import dev.xuexue.platform.MuPdfNative
 import dev.xuexue.platform.PdfNormalizedRect
 import dev.xuexue.platform.PdfPageRaster
 import dev.xuexue.platform.PdfPerformanceMetrics
@@ -28,7 +29,9 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
+import org.jetbrains.skia.Data
 import org.jetbrains.skia.ImageInfo
+import org.jetbrains.skia.impl.Managed
 import org.jetbrains.skia.Image as SkiaImage
 
 internal data class PdfTextureImage(
@@ -132,7 +135,7 @@ private suspend fun acquirePdfTextureLease(
         state.pdfTextureCache.acquireUncached(
             byteSize = raster.byteSize,
             prepare = { raster.toComposeBitmap(state.pdfPerformanceMetrics) },
-            onClose = ImageBitmap::releaseSkiaResources,
+            onClose = { bitmap -> bitmap.closeRasterMemory(raster) },
         )
     } else {
         state.pdfTextureCache.acquire(key, priority, expectedBytes = raster.byteSize) {
@@ -140,10 +143,21 @@ private suspend fun acquirePdfTextureLease(
             PreparedPdfTexture(
                 value = bitmap,
                 byteSize = raster.byteSize,
-                onClose = bitmap::releaseSkiaResources,
+                onClose = { bitmap.closeRasterMemory(raster) },
             )
         }
     }
+
+// The Skia image borrows the malloc'd raster buffer; the native memory must be
+// freed only after the borrowed bitmap is closed. The anchor keeps the Data
+// owner alive without registering a Cleaner (owned = false, never closed); the
+// placeholder pointer is never dereferenced or released.
+private object RasterMemoryAnchor : Managed(1L, 0L, false)
+
+private fun ImageBitmap.closeRasterMemory(raster: PdfPageRaster) {
+    releaseSkiaResources()
+    if (raster.nativeAddress != 0L) MuPdfNative.freeRasterBuffer(raster.nativeAddress)
+}
 
 private data class ActivePdfTexture(
     val key: PdfTextureKey,
@@ -153,12 +167,30 @@ private data class ActivePdfTexture(
 internal fun PdfPageRaster.toComposeBitmap(metrics: PdfPerformanceMetrics? = null): ImageBitmap {
     val startedAt = System.nanoTime()
     val image =
-        SkiaImage
-            .makeRaster(
+        if (nativeAddress != 0L) {
+            // Borrow the malloc'd render buffer instead of copying it into Skia.
+            val data =
+                Data.makeWithoutCopy(
+                    memoryAddr = nativeAddress,
+                    length = byteSize,
+                    underlyingMemoryOwner = RasterMemoryAnchor,
+                )
+            try {
+                SkiaImage.makeRaster(
+                    ImageInfo(pixelWidth, pixelHeight, ColorType.RGBA_8888, ColorAlphaType.PREMUL),
+                    data,
+                    pixelWidth * RGBA_BYTES_PER_PIXEL,
+                )
+            } finally {
+                data.close()
+            }
+        } else {
+            SkiaImage.makeRaster(
                 ImageInfo(pixelWidth, pixelHeight, ColorType.RGBA_8888, ColorAlphaType.PREMUL),
                 rgbaBytes,
                 pixelWidth * RGBA_BYTES_PER_PIXEL,
             )
+        }
     return try {
         image.toComposeImageBitmap()
     } finally {

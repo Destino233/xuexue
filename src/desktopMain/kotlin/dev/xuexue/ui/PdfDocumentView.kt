@@ -747,6 +747,7 @@ internal fun PdfDocument(
             EditorTool(Icons.Default.Height, "适高", { state.setPdfFitMode(PdfFitMode.HEIGHT.name, tab) })
             EditorTool(Icons.AutoMirrored.Filled.RotateRight, "顺时针旋转", {
                 tab.pdfRotation = (tab.pdfRotation + 90f) % 360f
+                state.clearPdfIdleTextures(tab)
                 state.persistLayout()
             })
             EditorTool(
@@ -783,14 +784,17 @@ internal fun PdfDocument(
                 Row {
                     PdfModeItem("连续", PdfViewMode.CONTINUOUS, viewMode) {
                         tab.pdfViewMode = it.name
+                        state.clearPdfIdleTextures(tab)
                         state.persistLayout()
                     }
                     PdfModeItem("单页", PdfViewMode.SINGLE, viewMode) {
                         tab.pdfViewMode = it.name
+                        state.clearPdfIdleTextures(tab)
                         state.persistLayout()
                     }
                     PdfModeItem("双页", PdfViewMode.DOUBLE, viewMode) {
                         tab.pdfViewMode = it.name
+                        state.clearPdfIdleTextures(tab)
                         state.persistLayout()
                     }
                 }

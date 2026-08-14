@@ -153,17 +153,19 @@ data class PdfPageRaster(
     val viewport: PdfNormalizedRect? = null,
     val incomplete: Boolean = false,
     val empty: Boolean = false,
+    val nativeAddress: Long = 0L,
 ) {
     init {
         require(pixelWidth > 0 && pixelHeight > 0) { "PDF raster dimensions must be positive." }
         val expectedBytes = pixelWidth.toLong() * pixelHeight * RGBA_BYTES_PER_PIXEL
-        require(expectedBytes <= Int.MAX_VALUE && rgbaBytes.size == expectedBytes.toInt()) {
+        require(expectedBytes <= Int.MAX_VALUE) { "PDF raster is too large." }
+        require(nativeAddress != 0L || rgbaBytes.size == expectedBytes.toInt()) {
             "PDF raster must contain exactly four RGBA bytes per pixel."
         }
     }
 
     val byteSize: Int
-        get() = rgbaBytes.size
+        get() = pixelWidth * pixelHeight * RGBA_BYTES_PER_PIXEL
 
     private companion object {
         const val RGBA_BYTES_PER_PIXEL = 4

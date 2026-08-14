@@ -248,10 +248,10 @@ internal class PdfTextureCache<T>(
         }
     }
 
-    internal fun trimIdle() {
+    internal fun trimIdle(documentPath: String? = null) {
         synchronized(lock) {
             entries.values
-                .filter { entry -> entry.leases == 0 }
+                .filter { entry -> entry.leases == 0 && (documentPath == null || entry.key.documentPath == documentPath) }
                 .toList()
                 .forEach { entry ->
                     entries.remove(entry.key)

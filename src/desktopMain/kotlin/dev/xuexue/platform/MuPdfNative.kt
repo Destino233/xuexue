@@ -157,6 +157,36 @@ internal object MuPdfNative {
         transparent: Boolean,
     ): ByteArray
 
+    /** Renders into a malloc'd buffer and returns its address; the caller must
+     *  hand it to [freeRasterBuffer] once the borrowed Skia image is closed.
+     *  The crop rectangle (in rendered pixels) is copied out of the padded
+     *  render region so tiles keep their edge padding without a second copy. */
+    @Suppress("LongParameterList") // The JNI ABI requires a flat native signature.
+    external fun renderRgbaNative(
+        displayListHandle: Long,
+        scale: Float,
+        x: Int,
+        y: Int,
+        width: Int,
+        height: Int,
+        cropX: Int,
+        cropY: Int,
+        cropWidth: Int,
+        cropHeight: Int,
+        cookieHandle: Long,
+        transparent: Boolean,
+    ): Long
+
+    external fun freeRasterBuffer(address: Long)
+
+    private external fun nativeZeroCopyProbe(): Boolean
+
+    /** True when the loaded library ships the zero-copy raster path. The probe
+     *  keeps older bundled DLLs working by falling back to byte-array copies. */
+    val zeroCopyRenderingAvailable: Boolean by lazy {
+        runCatching { nativeZeroCopyProbe() }.getOrDefault(false)
+    }
+
     external fun extractText(
         displayListHandle: Long,
         optionsUtf8: ByteArray,
@@ -309,6 +339,30 @@ internal class MuPdfCookie : AutoCloseable {
             y = bounds.y,
             width = bounds.width,
             height = bounds.height,
+            cookieHandle = handle,
+            transparent = transparent,
+        )
+
+    /** Zero-copy variant: returns the address of a malloc'd RGBA buffer.
+     *  [content] selects the cropped region (defaults to [bounds]). */
+    fun renderNative(
+        displayList: MuPdfDisplayList,
+        scale: Float,
+        bounds: MuPdfPixelBounds,
+        content: MuPdfPixelBounds = bounds,
+        transparent: Boolean = false,
+    ): Long =
+        MuPdfNative.renderRgbaNative(
+            displayListHandle = displayList.handle,
+            scale = scale,
+            x = bounds.x,
+            y = bounds.y,
+            width = bounds.width,
+            height = bounds.height,
+            cropX = content.x,
+            cropY = content.y,
+            cropWidth = content.width,
+            cropHeight = content.height,
             cookieHandle = handle,
             transparent = transparent,
         )

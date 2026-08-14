@@ -121,8 +121,8 @@ val bootstrapMuPdf =
             environment(
                 "PATH",
                 listOf(
-                    File(root, "usr/bin").absolutePath,
-                    File(root, "mingw64/bin").absolutePath,
+                    File(root, "usr/bin").absolutePath.replace('\\', '/'),
+                    File(root, "mingw64/bin").absolutePath.replace('\\', '/'),
                     System.getenv("PATH").orEmpty(),
                 ).joinToString(File.pathSeparator),
             )
@@ -237,6 +237,10 @@ compose.desktop {
             "-Xmx1024m",
             "-XX:MinHeapFreeRatio=20",
             "-XX:MaxHeapFreeRatio=60",
+            // Cap JVM-native overhead (class metadata, JIT code cache) that is
+            // invisible to heap accounting but still counts toward process RSS.
+            "-XX:MaxMetaspaceSize=256m",
+            "-XX:ReservedCodeCacheSize=128m",
             "-Djava.library.path=${muPdfDirectory.asFile.absolutePath}",
         )
 

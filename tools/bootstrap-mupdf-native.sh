@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Native launchers (e.g. the Gradle Exec task) may start this script with an
+# unusable PATH: MSYS2 appends Windows-style entries (C:/msys64/usr/bin) that
+# bash cannot resolve. Always prepend a valid toolchain when one exists.
+for root in /c/msys64 /c/msys2 /msys64 /msys2; do
+    if [[ -d "${root}/usr/bin" ]]; then
+        export PATH="${root}/usr/bin:${root}/mingw64/bin:${PATH:-}"
+        break
+    fi
+done
+
 MUPDF_VERSION="1.27.2"
 SOURCE_SHA256="553867b135303dc4c25ab67c5f234d8e900a0e36e66e8484d99adc05fe1e8737"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"

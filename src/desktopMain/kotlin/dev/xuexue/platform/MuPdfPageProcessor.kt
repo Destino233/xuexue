@@ -9,6 +9,11 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
+/** Test seam that lets consistency tests force the byte-array fallback. */
+internal object PdfZeroCopyGate {
+    var enabled: Boolean = MuPdfNative.zeroCopyRenderingAvailable
+}
+
 internal class MuPdfPageProcessor(
     private val renderDispatcher: CoroutineDispatcher,
     private val onNativeRenderStarted: () -> Unit = {},
@@ -116,22 +121,50 @@ internal class MuPdfPageProcessor(
             currentCoroutineContext()[Job]?.abortCookieOnCancellation(cookie)
         return try {
             onNativeRenderStarted()
-            val renderedRgba =
-                cookie.render(
-                    displayList = displayList,
-                    scale = scale,
-                    bounds = rasterRegion.renderBounds,
-                    transparent = request.layer == PdfRasterLayer.NATIVE_OVERLAY,
+            // Only viewport content is consumed directly by the texture cache;
+            // analysis/thumbnail rasters still need their byte arrays.
+            val zeroCopy =
+                PdfZeroCopyGate.enabled &&
+                    request.purpose == PdfRasterPurpose.VIEWPORT &&
+                    request.layer == PdfRasterLayer.CONTENT
+            if (zeroCopy) {
+                val address =
+                    cookie.renderNative(
+                        displayList = displayList,
+                        scale = scale,
+                        bounds = rasterRegion.renderBounds,
+                        content = rasterRegion.contentBounds,
+                        transparent = request.layer == PdfRasterLayer.NATIVE_OVERLAY,
+                    )
+                require(address != 0L) { "Zero-copy PDF render returned no buffer." }
+                currentCoroutineContext().ensureActive()
+                PdfPageRaster(
+                    pageIndex = page.pageIndex,
+                    pixelWidth = rasterRegion.contentBounds.width,
+                    pixelHeight = rasterRegion.contentBounds.height,
+                    rgbaBytes = ByteArray(0),
+                    viewport = request.viewport,
+                    incomplete = displayList.incomplete,
+                    nativeAddress = address,
                 )
-            currentCoroutineContext().ensureActive()
-            PdfPageRaster(
-                pageIndex = page.pageIndex,
-                pixelWidth = rasterRegion.contentBounds.width,
-                pixelHeight = rasterRegion.contentBounds.height,
-                rgbaBytes = rasterRegion.crop(renderedRgba),
-                viewport = request.viewport,
-                incomplete = displayList.incomplete,
-            )
+            } else {
+                val renderedRgba =
+                    cookie.render(
+                        displayList = displayList,
+                        scale = scale,
+                        bounds = rasterRegion.renderBounds,
+                        transparent = request.layer == PdfRasterLayer.NATIVE_OVERLAY,
+                    )
+                currentCoroutineContext().ensureActive()
+                PdfPageRaster(
+                    pageIndex = page.pageIndex,
+                    pixelWidth = rasterRegion.contentBounds.width,
+                    pixelHeight = rasterRegion.contentBounds.height,
+                    rgbaBytes = rasterRegion.crop(renderedRgba),
+                    viewport = request.viewport,
+                    incomplete = displayList.incomplete,
+                )
+            }
         } finally {
             cancellationHandle?.dispose()
             cookie.close()
