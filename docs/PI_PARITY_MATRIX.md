@@ -155,7 +155,7 @@
 | `src/core/tools/output-accumulator.ts`、`truncate.ts` | `PiBashOutputAccumulator`、`ToolOutput.kt` | `PiBashOutputAccumulatorTest.decodesUtf8CharactersSplitAcrossChunks`、`countsTrailingNewlineWithoutAddingAnExtraLine`、`truncatesOnlyTheTailOfAnOversizedLastLine` 覆盖跨 chunk UTF-8 解码、trailing newline 行数、50KB/2000 行 tail、超长 partial 行、full output persistence 和 `truncatedBy`/line-byte metadata；Process group/detached child 和完整 Pi details 仍待补 | `in-progress` |
 | `src/core/tools/path-utils.ts` | 工具路径语义 | cwd、absolute、symlink 和 display path | `pending` |
 | `src/core/tools/tool-definition-wrapper.ts` | ToolDefinition 转换 | schema、prompt metadata、progress | `pending` |
-| `src/core/cache-stats.ts`、`timings.ts` | 本地统计 | token/cost/cache/timing 计算 | `pending` |
+| `src/core/cache-stats.ts`、`timings.ts` | 本地统计 | `CacheStats.kt` 复刻 Pi 的 cache-miss/waste 计算（`CACHE_TTL_MS`、noise floor、compaction/branch 重置、model switch、无 cache provider 跳过、cost 差额）；`CacheStatsTest` 10 项覆盖累计 miss、健康会话、compaction 重置、模型切换、无 cache 跳过、按消息收集和首轮/健康轮 undefined；`Timings.kt` 复刻 `PI_TIMING=1` 命名空间计时（MAIN/EXTENSIONS），桌面 `Main.kt` 在 `PI_TIMING=1` 时启用并在退出路径打印；RPC/Compose 宿主展示 cache-waste 提示仍待补 | `in-progress` |
 | `src/core/diagnostics.ts`、`output-guard.ts` | 本地诊断与输出保护 | error capture、stdout cleanliness | `pending` |
 | `src/core/http-dispatcher.ts` | HTTP dispatch 平台接口 | proxy、headers、lifecycle | `pending` |
 | `src/core/exec.ts` | `exec/PiExec.kt`、Desktop `LocalPiCommandExecutor` | `LocalPiCommandExecutorTest` 覆盖非 shell argv、分离 stdout/stderr 和退出码、timeout 保留部分输出、预先 AbortSignal、spawn 失败 `code=1` 和被终止进程树；Kotlin/JVM extension API 已注入 `exec`，Process bridge 已按 `requestId` 隔离响应并转发工具 cancel | `in-progress` |
