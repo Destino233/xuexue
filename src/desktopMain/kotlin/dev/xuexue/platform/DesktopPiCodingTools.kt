@@ -671,7 +671,8 @@ internal class DesktopPiCodingTools(
                         val raw = lines[lineIndex].replace("\r", "")
                         val truncated = raw.length > PI_GREP_MAX_LINE_LENGTH
                         if (truncated) linesTruncated = true
-                        val shown = raw.take(PI_GREP_MAX_LINE_LENGTH)
+                        val shown =
+                            if (truncated) "${raw.take(PI_GREP_MAX_LINE_LENGTH)}... [truncated]" else raw
                         val relative = path.relativeToPosix(displayRoot)
                         outputLines +=
                             if (lineIndex == index) {

@@ -205,6 +205,18 @@ class DesktopPiCodingToolsTest {
         }
 
     @Test
+    fun grepTruncatesLongMatchLinesWithPiSuffix() =
+        runTest {
+            root.resolve("long.txt").writeText("needle " + "x".repeat(600) + "\n")
+            val result = execute("grep", buildJsonObject { put("pattern", "needle") })
+            val output = assertIs<TextContent>(result.content.single()).text
+            val matchLine = output.lineSequence().first { it.startsWith("long.txt:1: ") }
+            assertEquals("long.txt:1: " + "needle ".length.let { "needle " + "x".repeat(500 - it) } + "... [truncated]", matchLine)
+            assertContains(output, "Some lines truncated to 500 chars")
+            assertEquals(true, result.details.jsonObject["linesTruncated"]?.toString()?.toBoolean())
+        }
+
+    @Test
     fun lsIncludesDotfilesAndReportsEntryLimit() =
         runTest {
             root.resolve(".hidden").writeText("hidden")
