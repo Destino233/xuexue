@@ -45,8 +45,10 @@ internal object WindowsProcessSupport {
     fun configure(builder: ProcessBuilder) {
         if (!windows) return
         val environment = builder.environment()
-        val inherited = environment["PATH"].orEmpty().split(File.pathSeparator)
-        environment["PATH"] =
+        // JVM environment maps are case-sensitive; Windows uses "Path".
+        val pathKey = environment.keys.firstOrNull { it.equals("path", ignoreCase = true) } ?: "PATH"
+        val inherited = environment[pathKey].orEmpty().split(File.pathSeparator)
+        environment[pathKey] =
             (shell.pathEntries + inherited)
                 .filter(String::isNotBlank)
                 .distinct()
