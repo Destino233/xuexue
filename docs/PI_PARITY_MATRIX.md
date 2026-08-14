@@ -26,9 +26,9 @@
 | 包 | 源文件数 | 当前状态 |
 | --- | ---: | --- |
 | `packages/ai/src` | 149 | `pending` |
-| `packages/agent/src` | 25 | `pending` |
+| `packages/agent/src` | 25 | `in-progress` |
 | `packages/coding-agent/src` | 172 | `pending` |
-| 合计 | 346 | `pending` |
+| 合计 | 346 | `in-progress` |
 
 ## 2. 明确排除项
 
@@ -94,14 +94,37 @@
 | `src/agent-loop.ts` | Agent Loop、`ToolExecution.kt` | 原 20 项行为映射到 `AgentLoopTest*`，另含并发预检回归；工具执行按 `prepare -> validateToolArguments -> before hook -> execute`，schema/coercion 由 `ToolArgumentValidationTest` 覆盖 | `in-progress` |
 | `src/agent.ts` | Stateful Agent facade | 原 19 项行为映射到 `Agent*Test`，另含 StateFlow/Flow 一致性 | `verified` |
 | `src/proxy.ts` | `Proxy.kt` | `ProxyTest` 覆盖 Pi proxy 请求体（模型、上下文、可序列化 options）、SSE delta 对 partial assistant message 的重建、tool JSON 增量、认证错误和预先取消；JVM `HttpResponse` 不暴露 HTTP status text，因此无 JSON `error` 时保留 Pi 的 status 但呈现为 `HTTP <status>` | `verified` |
-| `src/harness/types.ts` | Harness 公共协议 | 与核心类型边界一致 | `pending` |
-| `src/harness/agent-harness.ts` | Harness orchestration | stream、session、compaction | `pending` |
-| `src/harness/messages.ts` | 自定义消息转换 | Agent message 转 model message | `pending` |
-| `src/harness/system-prompt.ts` | Skill system prompt 片段 | escaping、visibility 和顺序 | `pending` |
-| `src/harness/skills.ts`、`prompt-templates.ts` | Skills 与模板发现 | frontmatter、路径、覆盖和诊断 | `pending` |
-| `src/harness/session/**` | Session repo/storage/tree | JSONL、memory、UUID、恢复和遍历 | `pending` |
-| `src/harness/compaction/**` | compaction 与分支摘要 | 阈值、summary、恢复和继续运行 | `pending` |
-| `src/harness/utils/**` | truncate 与 shell output | 字节/行截断和尾部输出 | `pending` |
+| `src/harness/types.ts` | Harness 公共协议（`Result`、`FileError`/`ExecutionError`/`SessionError` 错误码、`FileSystem`/`Shell`/`ExecutionEnv` 能力接口、`SessionStorage`/`SessionRepo`） | 能力边界由 `SessionFileSystem`/`ResourceFileSystem` 承载，会话协议由 `SessionManager`/`SessionContext` 承载；Kotlin 以异常表达错误，`Result` 泛型不逐字复刻；`SessionContextTest`、`SessionManagerTreeTest`、`SessionFileCodecTest` 覆盖对应语义 | `in-progress` |
+| `src/harness/agent-harness.ts` | Harness orchestration（turn、队列、save point、compaction、tree、事件钩子） | `AgentSessionRuntime` 承载 startup/new/resume/fork/shutdown/tree-navigation；`AgentSessionQueueTest`、`AgentSessionRetryTest`、`AgentSessionCompactionTest`、`AgentSessionTreeNavigationTest`、`AgentSessionLifecycleTest`、`AgentSessionRuntimeTest` 覆盖；事件钩子见第 5 节 `src/core/extensions/*` | `in-progress` |
+| `src/harness/messages.ts` | 自定义消息转换（`bashExecution`/`custom`/`branchSummary`/`compactionSummary`、`convertToLlm`） | `SessionMessages.kt` 复刻 `bashExecutionToText`/`createCustomMessage`/`createBranchSummaryMessage`/`createCompactionSummaryMessage`/`convertToLlm`；`SessionMessagesTest` 覆盖 Pi 格式、excludeFromContext 过滤、custom/summary 转 user 和 round-trip | `verified` |
+| `src/harness/system-prompt.ts` | Skill system prompt 片段（`formatSkillsForSystemPrompt`） | Kotlin `formatSkillsForPrompt`（`PromptTemplates.kt`）复刻 coding-agent 文案变体（`\n\n` 前缀、`Use the read tool...`），与 agent harness 版本文案存在宿主差异；escaping/visibility/顺序由 `PromptTemplatesTest.formatsOnlyModelVisibleSkillsWithXmlEscaping` 覆盖 | `in-progress` |
+| `src/harness/skills.ts`、`prompt-templates.ts` | Skills 与模板发现（递归/非递归加载、source、诊断、frontmatter、ignore） | `SkillLoader.kt`、`PromptTemplateLoader.kt`、`Frontmatter.kt`、`PromptTemplates.kt`；`FrontmatterTest`、`PromptTemplatesTest`、`ResourceLoaderTest`、`AgentSessionResourcesTest` 覆盖 | `in-progress` |
+| `src/harness/session/**` | Session repo/storage/tree（JSONL、memory、UUID、恢复和遍历） | `SessionManager.kt`、`SessionFileCodec.kt`、`SessionPersistence.kt`、`SessionContext.kt`、`SessionIds.kt`；`SessionManagerTreeTest`、`SessionFileCodecTest`（含 uuidv7 布局）、`SessionContextTest`、`SessionMessagesTest`、desktop `SessionPersistenceTest` 覆盖 fork/tree/leaf/context/迁移；memory repo 语义由 `SessionManager.inMemory` 承载 | `in-progress` |
+| `src/harness/compaction/**` | compaction 与分支摘要（阈值、cut point、summary、file ops、恢复） | `Compaction.kt`、`CompactionGeneration.kt`、`CompactionUtils.kt`、`BranchSummarization.kt`；`CompactionTest`、`CompactionGenerationTest`、`CompactionUtilsTest`、`BranchSummarizationTest`、`AgentSessionCompactionTest`、`AgentSessionAutoCompactionTest` 覆盖 | `in-progress` |
+| `src/harness/utils/**` | truncate 与 shell output（字节/行截断、tail 部分行、capture 和 full-output 文件） | `ToolOutput.kt`（head/tail/UTF-8 边界）、`PiBashOutputAccumulator`、Desktop `LocalBashExecutor`；`ToolOutputTest`、`PiBashOutputAccumulatorTest`、`DesktopPiCodingToolsTest.bash*` 和 `grepTruncatesLongMatchLinesWithPiSuffix` 覆盖；Pi `truncate.test.ts` 的 surrogate/fuzz 用例尚未逐项映射 | `in-progress` |
+
+### 4.1 `packages/agent` Pi 测试文件映射
+
+| Pi 测试 | Kotlin 映射 | 说明 |
+| --- | --- | --- |
+| `test/agent-loop.test.ts` | `AgentLoopTest*` | 原 20 项行为映射，含并发预检回归 |
+| `test/agent.test.ts` | `Agent*Test` | 原 19 项行为映射，另含 StateFlow/Flow 一致性 |
+| `test/e2e.test.ts` | `Agent*Test`、`ProxyTest` | Agent facade 端到端组合（prompt、工具、错误、thinking），由状态机与代理测试覆盖 |
+| `test/harness/agent-harness.test.ts` | `AgentSessionQueueTest`、`AgentSessionRetryTest`、`AgentSessionCompactionTest`、`AgentSessionTreeNavigationTest`、`AgentSessionLifecycleTest`、`AgentSessionRuntimeTest` | harness orchestration 的队列、save point、abort、settled、事件钩子语义由 `AgentSession` 系列承载 |
+| `test/harness/agent-harness-stream.test.ts` | `AgentSessionPromptTest`、`AgentSessionRuntimeTest` | stream options 快照/patch 语义由 Runtime 每次请求快照和扩展 `context`/provider 钩子承载，逐项映射待补 |
+| `test/harness/compaction.test.ts` | `CompactionTest`、`CompactionGenerationTest`、`CompactionUtilsTest`、`BranchSummarizationTest` | 阈值、cut point、file ops、summary、错误与取消 |
+| `test/harness/nodejs-env.test.ts` | 排除（`harness/env/nodejs.ts`） | FileSystem/Shell 非平台语义由 `SessionFileSystem`/`ResourceFileSystem`/Desktop `LocalBashExecutor` 承载 |
+| `test/harness/prompt-templates.test.ts` | `PromptTemplatesTest`、`ResourceLoaderTest` | 非递归目录加载、source info、诊断、参数替换 |
+| `test/harness/repo.test.ts` | `SessionManagerTreeTest`、`SessionFileCodecTest` | create/open/list/delete/fork 与 metadata 持久化 |
+| `test/harness/resource-formatting.test.ts` | `PromptTemplatesTest`、`AgentSessionPromptTest` | `formatSkillInvocation`/`formatPromptTemplateInvocation` 输出格式 |
+| `test/harness/session-test-utils.ts` | `SessionTestFixtures` | 测试工具 |
+| `test/harness/session-uuid.test.ts` | `SessionFileCodecTest.generatedSessionIdsAreUuidV7` | RFC 9562 uuidv7 布局；单调性/确定性用例待补 |
+| `test/harness/session.test.ts` | `SessionContextTest`、`SessionManagerTreeTest` | context 构建、branch/leaf、label、custom entry 投影 |
+| `test/harness/skills.test.ts` | `FrontmatterTest`、`ResourceLoaderTest`、`AgentSessionResourcesTest` | SKILL.md 加载、symlink、source、诊断、根目录直接 `.md` |
+| `test/harness/storage.test.ts` | `SessionFileCodecTest`、`SessionPersistenceTest`、`SessionManagerTreeTest` | JSONL header/entry 解析、leaf 恢复、label 查找、路径遍历 |
+| `test/harness/system-prompt.test.ts` | `SystemPromptTest`、`PromptTemplatesTest.formatsOnlyModelVisibleSkillsWithXmlEscaping` | skill 可见性与 XML escaping |
+| `test/harness/truncate.test.ts` | `ToolOutputTest`、`PiBashOutputAccumulatorTest`、`DesktopPiCodingToolsTest.grepTruncatesLongMatchLinesWithPiSuffix` | head/tail、UTF-8 字节、partial line；surrogate/fuzz 用例待补 |
+| `test/scratch/*`、`test/utils/*` | 非测试辅助 | 不计入映射 |
 
 ## 5. `packages/coding-agent` 对照
 
@@ -127,7 +150,7 @@
 | `src/core/tools/read.ts` | Desktop `ReadTool`、`ToolOutput.kt`、`PiImageProcessResult.kt` | `DesktopPiCodingToolsTest.readHonorsOffsetLimitAndMacScreenshotVariant`、`readReturnsImageContentForSupportedImageMagic`、`readConvertsBmpToPngAndReportsConversionHint`、`readLongFirstLineUsesTheOriginalPathInFallback`；head truncation、UTF-8 byte/line limits、offset/limit、图片尺寸/Base64 限制和 BMP 转 PNG 已覆盖；JVM `ImageIO` 不承诺 WebP | `in-progress` |
 | `src/core/tools/write.ts`、`edit.ts`、`edit-diff.ts` | Desktop `WriteTool`/`EditTool`、`FileMutationQueue.kt`、`DesktopPiEditSupport.kt` | `DesktopPiCodingToolsTest.writeCreatesParentDirectories`、`editAppliesMultipleOriginalRangesAndReturnsPatchDetails`、`editPreservesBomAndCrLfWhileMatchingNormalizedText`、`editUsesPiFuzzyMatchingForSmartQuotesAndTrailingWhitespace`；exact replacement、写入前后 `fileDiff` details、原始区间多编辑、BOM/CRLF、Pi fuzzy matching、LCS unified diff、同路径串行队列和异常释放已覆盖；完整 Pi diff/render details 与 legacy args 待补 | `in-progress` |
 | `src/core/tools/bash.ts`、`bash-executor.ts` | `AgentSessionBashExecutor`、Desktop `LocalBashExecutor`、Desktop `BashTool` | `PiRpcProtocolTest.handlerExecutesAndPersistsBashResults`、`LocalBashExecutorTest` 和 `DesktopPiCodingToolsTest.bashEmitsInitialAndCoalescedStreamingUpdates`/`bashPersistsFullOutputForLineTruncation`/`bashTimeoutIncludesOutputCollectedBeforeCancellation` 覆盖 cwd/合并输出/退出码、共享 UTF-8 accumulator、50KB/2000 行 tail、full-output 文件、初始/合并增量更新和 timeout partial output；取消销毁及 descendants 回收已实现，结果经 `AgentSession.recordBashResult` 统一落盘 | `in-progress` |
-| `src/core/tools/grep.ts`、`find.ts`、`ls.ts` | Desktop `GrepTool`/`FindTool`/`LsTool` | `DesktopPiCodingToolsTest.grepSupportsLiteralContextAndSkipsBinaryFiles`、`findUsesGlobAndGitignoreRules`、`findScopesNestedGitignoreRulesLikePiRegression3303`、`findHonorsNegationAndNestedGitRepositoryBoundaries`、`lsIncludesDotfilesAndReportsEntryLimit`；读取、排序、limit、head truncation、literal/context、二进制跳过、glob、层级 `.gitignore`、nested Git 边界、ignore negation/安全剪枝、dotfile 和 entry limit 已接入；完整 Pi 输出格式待补 | `in-progress` |
+| `src/core/tools/grep.ts`、`find.ts`、`ls.ts` | Desktop `GrepTool`/`FindTool`/`LsTool` | `DesktopPiCodingToolsTest.grepSupportsLiteralContextAndSkipsBinaryFiles`、`grepTruncatesLongMatchLinesWithPiSuffix`（Pi `truncateLine` 的 500 字符 + `... [truncated]` 后缀与 `linesTruncated` details）、`findUsesGlobAndGitignoreRules`、`findScopesNestedGitignoreRulesLikePiRegression3303`、`findHonorsNegationAndNestedGitRepositoryBoundaries`、`lsIncludesDotfilesAndReportsEntryLimit`；读取、排序、limit、head truncation、literal/context、二进制跳过、glob、层级 `.gitignore`、nested Git 边界、ignore negation/安全剪枝、dotfile 和 entry limit 已接入；完整 Pi 输出格式待补 | `in-progress` |
 | `src/core/tools/file-mutation-queue.ts` | `FileMutationQueue.kt` | 同路径串行和异常释放 | `in-progress` |
 | `src/core/tools/output-accumulator.ts`、`truncate.ts` | `PiBashOutputAccumulator`、`ToolOutput.kt` | `PiBashOutputAccumulatorTest.decodesUtf8CharactersSplitAcrossChunks`、`countsTrailingNewlineWithoutAddingAnExtraLine`、`truncatesOnlyTheTailOfAnOversizedLastLine` 覆盖跨 chunk UTF-8 解码、trailing newline 行数、50KB/2000 行 tail、超长 partial 行、full output persistence 和 `truncatedBy`/line-byte metadata；Process group/detached child 和完整 Pi details 仍待补 | `in-progress` |
 | `src/core/tools/path-utils.ts` | 工具路径语义 | cwd、absolute、symlink 和 display path | `pending` |
