@@ -1,0 +1,15 @@
+{
+ "resources": {
+  "includes": [
+   {
+    "pattern": "skiko-windows-x64\\.dll"
+   },
+   {
+    "pattern": "skiko-windows-x64\\.dll\\.sha256"
+   },
+   {
+    "pattern": ".*\\.properties"
+   }
+  ]
+ }
+}

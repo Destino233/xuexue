@@ -1,0 +1,242 @@
+[
+ {
+  "name": "java.awt.event.MouseEvent"
+ },
+ {
+  "name": "java.awt.event.KeyEvent"
+ },
+ {
+  "name": "java.awt.event.WindowEvent"
+ },
+ {
+  "name": "java.awt.event.ComponentEvent"
+ },
+ {
+  "name": "java.awt.event.FocusEvent"
+ },
+ {
+  "name": "java.awt.event.PaintEvent"
+ },
+ {
+  "name": "java.awt.event.InputEvent"
+ },
+ {
+  "name": "java.awt.event.ActionEvent"
+ },
+ {
+  "name": "java.awt.event.MouseWheelEvent"
+ },
+ {
+  "name": "java.awt.event.HierarchyEvent"
+ },
+ {
+  "name": "java.awt.event.InvocationEvent"
+ },
+ {
+  "name": "java.awt.event.ContainerEvent"
+ },
+ {
+  "name": "java.awt.event.TextEvent"
+ },
+ {
+  "name": "java.awt.event.AdjustmentEvent"
+ },
+ {
+  "name": "java.awt.event.ItemEvent"
+ },
+ {
+  "name": "java.awt.Window"
+ },
+ {
+  "name": "java.awt.Frame"
+ },
+ {
+  "name": "java.awt.Dialog"
+ },
+ {
+  "name": "java.awt.Component"
+ },
+ {
+  "name": "java.awt.Canvas"
+ },
+ {
+  "name": "java.awt.Container"
+ },
+ {
+  "name": "java.awt.Toolkit"
+ },
+ {
+  "name": "java.awt.GraphicsEnvironment"
+ },
+ {
+  "name": "java.awt.GraphicsDevice"
+ },
+ {
+  "name": "java.awt.GraphicsConfiguration"
+ },
+ {
+  "name": "java.awt.Font"
+ },
+ {
+  "name": "java.awt.FontMetrics"
+ },
+ {
+  "name": "java.awt.Color"
+ },
+ {
+  "name": "java.awt.Cursor"
+ },
+ {
+  "name": "java.awt.Dimension"
+ },
+ {
+  "name": "java.awt.Point"
+ },
+ {
+  "name": "java.awt.Rectangle"
+ },
+ {
+  "name": "java.awt.Insets"
+ },
+ {
+  "name": "java.awt.MenuComponent"
+ },
+ {
+  "name": "java.awt.MenuItem"
+ },
+ {
+  "name": "java.awt.CheckboxMenuItem"
+ },
+ {
+  "name": "java.awt.Menu"
+ },
+ {
+  "name": "java.awt.PopupMenu"
+ },
+ {
+  "name": "java.awt.MenuBar"
+ },
+ {
+  "name": "java.awt.Checkbox"
+ },
+ {
+  "name": "java.awt.Button"
+ },
+ {
+  "name": "java.awt.Label"
+ },
+ {
+  "name": "java.awt.TextField"
+ },
+ {
+  "name": "java.awt.TextArea"
+ },
+ {
+  "name": "java.awt.Choice"
+ },
+ {
+  "name": "java.awt.List"
+ },
+ {
+  "name": "java.awt.Scrollbar"
+ },
+ {
+  "name": "java.awt.ScrollPane"
+ },
+ {
+  "name": "java.awt.Panel"
+ },
+ {
+  "name": "java.awt.PopupMenu"
+ },
+ {
+  "name": "java.awt.Graphics"
+ },
+ {
+  "name": "java.awt.Graphics2D"
+ },
+ {
+  "name": "java.awt.peer.ComponentPeer"
+ },
+ {
+  "name": "java.awt.peer.FramePeer"
+ },
+ {
+  "name": "java.awt.peer.WindowPeer"
+ },
+ {
+  "name": "java.awt.peer.DialogPeer"
+ },
+ {
+  "name": "java.awt.peer.MenuPeer"
+ },
+ {
+  "name": "java.awt.peer.MenuItemPeer"
+ },
+ {
+  "name": "java.awt.peer.CheckboxMenuItemPeer"
+ },
+ {
+  "name": "java.awt.peer.PopupMenuPeer"
+ },
+ {
+  "name": "java.awt.peer.MenuBarPeer"
+ },
+ {
+  "name": "sun.awt.windows.WToolkit"
+ },
+ {
+  "name": "sun.awt.windows.WComponentPeer"
+ },
+ {
+  "name": "sun.awt.windows.WFramePeer"
+ },
+ {
+  "name": "sun.awt.windows.WWindowPeer"
+ },
+ {
+  "name": "sun.awt.windows.WDialogPeer"
+ },
+ {
+  "name": "sun.awt.windows.WCanvasPeer"
+ },
+ {
+  "name": "sun.awt.windows.WPanelPeer"
+ },
+ {
+  "name": "sun.awt.windows.WMenuPeer"
+ },
+ {
+  "name": "sun.awt.windows.WMenuItemPeer"
+ },
+ {
+  "name": "sun.awt.windows.WCheckboxMenuItemPeer"
+ },
+ {
+  "name": "sun.awt.windows.WPopupMenuPeer"
+ },
+ {
+  "name": "sun.awt.windows.WMenuBarPeer"
+ },
+ {
+  "name": "sun.awt.windows.WRobotPeer"
+ },
+ {
+  "name": "sun.awt.windows.WFontMetrics"
+ },
+ {
+  "name": "sun.awt.windows.WPrintDialogPeer"
+ },
+ {
+  "name": "sun.awt.SunToolkit"
+ },
+ {
+  "name": "sun.awt.AppContext"
+ },
+ {
+  "name": "sun.awt.ComponentFactory"
+ },
+ {
+  "name": "sun.awt.HeadlessToolkit"
+ }
+]

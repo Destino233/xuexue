@@ -1,9 +1,9 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
-    kotlin("jvm") version "2.4.0"
-    id("org.jetbrains.kotlin.plugin.compose") version "2.4.0"
-    id("org.jetbrains.compose") version "1.8.2"
+    kotlin("jvm") version "2.2.21"
+    id("org.jetbrains.kotlin.plugin.compose") version "2.2.21"
+    id("org.jetbrains.compose") version "1.9.0"
 }
 
 repositories {
@@ -11,16 +11,23 @@ repositories {
     google()
 }
 
+java {
+    sourceCompatibility = JavaVersion.VERSION_24
+    targetCompatibility = JavaVersion.VERSION_24
+}
+
 kotlin {
     jvmToolchain(25)
     compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_24)
+        freeCompilerArgs.add("-Xjdk-release=24")
     }
 }
 
 dependencies {
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
+    compileOnly("org.graalvm.nativeimage:library-support:25.0.1")
 }
 
 compose.desktop {
