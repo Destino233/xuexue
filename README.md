@@ -64,6 +64,39 @@ Gradle automatically detects MSYS2 at `C:\msys64` or `C:\msys2`. Set
 `MSYS2_HOME` in PowerShell when it is installed elsewhere. `pacman` is only
 used inside the MSYS2 terminal; Gradle itself is launched from PowerShell.
 
+## Build a distributable
+
+Compose Multiplatform packaging is platform-native: each target must be built
+on its own operating system (Windows cannot produce macOS or Linux packages).
+The target formats are declared in `build.gradle.kts` under
+`compose.desktop.application.nativeDistributions` (Windows MSI, Debian deb,
+macOS dmg).
+
+Windows — verified in this repository (use `gradlew.bat` from PowerShell):
+
+```powershell
+# Unpacked portable app, no installer needed:
+#   build\compose\binaries\main\app\XueXue\XueXue.exe
+.\gradlew.bat createDistributable
+
+# MSI installer (standard Compose target; not exercised in this repository):
+.\gradlew.bat packageMsi
+```
+
+Linux and macOS — same flow, not verified in this repository; run the
+corresponding command on the target machine:
+
+```bash
+./gradlew createDistributable   # build/compose/binaries/main/app/XueXue/
+./gradlew packageDeb            # Debian/Ubuntu package (Linux)
+./gradlew packageDmg            # macOS disk image
+```
+
+The bundled `xuexue_mupdf` JNI library is rebuilt automatically whenever
+`tools/native/mupdf_bridge.c` or `tools/bootstrap-mupdf-native.sh` changes; a
+prebuilt copy ships under `.mupdf/<version>/<platform>/`. The launcher bundles
+a runtime, so the output runs without a system JDK.
+
 ## Alpha scope
 
 - Desktop workbench with activity rail, resizable tool panel, document tabs,
