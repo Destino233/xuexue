@@ -111,9 +111,10 @@ class PiCliArgsTest {
     @Test
     fun buildInitialMessageMergesStdinFileAndFirstMessage() {
         val parsed = parsePiArgs(listOf("Summarize the text given"))
-        val result = buildInitialMessage(
-            InitialMessageInput(messages = parsed.messages, stdinContent = "README contents\n"),
-        )
+        val result =
+            buildInitialMessage(
+                InitialMessageInput(messages = parsed.messages, stdinContent = "README contents\n"),
+            )
         assertEquals("README contents\nSummarize the text given", result.initialMessage)
         assertEquals(emptyList(), result.remainingMessages)
 

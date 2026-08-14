@@ -253,7 +253,9 @@ internal fun readExifOrientation(bytes: ByteArray): Int {
                 findWebpTiffOffset(bytes)
             }
 
-            else -> -1
+            else -> {
+                -1
+            }
         }
     if (tiffOffset < 0) return 1
     return readOrientationFromTiff(bytes, tiffOffset)

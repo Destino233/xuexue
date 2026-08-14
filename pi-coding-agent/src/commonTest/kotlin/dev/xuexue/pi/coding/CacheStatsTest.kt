@@ -43,11 +43,11 @@ class CacheStatsTest {
             timestamp = timestamp,
         )
 
-    private fun entry(message: AssistantMessage): SessionEntry =
-        SessionMessageEntry("x", null, "", message)
+    private fun entry(message: AssistantMessage): SessionEntry = SessionMessageEntry("x", null, "", message)
 
     // Turn 1: fresh 100k cache write at $3.75/M
     private val turn1 = assistant(cacheWrite = 100_000, cacheWriteCost = 0.375, timestamp = 0)
+
     // Turn 2: healthy, everything read back at $0.30/M
     private val turn2 =
         assistant(

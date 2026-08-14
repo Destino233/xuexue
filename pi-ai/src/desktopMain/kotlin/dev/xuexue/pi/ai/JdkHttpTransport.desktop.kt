@@ -37,12 +37,12 @@ internal fun parseProxyAddress(value: String): InetSocketAddress? {
 
 /** Resolve the env proxy for a URI, mirroring Pi's applyHttpProxySettings semantics. */
 internal fun envProxySelector(): ProxySelector? {
-    val proxyUrl = System.getenv("HTTPS_PROXY") ?: System.getenv("https_proxy") ?: System.getenv("HTTP_PROXY")
-        ?: System.getenv("http_proxy") ?: return null
+    val proxyUrl =
+        System.getenv("HTTPS_PROXY") ?: System.getenv("https_proxy") ?: System.getenv("HTTP_PROXY")
+            ?: System.getenv("http_proxy") ?: return null
     val address = parseProxyAddress(proxyUrl) ?: return null
     return object : ProxySelector() {
-        override fun select(uri: URI?): List<Proxy> =
-            listOf(Proxy(Proxy.Type.HTTP, address as SocketAddress))
+        override fun select(uri: URI?): List<Proxy> = listOf(Proxy(Proxy.Type.HTTP, address as SocketAddress))
 
         override fun connectFailed(
             uri: URI?,

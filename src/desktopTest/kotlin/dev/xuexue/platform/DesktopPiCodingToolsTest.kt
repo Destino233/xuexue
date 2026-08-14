@@ -107,8 +107,9 @@ class DesktopPiCodingToolsTest {
     @Test
     fun readRejectsJpegLsfVariantLikePi() =
         runTest {
-            val bytes = byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 0xf7.toByte()) +
-                ByteArray(16) { 0x01 }
+            val bytes =
+                byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 0xf7.toByte()) +
+                    ByteArray(16) { 0x01 }
             root.resolve("variant.jpg").writeBytes(bytes)
             val result = execute("read", buildJsonObject { put("path", "variant.jpg") })
             assertIs<TextContent>(result.content.single())

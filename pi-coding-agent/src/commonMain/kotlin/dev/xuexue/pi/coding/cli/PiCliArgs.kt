@@ -108,8 +108,14 @@ fun parsePiArgs(args: List<String>): PiCliArgs {
     while (index < args.size) {
         val arg = args[index]
         when {
-            arg == "--help" || arg == "-h" -> help = true
-            arg == "--version" || arg == "-v" -> version = true
+            arg == "--help" || arg == "-h" -> {
+                help = true
+            }
+
+            arg == "--version" || arg == "-v" -> {
+                version = true
+            }
+
             arg == "--mode" && index + 1 < args.size -> {
                 val value = args[++index]
                 mode =
@@ -120,13 +126,35 @@ fun parsePiArgs(args: List<String>): PiCliArgs {
                         else -> null
                     }
             }
-            arg == "--continue" || arg == "-c" -> continueSession = true
-            arg == "--resume" || arg == "-r" -> resume = true
-            arg == "--provider" && index + 1 < args.size -> provider = args[++index]
-            arg == "--model" && index + 1 < args.size -> model = args[++index]
-            arg == "--api-key" && index + 1 < args.size -> apiKey = args[++index]
-            arg == "--system-prompt" && index + 1 < args.size -> systemPrompt = args[++index]
-            arg == "--append-system-prompt" && index + 1 < args.size -> appendSystemPrompt += args[++index]
+
+            arg == "--continue" || arg == "-c" -> {
+                continueSession = true
+            }
+
+            arg == "--resume" || arg == "-r" -> {
+                resume = true
+            }
+
+            arg == "--provider" && index + 1 < args.size -> {
+                provider = args[++index]
+            }
+
+            arg == "--model" && index + 1 < args.size -> {
+                model = args[++index]
+            }
+
+            arg == "--api-key" && index + 1 < args.size -> {
+                apiKey = args[++index]
+            }
+
+            arg == "--system-prompt" && index + 1 < args.size -> {
+                systemPrompt = args[++index]
+            }
+
+            arg == "--append-system-prompt" && index + 1 < args.size -> {
+                appendSystemPrompt += args[++index]
+            }
+
             arg == "--name" || arg == "-n" -> {
                 if (index + 1 < args.size) {
                     name = args[++index]
@@ -134,33 +162,60 @@ fun parsePiArgs(args: List<String>): PiCliArgs {
                     diagnostics += PiCliDiagnostic("error", "--name requires a value")
                 }
             }
-            arg == "--no-session" -> noSession = true
-            arg == "--session" && index + 1 < args.size -> session = args[++index]
-            arg == "--session-id" && index + 1 < args.size -> sessionId = args[++index]
-            arg == "--fork" && index + 1 < args.size -> fork = args[++index]
-            arg == "--session-dir" && index + 1 < args.size -> sessionDir = args[++index]
+
+            arg == "--no-session" -> {
+                noSession = true
+            }
+
+            arg == "--session" && index + 1 < args.size -> {
+                session = args[++index]
+            }
+
+            arg == "--session-id" && index + 1 < args.size -> {
+                sessionId = args[++index]
+            }
+
+            arg == "--fork" && index + 1 < args.size -> {
+                fork = args[++index]
+            }
+
+            arg == "--session-dir" && index + 1 < args.size -> {
+                sessionDir = args[++index]
+            }
+
             arg == "--models" && index + 1 < args.size -> {
                 models += args[++index].split(",").map(String::trim).filter(String::isNotEmpty)
             }
-            arg == "--no-tools" || arg == "-nt" -> noTools = true
-            arg == "--no-builtin-tools" || arg == "-nbt" -> noBuiltinTools = true
+
+            arg == "--no-tools" || arg == "-nt" -> {
+                noTools = true
+            }
+
+            arg == "--no-builtin-tools" || arg == "-nbt" -> {
+                noBuiltinTools = true
+            }
+
             (arg == "--tools" || arg == "-t") && index + 1 < args.size -> {
                 tools += args[++index].split(",").map(String::trim).filter(String::isNotEmpty)
             }
+
             (arg == "--exclude-tools" || arg == "-xt") && index + 1 < args.size -> {
                 excludeTools += args[++index].split(",").map(String::trim).filter(String::isNotEmpty)
             }
+
             arg == "--thinking" && index + 1 < args.size -> {
                 val level = args[++index]
                 if (level in VALID_THINKING_LEVELS) {
                     thinking = level
                 } else {
-                    diagnostics += PiCliDiagnostic(
-                        "warning",
-                        "Invalid thinking level \"$level\". Valid values: ${VALID_THINKING_LEVELS.joinToString(", ")}",
-                    )
+                    diagnostics +=
+                        PiCliDiagnostic(
+                            "warning",
+                            "Invalid thinking level \"$level\". Valid values: ${VALID_THINKING_LEVELS.joinToString(", ")}",
+                        )
                 }
             }
+
             arg == "--print" || arg == "-p" -> {
                 print = true
                 val next = args.getOrNull(index + 1)
@@ -169,16 +224,47 @@ fun parsePiArgs(args: List<String>): PiCliArgs {
                     index++
                 }
             }
-            arg == "--export" && index + 1 < args.size -> export = args[++index]
-            (arg == "--extension" || arg == "-e") && index + 1 < args.size -> extensions += args[++index]
-            arg == "--no-extensions" || arg == "-ne" -> noExtensions = true
-            arg == "--skill" && index + 1 < args.size -> skills += args[++index]
-            arg == "--prompt-template" && index + 1 < args.size -> promptTemplates += args[++index]
-            arg == "--theme" && index + 1 < args.size -> themes += args[++index]
-            arg == "--no-skills" || arg == "-ns" -> noSkills = true
-            arg == "--no-prompt-templates" || arg == "-np" -> noPromptTemplates = true
-            arg == "--no-themes" -> noThemes = true
-            arg == "--no-context-files" || arg == "-nc" -> noContextFiles = true
+
+            arg == "--export" && index + 1 < args.size -> {
+                export = args[++index]
+            }
+
+            (arg == "--extension" || arg == "-e") && index + 1 < args.size -> {
+                extensions += args[++index]
+            }
+
+            arg == "--no-extensions" || arg == "-ne" -> {
+                noExtensions = true
+            }
+
+            arg == "--skill" && index + 1 < args.size -> {
+                skills += args[++index]
+            }
+
+            arg == "--prompt-template" && index + 1 < args.size -> {
+                promptTemplates += args[++index]
+            }
+
+            arg == "--theme" && index + 1 < args.size -> {
+                themes += args[++index]
+            }
+
+            arg == "--no-skills" || arg == "-ns" -> {
+                noSkills = true
+            }
+
+            arg == "--no-prompt-templates" || arg == "-np" -> {
+                noPromptTemplates = true
+            }
+
+            arg == "--no-themes" -> {
+                noThemes = true
+            }
+
+            arg == "--no-context-files" || arg == "-nc" -> {
+                noContextFiles = true
+            }
+
             arg == "--list-models" -> {
                 val next = args.getOrNull(index + 1)
                 if (next != null && !next.startsWith("-") && !next.startsWith("@")) {
@@ -187,11 +273,27 @@ fun parsePiArgs(args: List<String>): PiCliArgs {
                     listModels = ""
                 }
             }
-            arg == "--verbose" -> verbose = true
-            arg == "--approve" || arg == "-a" -> projectTrustOverride = true
-            arg == "--no-approve" || arg == "-na" -> projectTrustOverride = false
-            arg == "--offline" -> offline = true
-            arg.startsWith("@") -> fileArgs += arg.substring(1)
+
+            arg == "--verbose" -> {
+                verbose = true
+            }
+
+            arg == "--approve" || arg == "-a" -> {
+                projectTrustOverride = true
+            }
+
+            arg == "--no-approve" || arg == "-na" -> {
+                projectTrustOverride = false
+            }
+
+            arg == "--offline" -> {
+                offline = true
+            }
+
+            arg.startsWith("@") -> {
+                fileArgs += arg.substring(1)
+            }
+
             arg.startsWith("--") -> {
                 val eqIndex = arg.indexOf('=')
                 if (eqIndex != -1) {
@@ -207,10 +309,14 @@ fun parsePiArgs(args: List<String>): PiCliArgs {
                     }
                 }
             }
+
             arg.startsWith("-") && !arg.startsWith("--") -> {
                 diagnostics += PiCliDiagnostic("error", "Unknown option: $arg")
             }
-            else -> messages += arg
+
+            else -> {
+                messages += arg
+            }
         }
         index++
     }
