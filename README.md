@@ -93,9 +93,12 @@ corresponding command on the target machine:
 ```
 
 The bundled `xuexue_mupdf` JNI library is rebuilt automatically whenever
-`tools/native/mupdf_bridge.c` or `tools/bootstrap-mupdf-native.sh` changes; a
-prebuilt copy ships under `.mupdf/<version>/<platform>/`. The launcher bundles
-a runtime, so the output runs without a system JDK.
+`tools/native/mupdf_bridge.c` or `tools/bootstrap-mupdf-native.sh` changes;
+it is **not stored in git** (`.mupdf/` is ignored), so fresh checkouts build it
+as part of the first Gradle invocation. See
+[docs/NATIVE_BUILD.md](docs/NATIVE_BUILD.md) for the build prerequisites, the
+zero-copy raster API, and verification steps. The launcher bundles a runtime,
+so the output runs without a system JDK.
 
 ## Alpha scope
 
