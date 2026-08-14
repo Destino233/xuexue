@@ -465,22 +465,52 @@ class ModelRegistry(
             }
         }
 
-    private fun stripJsonComments(text: String): String =
-        buildString {
+    private fun stripJsonComments(text: String): String {
+        // Remove `//` line comments and trailing commas, leaving string literals untouched.
+        val withoutComments =
+            buildString {
+                var inString = false
+                var escaped = false
+                var index = 0
+                while (index < text.length) {
+                    val character = text[index]
+                    if (character == '\n') {
+                        append(character)
+                        index++
+                        continue
+                    }
+                    if (character == '"' && !escaped) inString = !inString
+                    if (!inString && character == '/' && text.getOrNull(index + 1) == '/') {
+                        while (index < text.length && text[index] != '\n') index++
+                        continue
+                    }
+                    append(character)
+                    escaped = character == '\\' && !escaped
+                    if (character != '\\') escaped = false
+                    index++
+                }
+            }
+        return buildString {
             var inString = false
             var escaped = false
             var index = 0
-            while (index < text.length) {
-                val character = text[index]
+            while (index < withoutComments.length) {
+                val character = withoutComments[index]
                 if (character == '\n') {
                     append(character)
                     index++
                     continue
                 }
                 if (character == '"' && !escaped) inString = !inString
-                if (!inString && character == '/' && text.getOrNull(index + 1) == '/') {
-                    while (index < text.length && text[index] != '\n') index++
-                    continue
+                if (!inString && character == ',') {
+                    var lookahead = index + 1
+                    while (lookahead < withoutComments.length && withoutComments[lookahead].isWhitespace()) {
+                        lookahead++
+                    }
+                    if (withoutComments.getOrNull(lookahead)?.let { it == '}' || it == ']' } == true) {
+                        index++
+                        continue
+                    }
                 }
                 append(character)
                 escaped = character == '\\' && !escaped
@@ -488,6 +518,7 @@ class ModelRegistry(
                 index++
             }
         }
+    }
 
     private companion object {
         val DATE_SUFFIX = Regex("-\\d{8}$")

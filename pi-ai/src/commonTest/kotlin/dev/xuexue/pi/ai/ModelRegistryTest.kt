@@ -49,6 +49,30 @@ class ModelRegistryTest {
         }
 
     @Test
+    fun loadsCustomModelsWithTrailingCommasAndCommentsLikePi() =
+        runTest {
+            val registry =
+                ModelRegistry(
+                    authStore = InMemoryAuthStore(),
+                    environment = emptyMap(),
+                    modelsJson =
+                        """
+                        {
+                          // trailing commas are legal in Pi models.json
+                          "providers": {
+                            "custom": {
+                              "baseUrl": "https://example.test/v1",
+                              "api": "openai-completions",
+                              "models": [{"id":"review","contextWindow":4096},],
+                            },
+                          },
+                        }
+                        """.trimIndent(),
+                )
+            assertEquals("https://example.test/v1", registry.find("custom", "review")?.baseUrl)
+        }
+
+    @Test
     fun ambiguousBareModelDoesNotResolveAndThinkingSuffixIsParsed() {
         val first = defaultModelCatalog().first().copy(id = "same")
         val second = defaultModelCatalog()[1].copy(id = "same")

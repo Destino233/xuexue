@@ -36,6 +36,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
@@ -131,7 +133,7 @@ internal class DesktopPiCodingTools(
                 }
             }
 
-            val text = Files.readString(path, StandardCharsets.UTF_8)
+            val text = decodePiText(Files.readAllBytes(path))
             val lines = text.split('\n')
             val offset = args.intValue("offset")?.coerceAtLeast(1) ?: 1
             val start = offset - 1
@@ -947,36 +949,134 @@ internal class DesktopPiCodingTools(
         if (signal?.isAborted == true) error("Operation aborted")
     }
 
-    @Suppress("CyclomaticComplexMethod")
+    /** Pi decodes text with Node's utf-8 replacement semantics; JVM decoders must do the same. */
+    private fun decodePiText(bytes: ByteArray): String =
+        StandardCharsets.UTF_8
+            .newDecoder()
+            .onMalformedInput(CodingErrorAction.REPLACE)
+            .onUnmappableCharacter(CodingErrorAction.REPLACE)
+            .decode(ByteBuffer.wrap(bytes))
+            .toString()
+
+    @Suppress("CyclomaticComplexMethod", "LongMethod")
     private fun detectImageMime(path: Path): String? {
         val bytes =
             runCatching {
-                Files.readAllBytes(path).copyOf(minOf(Files.size(path).toInt(), 16))
+                Files.readAllBytes(path).copyOf(minOf(Files.size(path).toInt(), IMAGE_MIME_SNIFF_BYTES))
             }.getOrNull() ?: return null
-        val extension =
-            path.fileName
-                .toString()
-                .substringAfterLast('.', "")
-                .lowercase(Locale.ROOT)
         return when {
-            bytes.size >= 8 &&
-                bytes.copyOfRange(0, 8).contentEquals(
-                    byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a),
-                ) -> "image/png"
+            startsWithBytes(bytes, 0, byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte())) -> {
+                // Pi rejects the 0xf7 SOF variant (JPEG-LS) like its sniff helper.
+                if (bytes.getOrNull(3) == 0xf7.toByte()) null else "image/jpeg"
+            }
 
-            bytes.size >= 3 && bytes[0] == 0xff.toByte() && bytes[1] == 0xd8.toByte() -> "image/jpeg"
+            startsWithBytes(bytes, 0, PNG_SIGNATURE) -> {
+                if (isPiPng(bytes) && !isPiAnimatedPng(bytes)) "image/png" else null
+            }
 
-            bytes.size >= 6 && String(bytes, Charsets.US_ASCII).startsWith("GIF") -> "image/gif"
+            startsWithAscii(bytes, 0, "GIF") -> {
+                "image/gif"
+            }
 
-            bytes.size >= 12 && String(bytes, Charsets.US_ASCII).startsWith("RIFF") &&
-                String(bytes, 8, 4, Charsets.US_ASCII) == "WEBP" -> "image/webp"
+            startsWithAscii(bytes, 0, "RIFF") && startsWithAscii(bytes, 8, "WEBP") -> {
+                "image/webp"
+            }
 
-            bytes.size >= 2 && bytes[0] == 'B'.code.toByte() && bytes[1] == 'M'.code.toByte() -> "image/bmp"
+            startsWithAscii(bytes, 0, "BM") && isPiBmp(bytes) -> {
+                "image/bmp"
+            }
 
-            extension in setOf("png", "jpg", "jpeg", "gif", "webp", "bmp") -> null
-
-            else -> null
+            else -> {
+                null
+            }
         }
+    }
+
+    private fun startsWithBytes(
+        buffer: ByteArray,
+        offset: Int,
+        bytes: ByteArray,
+    ): Boolean =
+        buffer.size >= offset + bytes.size &&
+            bytes.indices.all { index -> buffer[offset + index] == bytes[index] }
+
+    private fun startsWithAscii(
+        buffer: ByteArray,
+        offset: Int,
+        text: String,
+    ): Boolean =
+        buffer.size >= offset + text.length &&
+            text.indices.all { index -> buffer[offset + index] == text[index].code.toByte() }
+
+    private fun readUint32Be(
+        buffer: ByteArray,
+        offset: Int,
+    ): Long {
+        val a = buffer.getOrNull(offset)?.toLong()?.and(0xff) ?: 0L
+        val b = buffer.getOrNull(offset + 1)?.toLong()?.and(0xff) ?: 0L
+        val c = buffer.getOrNull(offset + 2)?.toLong()?.and(0xff) ?: 0L
+        val d = buffer.getOrNull(offset + 3)?.toLong()?.and(0xff) ?: 0L
+        return (a shl 24) or (b shl 16) or (c shl 8) or d
+    }
+
+    private fun readUint32Le(
+        buffer: ByteArray,
+        offset: Int,
+    ): Long {
+        val a = buffer.getOrNull(offset)?.toLong()?.and(0xff) ?: 0L
+        val b = buffer.getOrNull(offset + 1)?.toLong()?.and(0xff) ?: 0L
+        val c = buffer.getOrNull(offset + 2)?.toLong()?.and(0xff) ?: 0L
+        val d = buffer.getOrNull(offset + 3)?.toLong()?.and(0xff) ?: 0L
+        return a or (b shl 8) or (c shl 16) or (d shl 24)
+    }
+
+    private fun readUint16Le(
+        buffer: ByteArray,
+        offset: Int,
+    ): Int =
+        (buffer.getOrNull(offset)?.toInt()?.and(0xff) ?: 0) +
+            ((buffer.getOrNull(offset + 1)?.toInt()?.and(0xff) ?: 0) shl 8)
+
+    private fun isPiPng(buffer: ByteArray): Boolean =
+        buffer.size >= 16 &&
+            readUint32Be(buffer, PNG_SIGNATURE.size) == 13L &&
+            startsWithAscii(buffer, 12, "IHDR")
+
+    private fun isPiAnimatedPng(buffer: ByteArray): Boolean {
+        var offset = PNG_SIGNATURE.size
+        while (offset + 8 <= buffer.size) {
+            val chunkLength = readUint32Be(buffer, offset).toInt()
+            val chunkTypeOffset = offset + 4
+            if (startsWithAscii(buffer, chunkTypeOffset, "acTL")) return true
+            if (startsWithAscii(buffer, chunkTypeOffset, "IDAT")) return false
+            val nextOffset = offset + 8 + chunkLength + 4
+            if (nextOffset <= offset || nextOffset > buffer.size) return false
+            offset = nextOffset
+        }
+        return false
+    }
+
+    private fun isPiBmp(buffer: ByteArray): Boolean {
+        if (buffer.size < 26) return false
+        val declaredFileSize = readUint32Le(buffer, 2)
+        val pixelDataOffset = readUint32Le(buffer, 10)
+        val dibHeaderSize = readUint32Le(buffer, 14)
+        if (declaredFileSize != 0L && declaredFileSize < 26) return false
+        if (pixelDataOffset < 14 + dibHeaderSize) return false
+        if (declaredFileSize != 0L && pixelDataOffset >= declaredFileSize) return false
+        val colorPlanes: Int
+        val bitsPerPixel: Int
+        if (dibHeaderSize == 12L) {
+            colorPlanes = readUint16Le(buffer, 22)
+            bitsPerPixel = readUint16Le(buffer, 24)
+        } else if (dibHeaderSize in 40L..124L) {
+            if (buffer.size < 30) return false
+            colorPlanes = readUint16Le(buffer, 26)
+            bitsPerPixel = readUint16Le(buffer, 28)
+        } else {
+            return false
+        }
+        return colorPlanes == 1 && bitsPerPixel in intArrayOf(1, 4, 8, 16, 24, 32)
     }
 
     private fun JsonObject.requiredString(name: String): String =
@@ -997,6 +1097,8 @@ internal class DesktopPiCodingTools(
     private companion object {
         const val BASH_UPDATE_INTERVAL_NS = 100_000_000L
         const val MAX_TIMEOUT_SECONDS = 2_147_483.647
+        const val IMAGE_MIME_SNIFF_BYTES = 4_100
+        val PNG_SIGNATURE = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
     }
 
     private data class EditRequest(

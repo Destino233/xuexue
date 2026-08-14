@@ -105,6 +105,24 @@ class DesktopPiCodingToolsTest {
         }
 
     @Test
+    fun readRejectsJpegLsfVariantLikePi() =
+        runTest {
+            val bytes = byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 0xf7.toByte()) +
+                ByteArray(16) { 0x01 }
+            root.resolve("variant.jpg").writeBytes(bytes)
+            val result = execute("read", buildJsonObject { put("path", "variant.jpg") })
+            assertIs<TextContent>(result.content.single())
+        }
+
+    @Test
+    fun readRejectsFakeBmpWithoutValidDibHeaderLikePi() =
+        runTest {
+            root.resolve("fake.bmp").writeBytes(byteArrayOf('B'.code.toByte(), 'M'.code.toByte()) + ByteArray(20))
+            val result = execute("read", buildJsonObject { put("path", "fake.bmp") })
+            assertIs<TextContent>(result.content.single())
+        }
+
+    @Test
     fun readLongFirstLineUsesTheOriginalPathInFallback() =
         runTest {
             root.resolve("long.txt").writeText("x".repeat(60 * 1024))
@@ -213,7 +231,12 @@ class DesktopPiCodingToolsTest {
             val matchLine = output.lineSequence().first { it.startsWith("long.txt:1: ") }
             assertEquals("long.txt:1: " + "needle ".length.let { "needle " + "x".repeat(500 - it) } + "... [truncated]", matchLine)
             assertContains(output, "Some lines truncated to 500 chars")
-            assertEquals(true, result.details.jsonObject["linesTruncated"]?.toString()?.toBoolean())
+            assertEquals(
+                true,
+                result.details.jsonObject["linesTruncated"]
+                    ?.toString()
+                    ?.toBoolean(),
+            )
         }
 
     @Test
