@@ -237,6 +237,10 @@ compose.desktop {
             "-Xmx1024m",
             "-XX:MinHeapFreeRatio=20",
             "-XX:MaxHeapFreeRatio=60",
+            // After 30s without allocation pressure G1 runs a periodic concurrent
+            // cycle so the free-ratio band can shrink the heap back to the OS;
+            // without this the committed heap stays parked after heavy reading.
+            "-XX:G1PeriodicGCInterval=30000",
             // Cap JVM-native overhead (class metadata, JIT code cache) that is
             // invisible to heap accounting but still counts toward process RSS.
             "-XX:MaxMetaspaceSize=256m",
