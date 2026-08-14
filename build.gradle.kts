@@ -9,7 +9,7 @@ import java.util.Locale
 plugins {
     kotlin("multiplatform") version "2.4.0"
     id("org.jetbrains.kotlin.plugin.compose") version "2.4.0"
-    id("org.jetbrains.compose") version "1.8.2"
+    id("org.jetbrains.compose") version "1.9.0"
     kotlin("plugin.serialization") version "2.4.0"
     id("dev.detekt") version "2.0.0-alpha.5"
     id("org.jlleitschuh.gradle.ktlint") version "14.2.0"

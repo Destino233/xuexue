@@ -251,7 +251,7 @@ internal class PdfTextureCache<T>(
     internal fun trimIdle(documentPath: String? = null) {
         synchronized(lock) {
             entries.values
-                .filter { entry -> entry.leases == 0 && (documentPath == null || entry.key.documentPath == documentPath) }
+                .filter { entry -> entry.isIdleFor(documentPath) }
                 .toList()
                 .forEach { entry ->
                     entries.remove(entry.key)
@@ -412,6 +412,8 @@ internal class PdfTextureCache<T>(
         fun promote(requestedPriority: PdfRasterPriority) {
             if (requestedPriority > priority) priority = requestedPriority
         }
+
+        fun isIdleFor(documentPath: String?): Boolean = leases == 0 && (documentPath == null || key.documentPath == documentPath)
     }
 
     private class CacheClosedException : IllegalStateException("PDF texture cache is closed.")
