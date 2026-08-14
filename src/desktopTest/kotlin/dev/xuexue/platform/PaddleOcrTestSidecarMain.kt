@@ -32,6 +32,14 @@ object PaddleOcrTestSidecarMain {
                 server.stop(0)
             },
         )
+        Thread {
+            runCatching {
+                while (System.`in`.read() >= 0) {
+                    // Keep waiting until the manager closes the sidecar's input stream.
+                }
+                System.exit(0)
+            }
+        }.apply { isDaemon = true }.start()
         server.start()
         Files.writeString(started, "started")
         try {

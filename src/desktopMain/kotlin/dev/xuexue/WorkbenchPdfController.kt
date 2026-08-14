@@ -89,6 +89,13 @@ internal class WorkbenchPdfController(
 
     suspend fun inspect(document: DocumentTab): PdfDocumentMetadata = backend.inspect(pdfPath(document))
 
+    suspend fun authenticate(
+        document: DocumentTab,
+        password: String,
+    ) {
+        backend.authenticate(pdfPath(document), password)
+    }
+
     suspend fun pageDimensions(
         document: DocumentTab,
         pageIndex: Int,

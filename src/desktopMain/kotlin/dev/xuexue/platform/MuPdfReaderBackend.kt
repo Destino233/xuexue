@@ -43,6 +43,15 @@ internal class MuPdfReaderBackend(
             PdfDocumentMetadata(session.pageCount())
         }
 
+    override suspend fun authenticate(
+        path: Path,
+        password: String,
+    ) {
+        withSession(path) { session ->
+            if (!session.authenticate(password)) throw PdfIncorrectPasswordException()
+        }
+    }
+
     override suspend fun pageDimensions(
         path: Path,
         pageIndex: Int,

@@ -1,8 +1,10 @@
 package dev.xuexue.platform
 
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import java.nio.file.Files
 import java.nio.file.Path
@@ -196,6 +198,13 @@ data class PdfLink(
 interface PdfReaderBackend : AutoCloseable {
     suspend fun inspect(path: Path): PdfDocumentMetadata
 
+    suspend fun authenticate(
+        path: Path,
+        password: String,
+    ) {
+        error("This PDF backend does not support password authentication.")
+    }
+
     suspend fun pageDimensions(
         path: Path,
         pageIndex: Int,
@@ -277,6 +286,11 @@ class CachingPdfReaderBackend(
 
     override suspend fun inspect(path: Path): PdfDocumentMetadata = delegate.inspect(path)
 
+    override suspend fun authenticate(
+        path: Path,
+        password: String,
+    ) = delegate.authenticate(path, password)
+
     override suspend fun pageDimensions(
         path: Path,
         pageIndex: Int,
@@ -329,13 +343,15 @@ class CachingPdfReaderBackend(
             else -> {
                 val pending = checkNotNull(lookup.pending)
                 val result = runCatching { delegate.render(normalizedRequest) }
-                mutex.withLock {
-                    val completedRequest = inFlight.remove(key) ?: pending
-                    result.onSuccess { raster -> putRaster(key, raster, completedRequest.priority) }
-                    result.fold(
-                        completedRequest.deferred::complete,
-                        completedRequest.deferred::completeExceptionally,
-                    )
+                withContext(NonCancellable) {
+                    mutex.withLock {
+                        val completedRequest = inFlight.remove(key) ?: pending
+                        result.onSuccess { raster -> putRaster(key, raster, completedRequest.priority) }
+                        result.fold(
+                            completedRequest.deferred::complete,
+                            completedRequest.deferred::completeExceptionally,
+                        )
+                    }
                 }
                 result.getOrThrow()
             }

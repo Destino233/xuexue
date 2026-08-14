@@ -184,12 +184,27 @@ internal class MuPdfDocumentSession(
     private val progressiveScope: CoroutineScope? = null,
 ) {
     private var documentHandle = 0L
+    private var passwordRequired = false
     private var progressiveStream: MuPdfProgressiveStream? = null
     private var progressiveGeneration = 0L
     private val pageCache = LinkedHashMap<Int, MuPdfPageEntry>(16, 0.75f, true)
     private val linkCache = mutableMapOf<Int, ByteArray>()
 
     suspend fun pageCount(): Int = onActorWithProgressiveData { MuPdfNative.countPages(document()) }
+
+    suspend fun authenticate(password: String): Boolean =
+        onActorWithProgressiveData {
+            val handle = openDocumentHandle()
+            if (!passwordRequired) {
+                true
+            } else {
+                MuPdfNative
+                    .authenticatePassword(handle, password.encodeToByteArray())
+                    .also { authenticated ->
+                        if (authenticated) passwordRequired = false
+                    }
+            }
+        }
 
     suspend fun loadLinks(pageIndex: Int): ByteArray =
         onActorWithProgressiveData {
@@ -261,12 +276,19 @@ internal class MuPdfDocumentSession(
                 MuPdfNative.closeDocument(documentHandle)
                 documentHandle = 0L
             }
+            passwordRequired = false
             progressiveStream?.close()
             progressiveStream = null
         }
     }
 
     private fun document(): Long {
+        val handle = openDocumentHandle()
+        if (passwordRequired) throw PdfPasswordRequiredException()
+        return handle
+    }
+
+    private fun openDocumentHandle(): Long {
         if (documentHandle != 0L) return documentHandle
         val opened =
             progressiveSource?.let { source ->
@@ -280,6 +302,7 @@ internal class MuPdfDocumentSession(
             .also { opened ->
                 check(opened != 0L) { "MuPDF returned an empty document handle for $path." }
                 documentHandle = opened
+                passwordRequired = MuPdfNative.needsPassword(opened)
             }
     }
 

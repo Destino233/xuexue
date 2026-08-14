@@ -547,6 +547,54 @@ Java_dev_xuexue_platform_MuPdfNative_openDocument(JNIEnv *env, jobject self, jby
     return (jlong)(intptr_t)document;
 }
 
+JNIEXPORT jboolean JNICALL
+Java_dev_xuexue_platform_MuPdfNative_needsPassword(JNIEnv *env, jobject self, jlong handle)
+{
+    fz_context *ctx = get_context(env);
+    int needs_password = 0;
+
+    (void)self;
+    if (ctx == NULL || handle == 0)
+        return JNI_FALSE;
+    fz_try(ctx)
+        needs_password = fz_needs_password(ctx, (fz_document *)(intptr_t)handle);
+    fz_catch(ctx)
+    {
+        rethrow_mupdf(env, ctx);
+        return JNI_FALSE;
+    }
+    return needs_password ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_dev_xuexue_platform_MuPdfNative_authenticatePassword(
+    JNIEnv *env,
+    jobject self,
+    jlong handle,
+    jbyteArray password_utf8)
+{
+    fz_context *ctx = get_context(env);
+    char *password;
+    int authenticated = 0;
+
+    (void)self;
+    if (ctx == NULL || handle == 0)
+        return JNI_FALSE;
+    password = copy_utf8(env, password_utf8);
+    if (password == NULL)
+        return JNI_FALSE;
+    fz_try(ctx)
+        authenticated = fz_authenticate_password(ctx, (fz_document *)(intptr_t)handle, password);
+    fz_always(ctx)
+        free(password);
+    fz_catch(ctx)
+    {
+        rethrow_mupdf(env, ctx);
+        return JNI_FALSE;
+    }
+    return authenticated ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT jlong JNICALL
 Java_dev_xuexue_platform_MuPdfNative_createProgressiveStream(
     JNIEnv *env,

@@ -1,4 +1,5 @@
 .gradle/
+.gradle-user-home/
 .kotlin/
 build/
 out/
@@ -7,6 +8,8 @@ out/
 .DS_Store
 .xuexue/
 .mupdf/
+.cache/
+.tmp/
 __pycache__/
 *.pyc
 参考内容/

@@ -208,17 +208,21 @@ private suspend fun assertExportedOutline(
     assertEquals(listOf("Rebuilt child"), exported.single().children.map(PdfNativeOutlineNode::title))
     assertTrue(abs((exported.single().topNormalized ?: -1f) - 0.2f) < 0.03f)
     assertEquals(1, backend.inspect(output).pageCount)
-    assertTrue(runExternalReader("pdfinfo", output).contains("Pages:           1"))
-    assertTrue(runExternalReader("pdftotext", output, "-").contains("Chapter 1"))
-    val independentOutline =
-        runExternalReader(
-            "python3",
-            Path.of("tools/verify_pdf_outline.py"),
-            output.toString(),
-        )
-    assertTrue(independentOutline.contains("Rebuilt root"))
-    assertTrue(independentOutline.contains("Rebuilt child"))
+    if (!isWindows()) {
+        assertTrue(runExternalReader("pdfinfo", output).contains("Pages:           1"))
+        assertTrue(runExternalReader("pdftotext", output, "-").contains("Chapter 1"))
+        val independentOutline =
+            runExternalReader(
+                "python3",
+                Path.of("tools/verify_pdf_outline.py"),
+                output.toString(),
+            )
+        assertTrue(independentOutline.contains("Rebuilt root"))
+        assertTrue(independentOutline.contains("Rebuilt child"))
+    }
 }
+
+private fun isWindows(): Boolean = System.getProperty("os.name").contains("win", ignoreCase = true)
 
 private fun runExternalReader(
     executable: String,

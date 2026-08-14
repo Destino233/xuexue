@@ -65,4 +65,18 @@ class PdfZoomInteractionTest {
             ),
         )
     }
+
+    @Test
+    fun centeredPageZoomKeepsThePointUnderThePointerStable() {
+        assertEquals(
+            40,
+            zoomedPageScrollOffset(
+                currentOffset = 0,
+                anchorPosition = 700f,
+                sourcePageWidth = 800f,
+                targetPageWidth = 960f,
+                viewportWidth = 1_000f,
+            ),
+        )
+    }
 }

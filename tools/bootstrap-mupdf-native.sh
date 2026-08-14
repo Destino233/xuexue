@@ -60,7 +60,13 @@ if [[ -f "${OUTPUT_LIBRARY}" && "${OUTPUT_LIBRARY}" -nt "${BRIDGE_SOURCE}" && \
     exit 0
 fi
 
-CACHE_ROOT="${XDG_CACHE_HOME:-${HOME}/.cache}/xuexue/mupdf/${MUPDF_VERSION}"
+if [[ -n "${XDG_CACHE_HOME:-}" ]]; then
+    CACHE_ROOT="${XDG_CACHE_HOME}/xuexue/mupdf/${MUPDF_VERSION}"
+elif [[ "${OS_ID}" == "windows" ]]; then
+    CACHE_ROOT="${PROJECT_ROOT}/.cache/xuexue/mupdf/${MUPDF_VERSION}"
+else
+    CACHE_ROOT="${HOME}/.cache/xuexue/mupdf/${MUPDF_VERSION}"
+fi
 ARCHIVE="${CACHE_ROOT}/mupdf-${MUPDF_VERSION}-source.tar.gz"
 SOURCE_DIR="${CACHE_ROOT}/source"
 MUPDF_BUILD_DIR="build/xuexue/release-bundled"
@@ -81,15 +87,44 @@ else
     exit 1
 fi
 
+extract_mupdf_source() {
+    local -a tar_args=(
+        -xzf "${ARCHIVE}"
+        --strip-components=1
+        -C "${SOURCE_DIR}"
+    )
+
+    if [[ "${OS_ID}" == "windows" ]]; then
+        # MSYS2 without native symlink support cannot extract dangling links.
+        local symlink_path
+        while IFS= read -r symlink_path; do
+            [[ -n "${symlink_path}" ]] || continue
+            tar_args+=(--exclude="${symlink_path}")
+        done < <(
+            tar -tvzf "${ARCHIVE}" |
+                awk '$1 ~ /^l/ {
+                    sub(/^[^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ /, "")
+                    sub(/ -> .*/, "")
+                    print
+                }'
+        )
+    fi
+
+    tar "${tar_args[@]}"
+}
+
 if [[ ! -f "${SOURCE_DIR}/include/mupdf/fitz.h" ]]; then
     rm -rf "${SOURCE_DIR}"
     mkdir -p "${SOURCE_DIR}"
-    tar -xzf "${ARCHIVE}" --strip-components=1 -C "${SOURCE_DIR}"
+    extract_mupdf_source
 fi
 
 MUPDF_XCFLAGS="-fPIC"
+BRIDGE_CFLAGS=("-fPIC")
 if [[ "${OS_ID}" == "windows" ]]; then
-    MUPDF_XCFLAGS=""
+    # MuPDF 1.27.2 uses SSE4.1 intrinsics in its x86 deskew path.
+    MUPDF_XCFLAGS="-msse4.1"
+    BRIDGE_CFLAGS=()
 fi
 "${MAKE:-make}" -C "${SOURCE_DIR}" \
     OUT="${MUPDF_BUILD_DIR}" \
@@ -138,7 +173,7 @@ esac
     -Wall \
     -Wextra \
     -Wpedantic \
-    ${MUPDF_XCFLAGS:+'-fPIC'} \
+    "${BRIDGE_CFLAGS[@]}" \
     -I"${SOURCE_DIR}/include" \
     -I"${JAVA_INCLUDE_HOME}/include" \
     -I"${JAVA_INCLUDE_HOME}/include/${JNI_INCLUDE}" \

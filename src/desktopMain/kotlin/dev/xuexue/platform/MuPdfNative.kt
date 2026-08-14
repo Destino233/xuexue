@@ -20,14 +20,71 @@ internal object MuPdfNative {
                 ?.let(Path::of)
                 ?.resolve(System.mapLibraryName(NATIVE_LIBRARY_NAME))
                 ?.takeIf(Files::isRegularFile)
-        if (bundledLibrary == null) {
-            System.loadLibrary(NATIVE_LIBRARY_NAME)
-        } else {
-            System.load(bundledLibrary.toAbsolutePath().toString())
+        when {
+            bundledLibrary != null -> {
+                System.load(bundledLibrary.toAbsolutePath().toString())
+            }
+
+            else -> {
+                val extractedLibrary = extractClasspathLibrary()
+                if (extractedLibrary == null) {
+                    System.loadLibrary(NATIVE_LIBRARY_NAME)
+                } else {
+                    System.load(extractedLibrary.toAbsolutePath().toString())
+                }
+            }
         }
     }
 
+    private fun extractClasspathLibrary(): Path? {
+        val fileName = System.mapLibraryName(NATIVE_LIBRARY_NAME)
+        val resource =
+            MuPdfNative::class.java
+                .getResourceAsStream("/xuexue/native/$fileName")
+                ?: return null
+        val root = runtimeDirectory()
+        val target = root.resolve(fileName)
+        Files.createDirectories(root)
+        resource.use { input ->
+            if (!Files.isRegularFile(target)) Files.copy(input, target)
+        }
+        return target
+    }
+
+    private fun runtimeDirectory(): Path {
+        val configured =
+            System
+                .getenv("XUEXUE_RUNTIME_DIR")
+                ?.takeIf(String::isNotBlank)
+                ?.let(Path::of)
+        if (configured != null) return configured.toAbsolutePath().normalize().resolve(".xuexue-native")
+        val codeSourceDirectory =
+            runCatching {
+                val location =
+                    Path.of(
+                        MuPdfNative::class.java
+                            .protectionDomain
+                            .codeSource
+                            .location
+                            .toURI(),
+                    )
+                if (Files.isDirectory(location)) location else checkNotNull(location.parent)
+            }.getOrNull()
+        val baseDirectory = codeSourceDirectory ?: Path.of(System.getProperty("user.dir", "."))
+        return baseDirectory
+            .toAbsolutePath()
+            .normalize()
+            .resolve(".xuexue-native")
+    }
+
     external fun openDocument(pathUtf8: ByteArray): Long
+
+    external fun needsPassword(handle: Long): Boolean
+
+    external fun authenticatePassword(
+        handle: Long,
+        passwordUtf8: ByteArray,
+    ): Boolean
 
     external fun createProgressiveStream(
         length: Long,
@@ -151,6 +208,10 @@ internal object MuPdfNative {
 internal class PdfTryLaterException(
     message: String,
 ) : IllegalStateException(message)
+
+internal class PdfPasswordRequiredException : IllegalStateException("PDF password authentication is required.")
+
+internal class PdfIncorrectPasswordException : IllegalArgumentException("Incorrect PDF password.")
 
 internal data class PdfByteRange(
     val offset: Long,

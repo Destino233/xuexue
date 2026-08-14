@@ -533,6 +533,13 @@ class PaddleOcrServiceManager(
     @Synchronized
     fun stop() {
         process?.let { current ->
+            if (isWindows()) {
+                runCatching { current.outputStream.close() }
+                if (current.waitFor(2, TimeUnit.SECONDS)) {
+                    process = null
+                    return
+                }
+            }
             current.destroy()
             if (!current.waitFor(2, TimeUnit.SECONDS)) current.destroyForcibly()
         }

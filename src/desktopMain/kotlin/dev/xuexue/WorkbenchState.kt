@@ -57,6 +57,7 @@ import dev.xuexue.platform.PdfRasterLayer
 import dev.xuexue.platform.PdfRasterPriority
 import dev.xuexue.platform.PdfRasterPurpose
 import dev.xuexue.platform.PdfReaderBackend
+import dev.xuexue.platform.PdfRenderAdmission
 import dev.xuexue.platform.PdfSearchMatch
 import dev.xuexue.platform.PdfTextSelection
 import dev.xuexue.platform.PdfTextureCache
@@ -72,7 +73,9 @@ import dev.xuexue.platform.normalizedDocumentWheelZoomMultiplier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.nio.file.Files
@@ -89,6 +92,9 @@ private data class NavigationLocation(
 )
 
 private const val PDF_RESOURCE_TRIM_DELAY_MILLIS = 250L
+private const val PDF_MEMORY_PRESSURE_CHECK_DELAY_MILLIS = 2_000L
+private const val PDF_MEMORY_PRESSURE_FRACTION = 0.7
+private const val PDF_RASTER_HANDOFF_PERMITS = 4
 
 private data class WorkspaceEntryLoad(
     val kind: DocumentKind,
@@ -129,6 +135,8 @@ class WorkbenchState(
             onBytesChanged = pdfMetrics.textures::updateCacheBytes,
             onEviction = pdfMetrics.textures::recordCacheEviction,
         )
+    private val pdfRasterHandoff = PdfRenderAdmission(PDF_RASTER_HANDOFF_PERMITS)
+    private var pendingPersistJob: Job? = null
     var workspaceRoot by mutableStateOf<Path?>(null)
         private set
     var workspaceTree by mutableStateOf<WorkspaceEntry?>(null)
@@ -280,6 +288,17 @@ class WorkbenchState(
     internal val remotePdfDownloadStates: Map<String, RemotePdfDownloadState>
         get() = remotePdfController.downloadStates
 
+    // The pressure monitor uses its own job: it must never be a child of an
+    // external scope (e.g. runBlocking in tests) or shutdown paths that await
+    // all children would hang.
+    private val pdfMemoryPressureJob: Job =
+        scope.launch(SupervisorJob()) {
+            while (isActive) {
+                delay(PDF_MEMORY_PRESSURE_CHECK_DELAY_MILLIS)
+                trimPdfResourcesUnderPressure()
+            }
+        }
+
     suspend fun restoreLastWorkspace() {
         val restored =
             withContext(Dispatchers.IO) {
@@ -295,6 +314,7 @@ class WorkbenchState(
     suspend fun shutdown() {
         if (shutdown) return
         shutdown = true
+        pdfMemoryPressureJob.cancel()
         pdfOutlineController.close()
         runCatching {
             workspaceService.saveAppPreferences(
@@ -431,6 +451,7 @@ class WorkbenchState(
             remotePdfController.reset()
             remotePdfDialogVisible = false
             persistWorkbench()
+            pendingPersistJob?.join()
             workspaceRoot = null
             workspaceTree = null
             documents.clear()
@@ -905,6 +926,17 @@ class WorkbenchState(
         }
     }
 
+    private suspend fun trimPdfResourcesUnderPressure() {
+        val runtime = Runtime.getRuntime()
+        val heapMax = runtime.maxMemory()
+        if (heapMax <= 0L) return
+        val heapUsed = runtime.totalMemory() - runtime.freeMemory()
+        val pressureThresholdBytes = (heapMax.toDouble() * PDF_MEMORY_PRESSURE_FRACTION).toLong()
+        if (heapUsed < pressureThresholdBytes) return
+        pdfTextureCache.trimIdle()
+        runCatching { resolvedPdfReaderBackend.trimIdleResources() }
+    }
+
     fun updateContent(
         tab: DocumentTab,
         text: String,
@@ -1104,6 +1136,14 @@ class WorkbenchState(
 
     suspend fun inspectPdf(document: DocumentTab): PdfDocumentMetadata = pdfController.inspect(document)
 
+    suspend fun authenticatePdf(
+        document: DocumentTab,
+        password: String,
+    ) {
+        pdfController.authenticate(document, password)
+        pdfOutlineController.loadOutline(document)
+    }
+
     suspend fun inspectPdfPage(
         document: DocumentTab,
         pageIndex: Int,
@@ -1118,6 +1158,8 @@ class WorkbenchState(
         priority: PdfRasterPriority = PdfRasterPriority.VISIBLE,
         layer: PdfRasterLayer = PdfRasterLayer.CONTENT,
     ): PdfPageRaster = pdfController.render(document, pageIndex, dpi, purpose, viewport, priority, layer)
+
+    internal suspend fun <T> withPdfRasterHandoff(block: suspend () -> T): T = pdfRasterHandoff.withPermit(block)
 
     suspend fun searchPdf(
         document: DocumentTab,
@@ -1816,6 +1858,9 @@ class WorkbenchState(
                         .filter { it.kind == DocumentKind.PDF }
                         .associate { it.relativePath to it.pdfColorMode },
             )
-        scope.launch(Dispatchers.IO) { runCatching { workspaceService.saveWorkbench(root, snapshot) } }
+        pendingPersistJob =
+            scope.launch(Dispatchers.IO) {
+                runCatching { workspaceService.saveWorkbench(root, snapshot) }
+            }
     }
 }

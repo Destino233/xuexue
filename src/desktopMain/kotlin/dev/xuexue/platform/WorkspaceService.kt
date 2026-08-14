@@ -139,6 +139,7 @@ const val MAX_DOCUMENT_WHEEL_ZOOM_MULTIPLIER = 2f
 const val MIN_APPLICATION_MEMORY_MIB = 512
 const val MAX_APPLICATION_MEMORY_MIB = 16_384
 const val APPLICATION_MEMORY_STEP_MIB = 512
+const val DEFAULT_APPLICATION_MEMORY_LIMIT_MIB = 1_024
 
 fun normalizedDocumentWheelZoomMultiplier(value: Float): Float =
     value
@@ -146,10 +147,7 @@ fun normalizedDocumentWheelZoomMultiplier(value: Float): Float =
         ?.coerceIn(MIN_DOCUMENT_WHEEL_ZOOM_MULTIPLIER, MAX_DOCUMENT_WHEEL_ZOOM_MULTIPLIER)
         ?: DEFAULT_DOCUMENT_WHEEL_ZOOM_MULTIPLIER
 
-fun defaultApplicationMemoryLimitMiB(): Int =
-    normalizedApplicationMemoryLimitMiB(
-        bytesToMiB(Runtime.getRuntime().maxMemory()).toInt(),
-    )
+fun defaultApplicationMemoryLimitMiB(): Int = normalizedApplicationMemoryLimitMiB(DEFAULT_APPLICATION_MEMORY_LIMIT_MIB)
 
 fun normalizedApplicationMemoryLimitMiB(value: Int): Int {
     val clamped = value.coerceIn(MIN_APPLICATION_MEMORY_MIB, MAX_APPLICATION_MEMORY_MIB)

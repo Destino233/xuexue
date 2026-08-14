@@ -8,11 +8,51 @@ import java.nio.file.Path
 import java.security.MessageDigest
 import java.util.Base64
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 @Suppress("TooManyFunctions") // Independent security fixtures share the native PDF test helpers.
 class PdfSecurityFixtureTest {
+    @Test
+    fun passwordProtectedPdfCanBeAuthenticatedForReading() =
+        runBlocking {
+            val directory = Files.createTempDirectory("xuexue-password-pdf-fixture")
+            val source = directory.resolve("protected.pdf")
+            Files.write(
+                source,
+                securityPdf(
+                    userPassword = "user",
+                    ownerPassword = "owner",
+                    permissions = ALL_PERMISSIONS,
+                ),
+            )
+            val backend = MuPdfReaderBackend()
+            try {
+                assertFailsWith<PdfPasswordRequiredException> { backend.inspect(source) }
+                assertFailsWith<PdfIncorrectPasswordException> { backend.authenticate(source, "wrong") }
+
+                backend.authenticate(source, "user")
+
+                assertEquals(1, backend.inspect(source).pageCount)
+                assertTrue(backend.extractPageText(source, 0).contains("Protected fixture"))
+                val raster =
+                    backend.render(
+                        PdfRasterRequest(
+                            path = source,
+                            pageIndex = 0,
+                            dpi = 72f,
+                            purpose = PdfRasterPurpose.THUMBNAIL,
+                        ),
+                    )
+                assertTrue(raster.pixelWidth > 0)
+                assertTrue(raster.pixelHeight > 0)
+            } finally {
+                backend.close()
+                deleteTree(directory)
+            }
+        }
+
     @Test
     fun exportRejectsARealPasswordProtectedPdf() =
         runBlocking {

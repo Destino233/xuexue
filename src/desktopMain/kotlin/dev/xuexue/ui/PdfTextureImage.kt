@@ -91,22 +91,28 @@ internal fun rememberPdfTexture(
                 previous?.lease?.close()
                 return@LaunchedEffect
             }
-            loadPdfRasterWithRefinement(
-                render = { state.renderPdfPage(tab, page, dpi, purpose, viewport, priority, layer) },
-                onRaster = { raster ->
-                    val nextLease = acquirePdfTextureLease(state, key, priority, raster)
-                    var adopted = false
-                    try {
-                        currentCoroutineContext().ensureActive()
-                        val previous = activeTexture.value
-                        activeTexture.value = ActivePdfTexture(key, nextLease)
-                        previous?.lease?.close()
-                        adopted = true
-                    } finally {
-                        if (!adopted) nextLease.close()
-                    }
-                },
-            )
+            activeTexture.value?.let { previous ->
+                activeTexture.value = null
+                previous.lease.close()
+            }
+            state.withPdfRasterHandoff {
+                loadPdfRasterWithRefinement(
+                    render = { state.renderPdfPage(tab, page, dpi, purpose, viewport, priority, layer) },
+                    onRaster = { raster ->
+                        val nextLease = acquirePdfTextureLease(state, key, priority, raster)
+                        var adopted = false
+                        try {
+                            currentCoroutineContext().ensureActive()
+                            val previous = activeTexture.value
+                            activeTexture.value = ActivePdfTexture(key, nextLease)
+                            previous?.lease?.close()
+                            adopted = true
+                        } finally {
+                            if (!adopted) nextLease.close()
+                        }
+                    },
+                )
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Throwable) {

@@ -82,3 +82,31 @@ internal fun zoomedScrollOffset(
     anchorPosition: Float,
     zoomRatio: Float,
 ): Int = ((currentOffset + anchorPosition) * zoomRatio - anchorPosition).roundToInt().coerceAtLeast(0)
+
+internal fun zoomedPageScrollOffset(
+    currentOffset: Int,
+    anchorPosition: Float,
+    sourcePageWidth: Float,
+    targetPageWidth: Float,
+    viewportWidth: Float,
+    contentPadding: Float = 0f,
+): Int {
+    if (
+        !sourcePageWidth.isValidZoomExtent() ||
+        !targetPageWidth.isValidZoomExtent() ||
+        !viewportWidth.isValidZoomExtent()
+    ) {
+        return currentOffset.coerceAtLeast(0)
+    }
+    val availableViewportWidth = (viewportWidth - contentPadding * 2f).coerceAtLeast(0f)
+    val sourcePageOrigin = contentPadding + (availableViewportWidth - sourcePageWidth).coerceAtLeast(0f) / 2f
+    val targetPageOrigin = contentPadding + (availableViewportWidth - targetPageWidth).coerceAtLeast(0f) / 2f
+    val sourcePagePosition = currentOffset + anchorPosition - sourcePageOrigin
+    return (
+        sourcePagePosition * targetPageWidth / sourcePageWidth +
+            targetPageOrigin -
+            anchorPosition
+    ).roundToInt().coerceAtLeast(0)
+}
+
+private fun Float.isValidZoomExtent(): Boolean = isFinite() && this > 0f

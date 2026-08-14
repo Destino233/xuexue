@@ -35,6 +35,15 @@ set APP_HOME=%DIRNAME%
 @rem Resolve any "." and ".." in APP_HOME to make it shorter.
 for %%i in ("%APP_HOME%") do set APP_HOME=%%~fi
 
+@rem Keep Windows build caches and temporary files on the checkout drive by default.
+if not defined GRADLE_USER_HOME set "GRADLE_USER_HOME=%APP_HOME%\.gradle-user-home"
+if /I "%GRADLE_USER_HOME:~0,1%"=="C" set "GRADLE_USER_HOME=%APP_HOME%\.gradle-user-home"
+if not defined TEMP set "TEMP=%APP_HOME%\.tmp"
+if /I "%TEMP:~0,1%"=="C" set "TEMP=%APP_HOME%\.tmp"
+if not defined TMP set "TMP=%APP_HOME%\.tmp"
+if /I "%TMP:~0,1%"=="C" set "TMP=%APP_HOME%\.tmp"
+if not exist "%APP_HOME%\.tmp" mkdir "%APP_HOME%\.tmp" >NUL 2>&1
+
 @rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
 set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m"
 
@@ -44,6 +53,16 @@ if defined JAVA_HOME goto findJavaFromJavaHome
 set JAVA_EXE=java.exe
 %JAVA_EXE% -version >NUL 2>&1
 if %ERRORLEVEL% equ 0 goto execute
+
+@rem Find a standard JDK 26 installation when JAVA_HOME and PATH are unset.
+for /d %%i in ("%ProgramFiles%\Eclipse Adoptium\jdk-26*") do if exist "%%~fi\bin\java.exe" (
+    set "JAVA_HOME=%%~fi"
+    goto findJavaFromJavaHome
+)
+for /d %%i in ("%ProgramFiles%\Java\jdk-26*") do if exist "%%~fi\bin\java.exe" (
+    set "JAVA_HOME=%%~fi"
+    goto findJavaFromJavaHome
+)
 
 echo. 1>&2
 echo ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH. 1>&2
@@ -75,7 +94,7 @@ echo location of your Java installation. 1>&2
 @rem Execute gradlew
 @rem endlocal doesn't take effect until after the line is parsed and variables are expanded
 @rem which allows us to clear the local environment before executing the java command
-endlocal & "%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -jar "%APP_HOME%\gradle\wrapper\gradle-wrapper.jar" %* & call :exitWithErrorLevel
+endlocal & set "GRADLE_USER_HOME=%GRADLE_USER_HOME%" & set "TEMP=%TEMP%" & set "TMP=%TMP%" & "%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -jar "%APP_HOME%\gradle\wrapper\gradle-wrapper.jar" %* & call :exitWithErrorLevel
 
 :exitWithErrorLevel
 @rem Use "%COMSPEC%" /c exit to allow operators to work properly in scripts

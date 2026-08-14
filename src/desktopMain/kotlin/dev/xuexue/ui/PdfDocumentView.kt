@@ -22,6 +22,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -55,10 +56,12 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Height
 import androidx.compose.material.icons.filled.Highlight
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.WidthFull
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -74,6 +77,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -87,18 +91,24 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import dev.xuexue.DocumentTab
 import dev.xuexue.WorkbenchState
 import dev.xuexue.platform.PdfDocumentMetadata
+import dev.xuexue.platform.PdfIncorrectPasswordException
 import dev.xuexue.platform.PdfLink
 import dev.xuexue.platform.PdfNormalizedRect
 import dev.xuexue.platform.PdfOutlineNode
 import dev.xuexue.platform.PdfOutlineReviewState
 import dev.xuexue.platform.PdfPageDimensions
 import dev.xuexue.platform.PdfPagePoint
+import dev.xuexue.platform.PdfPasswordRequiredException
 import dev.xuexue.platform.PdfRasterPriority
 import dev.xuexue.platform.PdfRasterPurpose
 import dev.xuexue.platform.PdfSearchMatch
@@ -111,6 +121,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.launch
 import java.awt.Desktop
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
@@ -123,6 +134,57 @@ private enum class PdfViewMode { CONTINUOUS, SINGLE, DOUBLE }
 
 private enum class PdfFitMode { MANUAL, WIDTH, HEIGHT }
 
+private fun sourcePageWidthForZoom(
+    viewMode: PdfViewMode,
+    fitMode: PdfFitMode,
+    viewportWidth: Float,
+    manualPageWidth: Float,
+    continuousManualPageWidth: Float,
+    horizontalContentPadding: Float,
+): Float {
+    if (viewportWidth <= 0f) return 0f
+    return when (viewMode) {
+        PdfViewMode.CONTINUOUS -> {
+            if (fitMode == PdfFitMode.WIDTH) {
+                viewportWidth
+            } else {
+                continuousManualPageWidth
+            }
+        }
+
+        PdfViewMode.SINGLE -> {
+            when (fitMode) {
+                PdfFitMode.WIDTH -> {
+                    (viewportWidth - horizontalContentPadding * 2f).coerceAtLeast(0f)
+                }
+
+                PdfFitMode.MANUAL -> {
+                    manualPageWidth
+                }
+
+                PdfFitMode.HEIGHT -> {
+                    0f
+                }
+            }
+        }
+
+        PdfViewMode.DOUBLE -> {
+            0f
+        }
+    }
+}
+
+private fun targetPageWidthForZoom(
+    viewMode: PdfViewMode,
+    manualPageWidth: Float,
+    continuousManualPageWidth: Float,
+): Float =
+    when (viewMode) {
+        PdfViewMode.CONTINUOUS -> continuousManualPageWidth
+        PdfViewMode.SINGLE -> manualPageWidth
+        PdfViewMode.DOUBLE -> manualPageWidth / 2f
+    }
+
 @Composable
 internal fun PdfDocument(
     state: WorkbenchState,
@@ -132,8 +194,13 @@ internal fun PdfDocument(
     var metadata by remember(tab.relativePath) { mutableStateOf(PdfDocumentMetadata(0)) }
     val pageCount = metadata.pageCount
     var loadError by remember(tab.relativePath) { mutableStateOf<String?>(null) }
+    var passwordRequired by remember(tab.relativePath) { mutableStateOf(false) }
+    var passwordInput by remember(tab.relativePath) { mutableStateOf("") }
+    var passwordError by remember(tab.relativePath) { mutableStateOf<String?>(null) }
+    var authenticating by remember(tab.relativePath) { mutableStateOf(false) }
     var loading by remember(tab.relativePath) { mutableStateOf(true) }
     var loadAttempt by remember(tab.relativePath) { mutableStateOf(0) }
+    val coroutineScope = rememberCoroutineScope()
     var pageInput by remember(tab.pdfPage) { mutableStateOf((tab.pdfPage + 1).toString()) }
     val rotation = tab.pdfRotation
     var showSearch by remember(tab.relativePath) { mutableStateOf(false) }
@@ -147,6 +214,7 @@ internal fun PdfDocument(
     val configuredSidePanel = runCatching { PdfSidePanel.valueOf(tab.pdfSidePanel) }.getOrDefault(PdfSidePanel.THUMBNAILS)
     val sidePanel = if (compact) PdfSidePanel.NONE else configuredSidePanel
     val colorMode = runCatching { PdfColorMode.valueOf(tab.pdfColorMode) }.getOrDefault(PdfColorMode.NORMAL)
+    val pageScaleFactor = if (compact) 0.72f else 1f
     val remoteDownload = state.remotePdfDownloadStates[tab.relativePath]
     var selectedPage by remember(tab.relativePath) { mutableStateOf<Int?>(null) }
     var selectedTextPage by remember(tab.relativePath) { mutableStateOf<Int?>(null) }
@@ -166,10 +234,15 @@ internal fun PdfDocument(
             initialFirstVisibleItemIndex = tab.pdfPage,
             initialFirstVisibleItemScrollOffset = tab.pdfScrollOffset,
         )
+    val density = LocalDensity.current
+    var viewportSize by remember(tab.relativePath) { mutableStateOf(IntSize.Zero) }
+    val manualPageWidthPx = with(density) { (680f * tab.pdfZoom).dp.toPx() }
+    val continuousManualPageWidthPx = manualPageWidthPx * pageScaleFactor
     val singlePageVerticalScrollState = rememberScrollState(tab.pdfVerticalOffset)
     val singlePageHorizontalScrollState = rememberScrollState(tab.pdfHorizontalOffset)
     val doublePageVerticalScrollState = rememberScrollState(tab.pdfVerticalOffset)
     val doublePageHorizontalScrollState = rememberScrollState(tab.pdfHorizontalOffset)
+    val continuousHorizontalScrollState = rememberScrollState(tab.pdfHorizontalOffset)
     var pendingZoomAnchor by remember(tab.relativePath) { mutableStateOf<PdfZoomAnchor?>(null) }
     var zoomPersistenceSerial by remember(tab.relativePath) { mutableStateOf(0) }
     var scrollPersistenceSerial by remember(tab.relativePath) { mutableStateOf(0) }
@@ -255,14 +328,56 @@ internal fun PdfDocument(
             }
         }
     }
+    val submitPassword: () -> Unit = submit@{
+        if (authenticating) return@submit
+        passwordError = null
+        authenticating = true
+        coroutineScope.launch {
+            try {
+                state.authenticatePdf(tab, passwordInput)
+                passwordInput = ""
+                passwordRequired = false
+                loadAttempt++
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: PdfPasswordRequiredException) {
+                passwordError = "请输入 PDF 密码后继续。"
+            } catch (_: PdfIncorrectPasswordException) {
+                passwordError = "密码错误，请重试。"
+            } catch (error: Throwable) {
+                passwordError = error.message ?: "PDF 密码错误，请重试。"
+            } finally {
+                authenticating = false
+            }
+        }
+    }
     val applyInteractiveZoom: (Float, Offset) -> Unit = { requestedZoom, position ->
         val zoom = requestedZoom.coerceIn(MIN_PDF_ZOOM, MAX_PDF_ZOOM)
         if (zoom != tab.pdfZoom) {
+            val viewportWidth = viewportSize.width.toFloat()
+            val horizontalContentPadding =
+                if (viewMode == PdfViewMode.SINGLE) {
+                    with(density) { 24.dp.toPx() }
+                } else {
+                    0f
+                }
+            val sourcePageWidth =
+                sourcePageWidthForZoom(
+                    viewMode = viewMode,
+                    fitMode = fitMode,
+                    viewportWidth = viewportWidth,
+                    manualPageWidth = manualPageWidthPx,
+                    continuousManualPageWidth = continuousManualPageWidthPx,
+                    horizontalContentPadding = horizontalContentPadding,
+                )
             pendingZoomAnchor =
                 PdfZoomAnchor(
                     sourceZoom = tab.pdfZoom,
                     pointerPosition = position,
                     viewMode = viewMode,
+                    sourcePageWidth = sourcePageWidth,
+                    viewportWidth = viewportWidth,
+                    horizontalContentPadding = horizontalContentPadding,
                     firstVisiblePage =
                         listState.layoutInfo.visibleItemsInfo
                             .firstOrNull { item ->
@@ -278,6 +393,7 @@ internal fun PdfDocument(
                             },
                     horizontalOffset = singlePageHorizontalScrollState.value,
                     verticalOffset = singlePageVerticalScrollState.value,
+                    continuousHorizontalOffset = continuousHorizontalScrollState.value,
                     doubleHorizontalOffset = doublePageHorizontalScrollState.value,
                     doubleVerticalOffset = doublePageVerticalScrollState.value,
                 )
@@ -288,6 +404,7 @@ internal fun PdfDocument(
     LaunchedEffect(tab.relativePath, loadAttempt) {
         loading = true
         loadError = null
+        passwordError = null
         state.pdfPerformanceMetrics.beginFirstViewportMeasurement()
         try {
             metadata =
@@ -296,7 +413,11 @@ internal fun PdfDocument(
                 }
         } catch (cancelled: CancellationException) {
             throw cancelled
+        } catch (_: PdfPasswordRequiredException) {
+            passwordRequired = true
+            loadError = null
         } catch (error: Throwable) {
+            passwordRequired = false
             loadError = error.message ?: "PDF 加载失败"
         } finally {
             loading = false
@@ -353,6 +474,18 @@ internal fun PdfDocument(
                 }
             }
         }
+    }
+    LaunchedEffect(tab.pdfNavigationSerial, viewMode) {
+        if (viewMode != PdfViewMode.CONTINUOUS) return@LaunchedEffect
+        continuousHorizontalScrollState.scrollTo(tab.pdfHorizontalOffset)
+        snapshotFlow { continuousHorizontalScrollState.value }
+            .distinctUntilChanged()
+            .collect { horizontal ->
+                if (horizontal != tab.pdfHorizontalOffset) {
+                    tab.pdfHorizontalOffset = horizontal
+                    scrollPersistenceSerial++
+                }
+            }
     }
     LaunchedEffect(tab.pdfNavigationSerial, viewMode) {
         val horizontalState =
@@ -447,23 +580,55 @@ internal fun PdfDocument(
     LaunchedEffect(tab.pdfZoom, viewMode) {
         val anchor = pendingZoomAnchor ?: return@LaunchedEffect
         val zoomRatio = tab.pdfZoom / anchor.sourceZoom
+        val targetPageWidth =
+            targetPageWidthForZoom(
+                viewMode = anchor.viewMode,
+                manualPageWidth = manualPageWidthPx,
+                continuousManualPageWidth = continuousManualPageWidthPx,
+            )
+        val continuousZoomRatio =
+            if (anchor.sourcePageWidth > 0f && targetPageWidth > 0f) {
+                targetPageWidth / anchor.sourcePageWidth
+            } else {
+                zoomRatio
+            }
         when (anchor.viewMode) {
             PdfViewMode.CONTINUOUS -> {
                 listState.scrollToItem(
                     anchor.firstVisiblePage,
-                    (anchor.firstVisiblePageOffset * zoomRatio - anchor.pointerPosition.y)
+                    (anchor.firstVisiblePageOffset * continuousZoomRatio - anchor.pointerPosition.y)
                         .roundToInt()
                         .coerceAtLeast(0),
+                )
+                continuousHorizontalScrollState.scrollTo(
+                    zoomedPageScrollOffset(
+                        currentOffset = anchor.continuousHorizontalOffset,
+                        anchorPosition = anchor.pointerPosition.x,
+                        sourcePageWidth = anchor.sourcePageWidth,
+                        targetPageWidth = targetPageWidth,
+                        viewportWidth = anchor.viewportWidth,
+                    ),
                 )
             }
 
             PdfViewMode.SINGLE -> {
                 singlePageHorizontalScrollState.scrollTo(
-                    zoomedScrollOffset(
-                        currentOffset = anchor.horizontalOffset,
-                        anchorPosition = anchor.pointerPosition.x,
-                        zoomRatio = zoomRatio,
-                    ),
+                    if (anchor.sourcePageWidth > 0f) {
+                        zoomedPageScrollOffset(
+                            currentOffset = anchor.horizontalOffset,
+                            anchorPosition = anchor.pointerPosition.x,
+                            sourcePageWidth = anchor.sourcePageWidth,
+                            targetPageWidth = targetPageWidth,
+                            viewportWidth = anchor.viewportWidth,
+                            contentPadding = anchor.horizontalContentPadding,
+                        )
+                    } else {
+                        zoomedScrollOffset(
+                            currentOffset = anchor.horizontalOffset,
+                            anchorPosition = anchor.pointerPosition.x,
+                            zoomRatio = zoomRatio,
+                        )
+                    },
                 )
                 singlePageVerticalScrollState.scrollTo(
                     zoomedScrollOffset(
@@ -718,6 +883,7 @@ internal fun PdfDocument(
                     .weight(1f)
                     .fillMaxHeight()
                     .background(pdfPageBackground(colorMode))
+                    .onSizeChanged { viewportSize = it }
                     .pdfCtrlWheelZoom { scrollDelta, position ->
                         applyInteractiveZoom(
                             pdfZoomForScroll(
@@ -742,6 +908,17 @@ internal fun PdfDocument(
                     )
             Box(viewportModifier, contentAlignment = Alignment.Center) {
                 when {
+                    passwordRequired -> {
+                        PdfPasswordPrompt(
+                            documentName = tab.displayName,
+                            password = passwordInput,
+                            error = passwordError,
+                            authenticating = authenticating,
+                            onPasswordChange = { passwordInput = it },
+                            onSubmit = submitPassword,
+                        )
+                    }
+
                     loadError != null -> {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(loadError!!, color = MaterialTheme.colorScheme.error)
@@ -759,40 +936,63 @@ internal fun PdfDocument(
                     }
 
                     viewMode == PdfViewMode.CONTINUOUS && pageCount > 0 -> {
-                        Box(Modifier.fillMaxSize()) {
-                            LazyColumn(
-                                state = listState,
-                                modifier = Modifier.fillMaxSize(),
-                                contentPadding =
-                                    androidx.compose.foundation.layout
-                                        .PaddingValues(vertical = 20.dp),
-                                verticalArrangement = Arrangement.spacedBy(16.dp),
+                        BoxWithConstraints(Modifier.fillMaxSize()) {
+                            val pageWidth =
+                                if (fitMode == PdfFitMode.WIDTH) {
+                                    maxWidth
+                                } else {
+                                    (680f * tab.pdfZoom * pageScaleFactor).dp
+                                }
+                            val contentWidth = if (pageWidth > maxWidth) pageWidth else maxWidth
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .horizontalScroll(continuousHorizontalScrollState),
                             ) {
-                                items(pageCount) { page ->
-                                    PdfPageItem(
-                                        state = state,
-                                        tab = tab,
-                                        page = page,
-                                        zoom = tab.pdfZoom * if (compact) 0.72f else 1f,
-                                        rotation = rotation,
-                                        selected = selectedPage == page,
-                                        searchMatch = searchMatches.any { it.pageIndex == page },
-                                        searchRegions =
-                                            searchMatches
-                                                .asSequence()
-                                                .filter { it.pageIndex == page }
-                                                .flatMap { it.regions.asSequence() }
-                                                .toList(),
-                                        selectionRegions =
-                                            textSelection
-                                                ?.takeIf { selectedTextPage == page }
-                                                ?.regions
-                                                .orEmpty(),
-                                        selectionActions = selectionActionsForPage(page),
-                                        textSelectionInteraction = textSelectionInteractionForPage(page),
-                                        onLink = openPdfLink,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    ) { selectedPage = page }
+                                LazyColumn(
+                                    state = listState,
+                                    modifier = Modifier.width(contentWidth).fillMaxHeight(),
+                                    contentPadding =
+                                        androidx.compose.foundation.layout
+                                            .PaddingValues(vertical = 20.dp),
+                                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                                ) {
+                                    items(pageCount) { page ->
+                                        Box(
+                                            Modifier.fillMaxWidth(),
+                                            contentAlignment = Alignment.TopCenter,
+                                        ) {
+                                            PdfPageItem(
+                                                state = state,
+                                                tab = tab,
+                                                page = page,
+                                                zoom = tab.pdfZoom * if (compact) 0.72f else 1f,
+                                                rotation = rotation,
+                                                selected = selectedPage == page,
+                                                searchMatch = searchMatches.any { it.pageIndex == page },
+                                                searchRegions =
+                                                    searchMatches
+                                                        .asSequence()
+                                                        .filter { it.pageIndex == page }
+                                                        .flatMap { it.regions.asSequence() }
+                                                        .toList(),
+                                                selectionRegions =
+                                                    textSelection
+                                                        ?.takeIf { selectedTextPage == page }
+                                                        ?.regions
+                                                        .orEmpty(),
+                                                selectionActions = selectionActionsForPage(page),
+                                                textSelectionInteraction = textSelectionInteractionForPage(page),
+                                                onLink = openPdfLink,
+                                                modifier =
+                                                    if (fitMode == PdfFitMode.WIDTH) {
+                                                        Modifier.fillMaxWidth()
+                                                    } else {
+                                                        Modifier.width(pageWidth)
+                                                    },
+                                            ) { selectedPage = page }
+                                        }
+                                    }
                                 }
                             }
                             VerticalScrollbar(
@@ -1076,6 +1276,87 @@ private fun pdfPageHoverModifier(onClick: () -> Unit): Modifier {
             indication = null,
             onClick = onClick,
         )
+}
+
+@Composable
+private fun PdfPasswordPrompt(
+    documentName: String,
+    password: String,
+    error: String?,
+    authenticating: Boolean,
+    onPasswordChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.widthIn(max = 360.dp).padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(
+            imageVector = Icons.Default.Lock,
+            contentDescription = null,
+            modifier = Modifier.size(32.dp),
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = "PDF 需要密码",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = "请输入“$documentName”的密码以继续阅读。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(16.dp))
+        OutlinedTextField(
+            value = password,
+            onValueChange = onPasswordChange,
+            label = { Text("PDF 密码") },
+            singleLine = true,
+            enabled = !authenticating,
+            isError = error != null,
+            visualTransformation = PasswordVisualTransformation(),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown && event.key == Key.Enter) {
+                            onSubmit()
+                            true
+                        } else {
+                            false
+                        }
+                    },
+        )
+        error?.let { message ->
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+        Button(
+            onClick = onSubmit,
+            enabled = !authenticating,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            if (authenticating) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(17.dp),
+                    strokeWidth = 2.dp,
+                )
+            } else {
+                Text("解锁 PDF")
+            }
+        }
+    }
 }
 
 @Composable
@@ -1443,10 +1724,14 @@ private data class PdfZoomAnchor(
     val sourceZoom: Float,
     val pointerPosition: Offset,
     val viewMode: PdfViewMode,
+    val sourcePageWidth: Float,
+    val viewportWidth: Float,
     val firstVisiblePage: Int,
     val firstVisiblePageOffset: Int,
     val horizontalOffset: Int,
     val verticalOffset: Int,
+    val continuousHorizontalOffset: Int,
+    val horizontalContentPadding: Float,
     val doubleHorizontalOffset: Int,
     val doubleVerticalOffset: Int,
 )

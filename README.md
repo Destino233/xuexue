@@ -20,6 +20,50 @@ of truth. Layout state is stored in `.xuexue/workbench.properties`; Agent
 sessions and PDF annotations are also stored under `.xuexue` and should be
 backed up when they matter.
 
+## Windows
+
+Windows builds use MSYS2 for the POSIX shell and the MinGW GNU toolchain used
+to build the MuPDF JNI library. You do not need Windows Developer Mode: the
+build skips source-archive symlinks that cannot be created by a standard
+MSYS2 installation.
+
+Install the prerequisites from PowerShell:
+
+```powershell
+winget install --id EclipseAdoptium.Temurin.26.JDK --exact --source winget
+winget install --id MSYS2.MSYS2 --exact --source winget
+```
+
+Open the **MSYS2 MINGW64** terminal and update its packages. If `pacman -Syu`
+asks you to close the terminal, reopen **MSYS2 MINGW64** before running the
+second command:
+
+```bash
+pacman -Syu
+pacman -Su
+pacman -S --needed base-devel mingw-w64-x86_64-toolchain curl
+```
+
+Then open PowerShell in the repository. The following keeps Gradle, MuPDF,
+temporary files, and build caches on D:; adjust the root only if your data
+drive uses another path:
+
+```powershell
+New-Item -ItemType Directory -Force -Path `
+  'D:\Dev\gradle-cache', 'D:\Dev\cache', 'D:\Dev\tmp' | Out-Null
+$env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-26.0.2.10-hotspot'
+$env:GRADLE_USER_HOME = 'D:\Dev\gradle-cache'
+$env:XDG_CACHE_HOME = '/d/Dev/cache'
+$env:TEMP = 'D:\Dev\tmp'
+$env:TMP = $env:TEMP
+$env:TMPDIR = '/d/Dev/tmp'
+.\gradlew.bat run
+```
+
+Gradle automatically detects MSYS2 at `C:\msys64` or `C:\msys2`. Set
+`MSYS2_HOME` in PowerShell when it is installed elsewhere. `pacman` is only
+used inside the MSYS2 terminal; Gradle itself is launched from PowerShell.
+
 ## Alpha scope
 
 - Desktop workbench with activity rail, resizable tool panel, document tabs,

@@ -22,6 +22,7 @@ import dev.xuexue.platform.PdfOutlineNode
 import dev.xuexue.platform.PdfOutlineRepository
 import dev.xuexue.platform.PdfOutlineReviewState
 import dev.xuexue.platform.PdfOutlineSource
+import dev.xuexue.platform.PdfPasswordRequiredException
 import dev.xuexue.platform.PdfReaderBackend
 import dev.xuexue.platform.PpStructureV3Engine
 import dev.xuexue.platform.WorkspaceService
@@ -251,6 +252,8 @@ internal class WorkbenchPdfOutlineController(
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
+                } catch (_: PdfPasswordRequiredException) {
+                    document.pdfOutlineError = null
                 } catch (failure: IOException) {
                     reportOutlineLoadFailure(document, failure)
                 } catch (failure: IllegalArgumentException) {

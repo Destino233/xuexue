@@ -1,6 +1,9 @@
+import org.gradle.api.file.DuplicatesStrategy
 import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.testing.Test
+import org.gradle.jvm.tasks.Jar
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import java.io.File
 import java.util.Locale
 
 plugins {
@@ -14,7 +17,11 @@ plugins {
 }
 
 dependencyLocking {
-    lockAllConfigurations()
+    // Compose resolves a different native artifact on Windows. Keep the existing
+    // lockfile behavior for Linux and let Windows resolve its platform variant.
+    if (!System.getProperty("os.name").lowercase(Locale.ROOT).startsWith("windows")) {
+        lockAllConfigurations()
+    }
 }
 
 detekt {
@@ -68,6 +75,30 @@ val muPdfArchitecture =
 val composeArchitecture = if (muPdfArchitecture == "x86_64") "x64" else "arm64"
 val muPdfPlatform = "$muPdfOs-$muPdfArchitecture"
 val composePlatform = "$muPdfOs-$composeArchitecture"
+val nativeShell =
+    if (muPdfOs == "windows") {
+        listOfNotNull(
+            System.getenv("MSYS2_HOME")?.let { File(it, "usr/bin/bash.exe") },
+            File("C:/msys64/usr/bin/bash.exe"),
+            File("C:/msys2/usr/bin/bash.exe"),
+            File("C:/Program Files/Git/usr/bin/bash.exe"),
+            File("C:/Program Files/Git/bin/bash.exe"),
+        ).firstOrNull { it.isFile }?.absolutePath ?: "bash"
+    } else {
+        "bash"
+    }
+val msys2Root =
+    if (muPdfOs == "windows") {
+        listOfNotNull(
+            System.getenv("MSYS2_HOME")?.let { File(it) },
+            File("C:/msys64"),
+            File("C:/msys2"),
+        ).firstOrNull { root ->
+            File(root, "usr/bin/bash.exe").isFile
+        }
+    } else {
+        null
+    }
 val muPdfNativeLibraryName =
     when (muPdfOs) {
         "windows" -> "xuexue_mupdf.dll"
@@ -81,11 +112,24 @@ val muPdfAppResourcesRoot = layout.buildDirectory.dir("generated/mupdf-app-resou
 val bootstrapMuPdf =
     tasks.register<Exec>("bootstrapMuPdf") {
         commandLine(
-            "bash",
+            nativeShell,
             layout.projectDirectory
                 .file("tools/bootstrap-mupdf-native.sh")
                 .asFile.absolutePath,
         )
+        msys2Root?.let { root ->
+            environment(
+                "PATH",
+                listOf(
+                    File(root, "usr/bin").absolutePath,
+                    File(root, "mingw64/bin").absolutePath,
+                    System.getenv("PATH").orEmpty(),
+                ).joinToString(File.pathSeparator),
+            )
+        }
+        if (muPdfOs == "windows") {
+            environment("JAVA_HOME", System.getProperty("java.home"))
+        }
         inputs.files(
             layout.projectDirectory.file("tools/bootstrap-mupdf-native.sh"),
             layout.projectDirectory.file("tools/native/mupdf_bridge.c"),
@@ -157,12 +201,42 @@ kotlin {
     }
 }
 
+if (muPdfOs == "windows") {
+    val desktopRuntimeClasspath = configurations.named("desktopRuntimeClasspath")
+    tasks.named<Jar>("desktopJar") {
+        dependsOn(bootstrapMuPdf)
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+        from({
+            desktopRuntimeClasspath
+                .get()
+                .map { file -> if (file.isDirectory) file else zipTree(file) }
+        })
+        from(muPdfNativeLibrary) {
+            into("xuexue/native")
+        }
+        exclude("META-INF/*.SF", "META-INF/*.RSA", "META-INF/*.DSA")
+        manifest {
+            attributes(
+                "Main-Class" to "dev.xuexue.MainKt",
+                "Enable-Native-Access" to "ALL-UNNAMED",
+            )
+        }
+    }
+}
+
 compose.desktop {
     application {
         mainClass = "dev.xuexue.MainKt"
         dependsOn("bootstrapMuPdf", "prepareMuPdfAppResources")
         jvmArgs(
             "--enable-native-access=ALL-UNNAMED",
+            // Start small and grow on demand, capped at DEFAULT_APPLICATION_MEMORY_LIMIT_MIB.
+            // The free-ratio band makes G1 return idle heap to the OS instead of
+            // parking committed memory at the cap after a reading/scroll session.
+            "-Xms256m",
+            "-Xmx1024m",
+            "-XX:MinHeapFreeRatio=20",
+            "-XX:MaxHeapFreeRatio=60",
             "-Djava.library.path=${muPdfDirectory.asFile.absolutePath}",
         )
 
