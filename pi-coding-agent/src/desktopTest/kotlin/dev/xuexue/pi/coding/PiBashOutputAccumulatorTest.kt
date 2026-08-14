@@ -39,6 +39,19 @@ class PiBashOutputAccumulatorTest {
     }
 
     @Test
+    fun sanitizesControlAndUnicodeFormatCharactersLikePi() {
+        val accumulator = PiBashOutputAccumulator()
+        // BEL (0x07), unit separator (0x1f), and Unicode format chars 0xfff9/0xfffb
+        // are dropped; tab, LF, and CR are kept by Pi's shell.ts sanitize.
+        val input = "a\u0007b\u001fc\t\n\u0000d\ufff9e\ufffbf\r\n"
+        accumulator.append(input.toByteArray())
+        accumulator.finish()
+
+        val snapshot = accumulator.snapshot()
+        assertEquals("abc\t\ndef\n", snapshot.content)
+    }
+
+    @Test
     fun truncatesOnlyTheTailOfAnOversizedLastLine() {
         val accumulator = PiBashOutputAccumulator(maxLines = 2_000, maxBytes = 4)
         accumulator.append("123456789".toByteArray())

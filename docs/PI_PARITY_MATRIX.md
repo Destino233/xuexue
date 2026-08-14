@@ -166,7 +166,7 @@
 | `src/utils/frontmatter.ts`、`json.ts`、`mime.ts` | 资源解析工具 | `Frontmatter.kt`/`FrontmatterTest` 覆盖 YAML 块标量、CRLF、未终止 frontmatter 原样返回和无效集合拒绝；`ModelRegistry.stripJsonComments` 与 `ModelRegistryTest.loadsCustomModelsWithTrailingCommasAndCommentsLikePi` 覆盖 `//` 注释与尾逗号剥离（字符串字面量不受影响）；`detectImageMime`（`DesktopPiCodingTools`）与 `DesktopPiCodingToolsTest.readRejectsJpegLsfVariantLikePi`/`readRejectsFakeBmpWithoutValidDibHeaderLikePi`/`readReturnsImageContentForSupportedImageMagic`/`readConvertsBmpToPngAndReportsConversionHint` 覆盖 JPEG `0xf7` 排除、PNG IHDR/动画、BMP DIB 校验和 GIF/WEBP/PNG/JPEG 嗅探 | `in-progress` |
 | `src/utils/image-*.ts`、`exif-orientation.ts` | 图片处理 | resize、format、orientation 和 caller tests | `pending` |
 | `src/utils/git.ts`、`fs-watch.ts`、`paths.ts` | Desktop 资源平台能力 | git refs、watch failure、目录规则 | `pending` |
-| `src/utils/shell.ts`、`child-process.ts` | Desktop 进程平台能力 | shell selection、signals、cleanup | `pending` |
+| `src/utils/shell.ts`、`child-process.ts` | Desktop 进程平台能力 | `WindowsProcessSupport`/`DesktopShellSupport` 复刻 shell 选择（MSYS2/Git 已知位置、PATH 搜索、`-lc`/`-s` stdin transport）与 PATH 注入（大小写不敏感键，`d4201f6` 修复 JVM `Path` 键）；`sanitizeBinaryOutput` 已接入 `PiBashOutputAccumulator`（控制字符/Unicode 格式字符过滤，`PiBashOutputAccumulatorTest.sanitizesControlAndUnicodeFormatCharactersLikePi`）；进程树回收用 `ProcessHandle.descendants()` 等价 Pi `taskkill /F /T`/`kill(-pid)`；`LocalBashExecutorTest`、`LocalPiCommandExecutorTest`、`ProcessPiExtensionTest` 覆盖执行/取消/超时；`getShellConfig` 的 Git Bash 优先顺序与 `trackDetachedChildPid` 全局回收仍待对齐 | `in-progress` |
 | `src/cli/*.ts` 中非 UI 行为 | Compose/RPC 启动适配 | args、initial message、files、model list、trust | `pending` |
 | `src/config.ts`、`migrations.ts` | 应用配置和迁移 | path、version 和 migration fixtures | `pending` |
 

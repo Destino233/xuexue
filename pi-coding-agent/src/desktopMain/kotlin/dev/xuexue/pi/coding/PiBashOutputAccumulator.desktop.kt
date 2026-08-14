@@ -113,7 +113,7 @@ class PiBashOutputAccumulator(
 
     private fun appendDecoded(text: String) {
         if (text.isEmpty()) return
-        val normalized = text.replace("\r", "")
+        val normalized = sanitizeBinaryOutput(text).replace("\r", "")
         if (normalized.isEmpty()) return
         val bytes = normalized.toByteArray(StandardCharsets.UTF_8)
         totalDecodedBytes += bytes.size
@@ -132,6 +132,23 @@ class PiBashOutputAccumulator(
             hasOpenLine = openLine.isNotEmpty()
         }
         if (shouldUseTempFile()) ensureTempFile()
+    }
+
+    /** Port of Pi's shell.ts sanitize: drop control chars (except tab/LF/CR) and Unicode format chars. */
+    private fun sanitizeBinaryOutput(value: String): String {
+        if (value.isEmpty()) return value
+        val result = StringBuilder(value.length)
+        var index = 0
+        while (index < value.length) {
+            val codePoint = value.codePointAt(index)
+            val character = String(Character.toChars(codePoint))
+            val keep =
+                codePoint == 0x09 || codePoint == 0x0a || codePoint == 0x0d ||
+                    (codePoint > 0x1f && codePoint !in 0xfff9..0xfffb)
+            if (keep) result.append(character)
+            index += Character.charCount(codePoint)
+        }
+        return result.toString()
     }
 
     private fun decodeUtf8(data: ByteArray): String {
