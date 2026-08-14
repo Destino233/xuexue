@@ -1,0 +1,602 @@
+[
+ {
+  "name": "java.awt.event.MouseEvent",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.event.KeyEvent",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.event.WindowEvent",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.event.ComponentEvent",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.event.FocusEvent",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.event.PaintEvent",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.event.InputEvent",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.event.ActionEvent",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.event.MouseWheelEvent",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.event.HierarchyEvent",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.event.InvocationEvent",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.event.ContainerEvent",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.event.TextEvent",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.event.AdjustmentEvent",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.event.ItemEvent",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Window",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Frame",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Dialog",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Component",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Canvas",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Container",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Toolkit",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.GraphicsEnvironment",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.GraphicsDevice",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.GraphicsConfiguration",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Font",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.FontMetrics",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Color",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Cursor",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Dimension",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Point",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Rectangle",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Insets",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.MenuComponent",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.MenuItem",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.CheckboxMenuItem",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Menu",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.PopupMenu",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.MenuBar",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Checkbox",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Button",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Label",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.TextField",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.TextArea",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Choice",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.List",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Scrollbar",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.ScrollPane",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Panel",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.PopupMenu",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Graphics",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.Graphics2D",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.peer.ComponentPeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.peer.FramePeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.peer.WindowPeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.peer.DialogPeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.peer.MenuPeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.peer.MenuItemPeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.peer.CheckboxMenuItemPeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.peer.PopupMenuPeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.awt.peer.MenuBarPeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.awt.windows.WToolkit",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.awt.windows.WComponentPeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.awt.windows.WFramePeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.awt.windows.WWindowPeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.awt.windows.WDialogPeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.awt.windows.WCanvasPeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.awt.windows.WPanelPeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.awt.windows.WMenuPeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.awt.windows.WMenuItemPeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.awt.windows.WCheckboxMenuItemPeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.awt.windows.WPopupMenuPeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.awt.windows.WMenuBarPeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.awt.windows.WRobotPeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.awt.windows.WFontMetrics",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.awt.windows.WPrintDialogPeer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.awt.SunToolkit",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.awt.AppContext",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.awt.ComponentFactory",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.awt.HeadlessToolkit",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "dev.xuexue.platform.MuPdfNative",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "dev.xuexue.platform.PdfTryLaterException",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "java.util.concurrent.CancellationException",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.java2d.pipe.ShapeSpanIterator",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.java2d.pipe.Region",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.java2d.pipe.AATileGenerator",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.java2d.pipe.BufferedMaskBlit",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.java2d.pipe.BufferedRenderPipe",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.java2d.pipe.PixelToParallelogramConverter",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.java2d.pipe.RenderQueue",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.java2d.pipe.RenderBuffer",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.java2d.pipe.SpanShapeIterator",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.java2d.loops.GraphicsPrimitive",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.java2d.loops.SurfaceType",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.java2d.loops.CompositeType",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.java2d.SunGraphics2D",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.java2d.SurfaceData",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.java2d.SunCompositeContext",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.awt.windows.WindowType",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ },
+ {
+  "name": "sun.java2d.windows.GDIWindowSurfaceData",
+  "allDeclaredConstructors": true,
+  "allDeclaredMethods": true,
+  "allDeclaredFields": true
+ }
+]

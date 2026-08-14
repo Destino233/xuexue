@@ -1,0 +1,9 @@
+# build outputs (native exe, staging, agent captures, logs)
+build/
+# compiled probe classes
+*.class
+# extracted JDK sources
+_src/
+# scratch
+_stage_*.patch
+_dpi.ps1

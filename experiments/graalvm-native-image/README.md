@@ -11,6 +11,10 @@ for build-time configuration effort.
 - [x] Minimal non-Compose AOT build works (hello-native, 30ms startup)
 - [x] Minimal Compose AOT build **works** (Compose 1.9.0 + GraalVM 25.2.4):
       window + animation + clean exit, RSS ~113MB. See `EXPERIMENT_REPORT.md`.
+- [x] **Real app AOT build works** (see `main-app/`): the full XueXue app
+      (MuPDF JNI, kotlinx.serialization, AI client stack) compiles with
+      native-image; window, workspace chooser, and PDF reading verified on
+      Windows x64, RSS ~140MB vs ~600-700MB JVM baseline.
 - [x] Reflect/JNI/resource config assembled from the inventory below
 - [x] RSS and startup measured against the JVM build (~113MB vs ~300-400MB)
 

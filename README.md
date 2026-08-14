@@ -92,6 +92,25 @@ corresponding command on the target machine:
 ./gradlew packageDmg            # macOS disk image
 ```
 
+## GraalVM native-image build (experimental)
+
+An ahead-of-time compiled executable (no JVM at runtime, RSS ~140 MB vs
+~600-700 MB JVM baseline, window + PDF reading verified on Windows x64) is
+built from the same sources with GraalVM CE 25.2.4. This is experimental
+wiring; it does not affect normal JVM development or packaging:
+
+- The root build exposes two inert switches: `-Pxuexue.nativeJvmTarget=24`
+  (bytecode for the JDK-25-based GraalVM) and `-Dxuexue.nativeAgent=<dll>`
+  (tracing-agent capture for the test JVMs).
+- Everything else — build/rebuild/launch scripts, tracing-agent configs, and
+  the fix log — lives in `experiments/graalvm-native-image/main-app/`.
+  After changing source code, run `build-native.ps1` there (ordinary
+  changes) or `rebuild-native.ps1` (changes touching reflection/JNI/
+  resources), then launch with `run-native.cmd`.
+
+See the experiment README for the full workflow and known limitations:
+`experiments/graalvm-native-image/main-app/README.md`.
+
 The bundled `xuexue_mupdf` JNI library is rebuilt automatically whenever
 `tools/native/mupdf_bridge.c` or `tools/bootstrap-mupdf-native.sh` changes;
 it is **not stored in git** (`.mupdf/` is ignored), so fresh checkouts build it

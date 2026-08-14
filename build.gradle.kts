@@ -171,6 +171,20 @@ tasks.withType<Test>().configureEach {
             systemProperty(propertyName, propertyValue)
         }
     }
+    // GraalVM experiment wiring: -Dxuexue.nativeAgent=<path-to-agent-dll>
+    // runs the test JVMs under the native-image tracing agent (the JVMTI
+    // agent ships with GraalVM and is locked to its JVM major version, so
+    // the test JVM is also pinned to Java 25 here) to capture JNI/reflection/
+    // resource config for the AOT build. Inert unless the property is set;
+    // pair with -Pxuexue.nativeJvmTarget=24 and
+    // -Porg.gradle.java.installations.paths=<graalvm-home>.
+    System.getProperty("xuexue.nativeAgent")?.let { agentLibrary ->
+        val outputDir = layout.buildDirectory.dir("agent-tests").get().asFile.absolutePath
+        jvmArgs("-agentpath:$agentLibrary=config-output-dir=$outputDir")
+        javaLauncher.set(
+            javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) },
+        )
+    }
 }
 
 kotlin {
@@ -197,6 +211,41 @@ kotlin {
                 implementation(compose.materialIconsExtended)
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.10.2")
             }
+        }
+    }
+}
+
+// GraalVM native-image experiment wiring (experiments/graalvm-native-image/main-app):
+// -Pxuexue.nativeJvmTarget=NN forces every Kotlin compilation in this build to
+// emit Java-NN bytecode (GraalVM CE 25.2.4 is JDK 25 and cannot load the
+// default jvmToolchain(26) class files). Inert unless the property is set.
+val nativeJvmTarget =
+    providers
+        .gradleProperty("xuexue.nativeJvmTarget")
+        .orNull
+        ?.let { value -> org.jetbrains.kotlin.gradle.dsl.JvmTarget.valueOf("JVM_$value") }
+if (nativeJvmTarget != null) {
+    fun applyNativeJvmTarget(project: Project) {
+        project
+            .extensions
+            .configure<org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension>("kotlin") {
+                targets
+                    .withType<org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget>()
+                    .configureEach {
+                        compilations.configureEach {
+                            compileTaskProvider.configure {
+                                compilerOptions.jvmTarget.set(nativeJvmTarget)
+                            }
+                        }
+                    }
+            }
+    }
+    // The root project's plugin is already applied at this point; subprojects
+    // apply theirs later, so hook the callback to the plugin application.
+    applyNativeJvmTarget(project)
+    subprojects {
+        plugins.withId("org.jetbrains.kotlin.multiplatform") {
+            applyNativeJvmTarget(this@subprojects)
         }
     }
 }
