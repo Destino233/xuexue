@@ -9,10 +9,10 @@ for build-time configuration effort.
 
 - [x] Toolchain installed and `native-image` smoke-tested (GraalVM CE 25.2.4)
 - [x] Minimal non-Compose AOT build works (hello-native, 30ms startup)
-- [ ] Minimal Compose AOT build attempted (blocked on JDK 26 vs GraalVM 25;
-      see `notes/toolchain.md` — experiment uses `jvmTarget = 25`)
-- [ ] Reflect/JNI/resource config assembled from the inventory below
-- [ ] RSS and startup measured against the JVM build
+- [x] Minimal Compose AOT build attempted — **verdict: not viable**, windowed
+      AWT event loop fails under Substrate VM. See `EXPERIMENT_REPORT.md`.
+- [x] Reflect/JNI/resource config assembled from the inventory below
+- [ ] RSS and startup measured against the JVM build (moot; build unusable)
 
 ## Expected trade-off (from the main README discussion)
 
