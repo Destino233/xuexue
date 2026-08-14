@@ -13,3 +13,4 @@ out/
 __pycache__/
 *.pyc
 参考内容/
+count_code.py
