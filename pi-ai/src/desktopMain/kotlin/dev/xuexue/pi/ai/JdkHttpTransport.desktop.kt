@@ -9,6 +9,10 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.InputStream
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.net.ProxySelector
+import java.net.SocketAddress
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -21,12 +25,40 @@ import kotlin.coroutines.resumeWithException
 
 actual fun defaultHttpTransport(): HttpTransport = JdkHttpTransport()
 
+/** Parse a proxy URL into an HTTP proxy address, mirroring Pi's applyHttpProxySettings semantics. */
+internal fun parseProxyAddress(value: String): InetSocketAddress? {
+    val trimmed = value.trim()
+    if (trimmed.isEmpty()) return null
+    return runCatching {
+        val uri = URI.create(if ("://" in trimmed) trimmed else "http://$trimmed")
+        InetSocketAddress(uri.host, uri.port.takeIf { it > 0 } ?: 80)
+    }.getOrNull()
+}
+
+/** Resolve the env proxy for a URI, mirroring Pi's applyHttpProxySettings semantics. */
+internal fun envProxySelector(): ProxySelector? {
+    val proxyUrl = System.getenv("HTTPS_PROXY") ?: System.getenv("https_proxy") ?: System.getenv("HTTP_PROXY")
+        ?: System.getenv("http_proxy") ?: return null
+    val address = parseProxyAddress(proxyUrl) ?: return null
+    return object : ProxySelector() {
+        override fun select(uri: URI?): List<Proxy> =
+            listOf(Proxy(Proxy.Type.HTTP, address as SocketAddress))
+
+        override fun connectFailed(
+            uri: URI?,
+            sa: SocketAddress?,
+            ioe: java.io.IOException?,
+        ) = Unit
+    }
+}
+
 private class JdkHttpTransport : HttpTransport {
     private val client =
         HttpClient
             .newBuilder()
             .connectTimeout(Duration.ofSeconds(20))
             .followRedirects(HttpClient.Redirect.NORMAL)
+            .apply { envProxySelector()?.let(::proxy) }
             .build()
 
     override suspend fun execute(request: dev.xuexue.pi.ai.HttpRequest): dev.xuexue.pi.ai.HttpResponse {
