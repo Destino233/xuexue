@@ -17,6 +17,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,6 +65,7 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -291,13 +293,24 @@ fun AgentPanel(
     var panelMenuOpen by remember { mutableStateOf(false) }
     var sessionSelectorOpen by remember { mutableStateOf(false) }
     var renameDialog by remember { mutableStateOf(false) }
+    var deleteDialog by remember { mutableStateOf(false) }
     var renameInput by remember { mutableStateOf("") }
     val messageListState = rememberLazyListState()
     val messages = state.agentMessages
     val interactionRequests by state.agentInteractionRequests.collectAsState()
-    LaunchedEffect(state.activeAgentSessionId, messages.size, messages.lastOrNull()?.content, isAgentRunning) {
+    val lastMessageContent = messages.lastOrNull()?.content
+    LaunchedEffect(state.activeAgentSessionId) {
         if (messages.isNotEmpty()) {
             messageListState.scrollToItem(messages.lastIndex)
+        }
+    }
+    LaunchedEffect(messages.size, lastMessageContent, isAgentRunning) {
+        if (messages.isNotEmpty()) {
+            val visibleItems = messageListState.layoutInfo.visibleItemsInfo
+            val lastVisibleItem = visibleItems.lastOrNull()
+            val lastVisibleIndex = lastVisibleItem?.index ?: 0
+            val nearBottom = !messageListState.canScrollForward || lastVisibleIndex >= messages.lastIndex - 1
+            if (nearBottom) messageListState.scrollToItem(messages.lastIndex)
         }
     }
     Box(modifier.onGloballyPositioned { state.agentDropBounds = it.boundsInRoot() }) {
@@ -403,7 +416,7 @@ fun AgentPanel(
                                 text = { Text("删除会话", color = MaterialTheme.colorScheme.error) },
                                 leadingIcon = { Icon(Icons.Default.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
                                 onClick = {
-                                    state.deleteAgentSession(state.activeAgentSessionId)
+                                    deleteDialog = true
                                     sessionSelectorOpen = false
                                 },
                             )
@@ -599,8 +612,14 @@ fun AgentPanel(
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp)) {
-                    Row(Modifier.fillMaxWidth().height(30.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = state.includeActiveDocument, onCheckedChange = { state.includeActiveDocument = it }, modifier = Modifier.size(28.dp))
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(30.dp)
+                            .clickable { state.includeActiveDocument = !state.includeActiveDocument },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(checked = state.includeActiveDocument, onCheckedChange = null, modifier = Modifier.size(28.dp))
                         Icon(Icons.Default.AttachFile, null, Modifier.size(15.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.width(4.dp))
                         Text(
@@ -748,6 +767,29 @@ fun AgentPanel(
                 }, enabled = renameInput.isNotBlank()) { Text("保存") }
             },
             dismissButton = { TextButton(onClick = { renameDialog = false }) { Text("取消") } },
+        )
+    }
+    if (deleteDialog) {
+        AlertDialog(
+            onDismissRequest = { deleteDialog = false },
+            title = { Text("删除会话") },
+            text = { Text("确定删除“${state.activeAgentSession.name}”？删除后可通过恢复入口撤销。") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        state.deleteAgentSession(state.activeAgentSessionId)
+                        deleteDialog = false
+                    },
+                    colors =
+                        ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError,
+                        ),
+                ) {
+                    Text("删除")
+                }
+            },
+            dismissButton = { TextButton(onClick = { deleteDialog = false }) { Text("取消") } },
         )
     }
 }
