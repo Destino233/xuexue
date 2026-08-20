@@ -310,7 +310,9 @@ fun AgentPanel(
             val lastVisibleItem = visibleItems.lastOrNull()
             val lastVisibleIndex = lastVisibleItem?.index ?: 0
             val nearBottom = !messageListState.canScrollForward || lastVisibleIndex >= messages.lastIndex - 1
-            if (nearBottom) messageListState.scrollToItem(messages.lastIndex)
+            val lastMessageRole = messages.lastOrNull()?.role
+            val shouldRevealNewPrompt = lastMessageRole in setOf("user", "steering", "steering_queued")
+            if (nearBottom || shouldRevealNewPrompt) messageListState.scrollToItem(messages.lastIndex)
         }
     }
     Box(modifier.onGloballyPositioned { state.agentDropBounds = it.boundsInRoot() }) {
