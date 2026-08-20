@@ -6,7 +6,6 @@ package dev.xuexue.ui
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -18,11 +17,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,6 +35,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CallSplit
@@ -47,12 +43,15 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloseFullscreen
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FileCopy
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Memory
@@ -87,7 +86,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -108,6 +106,8 @@ import dev.xuexue.core.AgentSendAvailability
 import dev.xuexue.core.DocumentKind
 import dev.xuexue.pi.coding.InteractionRequest
 import dev.xuexue.pi.coding.InteractionResponse
+import java.awt.Toolkit
+import java.awt.datatransfer.StringSelection
 
 private enum class AgentSettingsSection(
     val label: String,
@@ -289,7 +289,7 @@ fun AgentPanel(
     val formalAgentState by state.formalAgentState.collectAsState()
     val isAgentRunning = formalAgentState?.isStreaming ?: state.agentRunning
     var panelMenuOpen by remember { mutableStateOf(false) }
-    var sessionMenuOpen by remember { mutableStateOf(false) }
+    var sessionSelectorOpen by remember { mutableStateOf(false) }
     var renameDialog by remember { mutableStateOf(false) }
     var renameInput by remember { mutableStateOf("") }
     val messageListState = rememberLazyListState()
@@ -306,13 +306,110 @@ fun AgentPanel(
             color = if (outerChrome) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.surface,
         ) {
             Column(Modifier.fillMaxSize()) {
-                Row(Modifier.fillMaxWidth().height(43.dp).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                val activeSession = state.activeAgentSession
+                val reportedTokens = activeSession.inputTokens + activeSession.outputTokens
+                val estimatedTokens = messages.sumOf { it.content.length }.div(4)
+                val usageLabel = if (reportedTokens > 0) "$reportedTokens tokens" else "约 $estimatedTokens tokens"
+                val costLabel = activeSession.costUsd?.let { " · \$${"%.4f".format(it)}" } ?: ""
+                Row(Modifier.fillMaxWidth().height(54.dp).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.SmartToy, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.tertiary)
                     Spacer(Modifier.width(7.dp))
                     Column(Modifier.weight(1f)) {
                         Text("Agent", fontWeight = FontWeight.SemiBold)
-                        Text(if (state.agentModel.isBlank()) "尚未配置模型" else state.agentModel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            buildString {
+                                append(if (state.agentModel.isBlank()) "尚未配置模型" else state.agentModel)
+                                append(" · ")
+                                append(if (isAgentRunning) "正在响应" else "${messages.size} 条消息")
+                                append(" · ")
+                                append(usageLabel)
+                                append(costLabel)
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isAgentRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
+                    Spacer(Modifier.width(8.dp))
+                    Box {
+                        Surface(
+                            onClick = { sessionSelectorOpen = true },
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.widthIn(max = 176.dp).height(34.dp),
+                        ) {
+                            Row(Modifier.padding(start = 10.dp, end = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    activeSession.name,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Icon(Icons.Default.ExpandMore, "切换会话", Modifier.size(18.dp))
+                            }
+                        }
+                        androidx.compose.material3.DropdownMenu(expanded = sessionSelectorOpen, onDismissRequest = { sessionSelectorOpen = false }) {
+                            state.agentSessions.forEach { session ->
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(session.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    leadingIcon = {
+                                        if (session.id == state.activeAgentSessionId) {
+                                            Icon(Icons.Default.Check, "当前会话")
+                                        } else {
+                                            Spacer(Modifier.size(24.dp))
+                                        }
+                                    },
+                                    trailingIcon = {
+                                        if (session.id == state.activeAgentSessionId && isAgentRunning) {
+                                            CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp)
+                                        }
+                                    },
+                                    onClick = {
+                                        state.selectAgentSession(session.id)
+                                        sessionSelectorOpen = false
+                                    },
+                                )
+                            }
+                            androidx.compose.material3.HorizontalDivider()
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text("重命名会话") },
+                                leadingIcon = { Icon(Icons.Default.Edit, null) },
+                                onClick = {
+                                    renameInput = activeSession.name
+                                    renameDialog = true
+                                    sessionSelectorOpen = false
+                                },
+                            )
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text("分叉会话") },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.CallSplit, null) },
+                                onClick = {
+                                    state.cloneAgentSession(fork = true)
+                                    sessionSelectorOpen = false
+                                },
+                            )
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text("克隆会话") },
+                                leadingIcon = { Icon(Icons.Default.FileCopy, null) },
+                                onClick = {
+                                    state.cloneAgentSession()
+                                    sessionSelectorOpen = false
+                                },
+                            )
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text("删除会话", color = MaterialTheme.colorScheme.error) },
+                                leadingIcon = { Icon(Icons.Default.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
+                                onClick = {
+                                    state.deleteAgentSession(state.activeAgentSessionId)
+                                    sessionSelectorOpen = false
+                                },
+                            )
+                        }
+                    }
+                    ToolIcon(Icons.Default.Add, "新建会话", state::newAgentSession)
                     Box {
                         ToolIcon(Icons.Default.MoreVert, "Agent 面板选项", { panelMenuOpen = true })
                         androidx.compose.material3.DropdownMenu(expanded = panelMenuOpen, onDismissRequest = { panelMenuOpen = false }) {
@@ -347,125 +444,6 @@ fun AgentPanel(
                         }
                     }
                     ToolIcon(Icons.Default.Close, "关闭 Agent", onClose)
-                }
-                if (!outerChrome) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                Row(Modifier.fillMaxWidth().height(37.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)), verticalAlignment = Alignment.CenterVertically) {
-                    Row(Modifier.weight(1f).fillMaxHeight().horizontalScroll(rememberScrollState())) {
-                        state.agentSessions.forEach { session ->
-                            val active = session.id == state.activeAgentSessionId
-                            val interactionSource = remember(session.id) { MutableInteractionSource() }
-                            val hovered by interactionSource.collectIsHoveredAsState()
-                            val pressed by interactionSource.collectIsPressedAsState()
-                            val containerColor by
-                                animateColorAsState(
-                                    targetValue =
-                                        when {
-                                            active -> MaterialTheme.colorScheme.surface
-                                            hovered -> MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
-                                            else -> Color.Transparent
-                                        },
-                                    animationSpec = WorkbenchMotion.fastTween(),
-                                    label = "agent session color",
-                                )
-                            val scale by
-                                animateFloatAsState(
-                                    targetValue = if (pressed) 0.97f else 1f,
-                                    animationSpec = WorkbenchMotion.expressiveSpring(),
-                                    label = "agent session scale",
-                                )
-                            Box(
-                                Modifier
-                                    .width(120.dp)
-                                    .fillMaxHeight()
-                                    .graphicsLayer {
-                                        scaleX = scale
-                                        scaleY = scale
-                                    }.background(containerColor)
-                                    .clickable(
-                                        interactionSource = interactionSource,
-                                        indication = null,
-                                    ) {
-                                        state.selectAgentSession(session.id)
-                                    },
-                            ) {
-                                Row(
-                                    Modifier.fillMaxSize().padding(horizontal = 9.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        text = session.name,
-                                        modifier = Modifier.weight(1f),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    if (active && isAgentRunning) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(11.dp),
-                                            strokeWidth = 1.5.dp,
-                                        )
-                                    }
-                                }
-                                MotionVisibility(
-                                    visible = active,
-                                    modifier = Modifier.align(Alignment.BottomCenter),
-                                    enter =
-                                        expandHorizontally(animationSpec = WorkbenchMotion.expressiveSpring()) +
-                                            fadeIn(),
-                                    exit =
-                                        shrinkHorizontally(animationSpec = WorkbenchMotion.standardTween()) +
-                                            fadeOut(),
-                                ) {
-                                    Box(
-                                        Modifier
-                                            .width(120.dp)
-                                            .height(2.dp)
-                                            .background(MaterialTheme.colorScheme.tertiary),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    ToolIcon(Icons.Default.Add, "新建会话", state::newAgentSession)
-                    Box {
-                        ToolIcon(Icons.Default.MoreVert, "会话操作", { sessionMenuOpen = true })
-                        androidx.compose.material3.DropdownMenu(expanded = sessionMenuOpen, onDismissRequest = { sessionMenuOpen = false }) {
-                            androidx.compose.material3.DropdownMenuItem(text = { Text("重命名") }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = {
-                                renameInput = state.activeAgentSession.name
-                                renameDialog = true
-                                sessionMenuOpen = false
-                            })
-                            androidx.compose.material3.DropdownMenuItem(text = { Text("分叉会话") }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.CallSplit, null) }, onClick = {
-                                state.cloneAgentSession(fork = true)
-                                sessionMenuOpen = false
-                            })
-                            androidx.compose.material3.DropdownMenuItem(text = { Text("克隆会话") }, leadingIcon = { Icon(Icons.Default.FileCopy, null) }, onClick = {
-                                state.cloneAgentSession()
-                                sessionMenuOpen = false
-                            })
-                            androidx.compose.material3.HorizontalDivider()
-                            androidx.compose.material3.DropdownMenuItem(text = { Text("删除会话", color = MaterialTheme.colorScheme.error) }, leadingIcon = { Icon(Icons.Default.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) }, onClick = {
-                                state.deleteAgentSession(state.activeAgentSessionId)
-                                sessionMenuOpen = false
-                            })
-                        }
-                    }
-                }
-                Row(
-                    Modifier.fillMaxWidth().height(27.dp).padding(horizontal = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    val session = state.activeAgentSession
-                    val reportedTokens = session.inputTokens + session.outputTokens
-                    val estimatedTokens = state.agentMessages.sumOf { it.content.length }.div(4)
-                    Text(
-                        if (reportedTokens > 0) "用量 $reportedTokens tokens" else "上下文 ≈ $estimatedTokens tokens",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.weight(1f))
-                    Text(session.costUsd?.let { "费用 \$${"%.4f".format(it)}" } ?: "费用 --", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                 }
                 MotionVisibility(
                     visible = state.canRestoreDeletedAgentSession,
@@ -563,6 +541,17 @@ fun AgentPanel(
                             Text("围绕当前文档开始对话", style = MaterialTheme.typography.titleMedium)
                             Spacer(Modifier.height(6.dp))
                             Text("可附带当前文档内容；运行时可随时停止。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.height(16.dp))
+                            Row(
+                                Modifier.horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                listOf("总结当前文档", "查找可改进之处", "解释这段内容").forEach { suggestion ->
+                                    TextButton(onClick = { state.agentInput = suggestion }) {
+                                        Text(suggestion, maxLines = 1)
+                                    }
+                                }
+                            }
                         }
                     } else {
                         LazyColumn(
@@ -575,7 +564,10 @@ fun AgentPanel(
                         ) {
                             itemsIndexed(
                                 messages,
-                                key = { index, message -> "$index:${message.role}" },
+                                key = { index, message ->
+                                    message.streamId?.let { streamId -> "${message.role}:$streamId" }
+                                        ?: "message:$index:${message.role}"
+                                },
                             ) { index, message ->
                                 AgentMessageBubble(
                                     role = message.role,
@@ -663,24 +655,43 @@ fun AgentPanel(
                 }
                 Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.Bottom) {
                     val canSend = state.agentSendAvailability == AgentSendAvailability.READY && state.agentInput.isNotBlank()
-                    OutlinedTextField(
-                        value = state.agentInput,
-                        onValueChange = { state.agentInput = it },
-                        placeholder = { Text("询问或交代任务…") },
-                        minLines = 2,
-                        maxLines = 5,
-                        modifier =
-                            Modifier.weight(1f).onPreviewKeyEvent {
-                                val isSendShortcut =
-                                    it.type == KeyEventType.KeyDown && it.key == Key.Enter && it.isCtrlPressed
-                                if (isSendShortcut && canSend) {
-                                    state.sendAgentMessage()
-                                    true
-                                } else {
-                                    false
-                                }
-                            },
-                    )
+                    val composerHint =
+                        when {
+                            state.agentSendAvailability == AgentSendAvailability.OFFLINE -> "已离线：在设置中开启网络访问"
+                            state.agentSendAvailability == AgentSendAvailability.MODEL_REQUIRED -> "请先配置模型"
+                            state.agentSendAvailability == AgentSendAvailability.API_KEY_REQUIRED -> "请先配置 API Key"
+                            state.agentSendAvailability == AgentSendAvailability.AWAITING_APPROVAL -> "等待工具权限确认"
+                            state.agentInput.isBlank() && isAgentRunning -> "Ctrl + Enter 发送 steering"
+                            state.agentInput.isBlank() -> "Ctrl + Enter 发送"
+                            isAgentRunning -> "Ctrl + Enter 发送 steering · ${state.agentInput.trim().length} 字符"
+                            else -> "Ctrl + Enter 发送 · ${state.agentInput.trim().length} 字符"
+                        }
+                    Column(Modifier.weight(1f)) {
+                        OutlinedTextField(
+                            value = state.agentInput,
+                            onValueChange = { state.agentInput = it },
+                            placeholder = { Text(if (isAgentRunning) "继续补充指令…" else "询问或交代任务…") },
+                            minLines = 2,
+                            maxLines = 5,
+                            modifier =
+                                Modifier.fillMaxWidth().onPreviewKeyEvent {
+                                    val isSendShortcut =
+                                        it.type == KeyEventType.KeyDown && it.key == Key.Enter && it.isCtrlPressed
+                                    if (isSendShortcut && canSend) {
+                                        state.sendAgentMessage()
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                },
+                        )
+                        Text(
+                            text = composerHint,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.padding(start = 4.dp, top = 3.dp),
+                        )
+                    }
                     Spacer(Modifier.width(6.dp))
                     MotionIconButton(
                         onClick = state::sendAgentMessage,
@@ -810,6 +821,7 @@ private fun AgentMessageBubble(
     val user = role == "user"
     val collapsible = role in setOf("tool", "tool_call", "reasoning") && content.lines().size > 6
     var expanded by remember(role) { mutableStateOf(!collapsible) }
+    var copied by remember(content) { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start) {
         Surface(
             color =
@@ -825,22 +837,45 @@ private fun AgentMessageBubble(
             modifier = Modifier.fillMaxWidth(if (user) 0.88f else 1f),
         ) {
             Column(Modifier.padding(10.dp)) {
-                Text(
-                    when (role) {
-                        "user" -> "你"
-                        "steering" -> "Steering · 执行中"
-                        "steering_queued" -> "Steering · 已排队"
-                        "steering_cancelled" -> "Steering · 已取消"
-                        "tool_call" -> "工具调用 · 运行中"
-                        "tool" -> "工具结果"
-                        "reasoning" -> "推理摘要"
-                        "diff" -> "文件差异"
-                        else -> "Agent"
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        when (role) {
+                            "user" -> "你"
+                            "steering" -> "Steering · 执行中"
+                            "steering_queued" -> "Steering · 已排队"
+                            "steering_cancelled" -> "Steering · 已取消"
+                            "tool_call" -> "工具调用 · 运行中"
+                            "tool" -> "工具结果"
+                            "reasoning" -> "推理摘要"
+                            "diff" -> "文件差异"
+                            else -> "Agent"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color =
+                            if (error) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (content.isNotBlank()) {
+                        ToolIcon(
+                            icon = if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
+                            description = if (copied) "已复制" else "复制消息",
+                            onClick = {
+                                runCatching {
+                                    Toolkit
+                                        .getDefaultToolkit()
+                                        .systemClipboard
+                                        .setContents(StringSelection(content), null)
+                                }
+                                copied = true
+                            },
+                        )
+                    }
+                }
                 Spacer(Modifier.height(4.dp))
                 if (role == "diff") {
                     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(7.dp)) {
@@ -941,7 +976,11 @@ fun AgentSettingsDialog(
                             Spacer(Modifier.height(9.dp))
                             OutlinedTextField(state.agentApiKey, { state.agentApiKey = it }, label = { Text("API Key") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
                             Spacer(Modifier.height(10.dp))
-                            Text("API Key 仅保存在当前进程。Provider 目录、OAuth 与自定义 Provider 将使用此分区。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                            Text(
+                                "Endpoint 与 Model 会保存到应用偏好；API Key 仅保存在当前进程，也可通过 OPENAI_API_KEY 提供。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.outline,
+                            )
                         }
 
                         AgentSettingsSection.PERMISSIONS -> {
