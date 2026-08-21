@@ -110,8 +110,14 @@ import dev.xuexue.core.AgentSendAvailability
 import dev.xuexue.core.DocumentKind
 import dev.xuexue.pi.coding.InteractionRequest
 import dev.xuexue.pi.coding.InteractionResponse
+import dev.xuexue.pi.coding.InteractionSeverity
+import kotlinx.coroutines.delay
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
+
+private const val DEFAULT_AGENT_NOTIFICATION_DURATION_MS = 5_000L
+private const val MIN_AGENT_NOTIFICATION_DURATION_MS = 1_000L
+private const val MAX_AGENT_NOTIFICATION_DURATION_MS = 15_000L
 
 private enum class AgentSettingsSection(
     val label: String,
@@ -131,6 +137,88 @@ private enum class RunningSessionAction {
     SELECT,
     FORK,
     CLONE,
+}
+
+private fun AgentNotificationDuration(request: InteractionRequest.Notify): Long? =
+    request.durationMs?.coerceIn(
+        MIN_AGENT_NOTIFICATION_DURATION_MS,
+        MAX_AGENT_NOTIFICATION_DURATION_MS,
+    )
+        ?: when (request.severity) {
+            InteractionSeverity.INFO,
+            InteractionSeverity.SUCCESS,
+            -> DEFAULT_AGENT_NOTIFICATION_DURATION_MS
+
+            InteractionSeverity.WARNING,
+            InteractionSeverity.ERROR,
+            -> null
+        }
+
+@Composable
+private fun AgentNotificationBanner(
+    request: InteractionRequest.Notify,
+    onDismiss: () -> Unit,
+) {
+    val containerColor =
+        when (request.severity) {
+            InteractionSeverity.INFO -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.58f)
+
+            InteractionSeverity.SUCCESS -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.58f)
+
+            InteractionSeverity.WARNING,
+            InteractionSeverity.ERROR,
+            -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.58f)
+        }
+    val accentColor =
+        when (request.severity) {
+            InteractionSeverity.INFO -> MaterialTheme.colorScheme.secondary
+
+            InteractionSeverity.SUCCESS -> MaterialTheme.colorScheme.tertiary
+
+            InteractionSeverity.WARNING,
+            InteractionSeverity.ERROR,
+            -> MaterialTheme.colorScheme.error
+        }
+    val icon =
+        when (request.severity) {
+            InteractionSeverity.INFO -> Icons.Default.SmartToy
+
+            InteractionSeverity.SUCCESS -> Icons.Default.Check
+
+            InteractionSeverity.WARNING,
+            InteractionSeverity.ERROR,
+            -> Icons.Default.ErrorOutline
+        }
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(containerColor)
+            .padding(start = 10.dp, top = 7.dp, end = 4.dp, bottom = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, Modifier.size(17.dp), tint = accentColor)
+        Spacer(Modifier.width(7.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                request.title,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                request.message,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+            Icon(Icons.Default.Close, "关闭通知", Modifier.size(17.dp))
+        }
+    }
 }
 
 @Composable
@@ -311,10 +399,21 @@ fun AgentPanel(
     var renameInput by remember { mutableStateOf("") }
     var pendingRunningAction by remember { mutableStateOf<RunningSessionAction?>(null) }
     var pendingSessionId by remember { mutableStateOf<String?>(null) }
+    var notification by remember { mutableStateOf<InteractionRequest.Notify?>(null) }
     val messageListState = rememberLazyListState()
     val messages = state.agentMessages
     val interactionRequests by state.agentInteractionRequests.collectAsState()
     val lastMessageContent = messages.lastOrNull()?.content
+    LaunchedEffect(state.agentInteractionNotifications) {
+        state.agentInteractionNotifications.collect { request -> notification = request }
+    }
+    LaunchedEffect(notification?.id) {
+        val currentNotification = notification ?: return@LaunchedEffect
+        AgentNotificationDuration(currentNotification)?.let { duration ->
+            delay(duration)
+            if (notification?.id == currentNotification.id) notification = null
+        }
+    }
     LaunchedEffect(state.activeAgentSessionId) {
         if (messages.isNotEmpty()) {
             messageListState.scrollToItem(messages.lastIndex)
@@ -516,6 +615,12 @@ fun AgentPanel(
                             Text("恢复")
                         }
                     }
+                }
+                notification?.let { request ->
+                    AgentNotificationBanner(
+                        request = request,
+                        onDismiss = { notification = null },
+                    )
                 }
                 AnimatedContent(
                     targetState = state.pendingAgentApproval,
