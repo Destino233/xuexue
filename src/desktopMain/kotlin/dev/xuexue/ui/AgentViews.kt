@@ -73,6 +73,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -99,6 +100,7 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.xuexue.WorkbenchState
@@ -122,6 +124,13 @@ private enum class AgentSettingsSection(
     RESOURCES("资源", Icons.Default.Description),
     EXTENSIONS("扩展与包", Icons.Default.Hub),
     DIAGNOSTICS("诊断", Icons.Default.ErrorOutline),
+}
+
+private enum class RunningSessionAction {
+    NEW,
+    SELECT,
+    FORK,
+    CLONE,
 }
 
 @Composable
@@ -197,13 +206,17 @@ private fun AgentInteractionBanner(
             is InteractionRequest.Select -> {
                 Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     request.options.forEachIndexed { index, option ->
-                        TextButton(
-                            onClick = { selectedIndex = index },
-                            modifier = Modifier.fillMaxWidth().height(30.dp),
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { selectedIndex = index }
+                                .padding(horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            RadioButton(selected = index == selectedIndex, onClick = null)
                             Text(
-                                text = if (index == selectedIndex) "● $option" else option,
-                                modifier = Modifier.fillMaxWidth(),
+                                text = option,
+                                modifier = Modifier.padding(start = 4.dp).weight(1f),
                             )
                         }
                     }
@@ -233,6 +246,7 @@ private fun AgentInteractionBanner(
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = request.placeholder?.let { hint -> ({ Text(hint) }) },
                     singleLine = !request.multiline,
+                    visualTransformation = if (request.secret) PasswordVisualTransformation() else VisualTransformation.None,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Button(
@@ -295,6 +309,8 @@ fun AgentPanel(
     var renameDialog by remember { mutableStateOf(false) }
     var deleteDialog by remember { mutableStateOf(false) }
     var renameInput by remember { mutableStateOf("") }
+    var pendingRunningAction by remember { mutableStateOf<RunningSessionAction?>(null) }
+    var pendingSessionId by remember { mutableStateOf<String?>(null) }
     val messageListState = rememberLazyListState()
     val messages = state.agentMessages
     val interactionRequests by state.agentInteractionRequests.collectAsState()
@@ -383,7 +399,12 @@ fun AgentPanel(
                                         }
                                     },
                                     onClick = {
-                                        state.selectAgentSession(session.id)
+                                        if (isAgentRunning && session.id != state.activeAgentSessionId) {
+                                            pendingSessionId = session.id
+                                            pendingRunningAction = RunningSessionAction.SELECT
+                                        } else {
+                                            state.selectAgentSession(session.id)
+                                        }
                                         sessionSelectorOpen = false
                                     },
                                 )
@@ -402,7 +423,11 @@ fun AgentPanel(
                                 text = { Text("分叉会话") },
                                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.CallSplit, null) },
                                 onClick = {
-                                    state.cloneAgentSession(fork = true)
+                                    if (isAgentRunning) {
+                                        pendingRunningAction = RunningSessionAction.FORK
+                                    } else {
+                                        state.cloneAgentSession(fork = true)
+                                    }
                                     sessionSelectorOpen = false
                                 },
                             )
@@ -410,7 +435,11 @@ fun AgentPanel(
                                 text = { Text("克隆会话") },
                                 leadingIcon = { Icon(Icons.Default.FileCopy, null) },
                                 onClick = {
-                                    state.cloneAgentSession()
+                                    if (isAgentRunning) {
+                                        pendingRunningAction = RunningSessionAction.CLONE
+                                    } else {
+                                        state.cloneAgentSession()
+                                    }
                                     sessionSelectorOpen = false
                                 },
                             )
@@ -424,7 +453,17 @@ fun AgentPanel(
                             )
                         }
                     }
-                    ToolIcon(Icons.Default.Add, "新建会话", state::newAgentSession)
+                    ToolIcon(
+                        Icons.Default.Add,
+                        "新建会话",
+                        {
+                            if (isAgentRunning) {
+                                pendingRunningAction = RunningSessionAction.NEW
+                            } else {
+                                state.newAgentSession()
+                            }
+                        },
+                    )
                     Box {
                         ToolIcon(Icons.Default.MoreVert, "Agent 面板选项", { panelMenuOpen = true })
                         androidx.compose.material3.DropdownMenu(expanded = panelMenuOpen, onDismissRequest = { panelMenuOpen = false }) {
@@ -504,7 +543,10 @@ fun AgentPanel(
                             }
                             Text(request.target, style = MaterialTheme.typography.bodySmall, fontFamily = CodeFont, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             Text(request.detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                Modifier.horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
                                 Button(onClick = { state.decideAgentApproval(AgentApprovalDecision.ALLOW_ONCE) }, modifier = Modifier.height(31.dp)) { Text("仅本次允许") }
                                 if (request.operation in setOf(AgentOperationKind.WRITE_FILE, AgentOperationKind.RUN_SHELL)) {
                                     TextButton(onClick = { state.decideAgentApproval(AgentApprovalDecision.ALLOW_SESSION) }, modifier = Modifier.height(31.dp)) { Text("本会话允许") }
@@ -775,7 +817,14 @@ fun AgentPanel(
         AlertDialog(
             onDismissRequest = { deleteDialog = false },
             title = { Text("删除会话") },
-            text = { Text("确定删除“${state.activeAgentSession.name}”？删除后可通过恢复入口撤销。") },
+            text = {
+                Text(
+                    buildString {
+                        append("确定删除“${state.activeAgentSession.name}”？删除后可通过恢复入口撤销。")
+                        if (isAgentRunning) append("当前运行也会停止。")
+                    },
+                )
+            },
             confirmButton = {
                 Button(
                     onClick = {
@@ -792,6 +841,49 @@ fun AgentPanel(
                 }
             },
             dismissButton = { TextButton(onClick = { deleteDialog = false }) { Text("取消") } },
+        )
+    }
+    pendingRunningAction?.let { action ->
+        val actionLabel =
+            when (action) {
+                RunningSessionAction.NEW -> "新建会话"
+                RunningSessionAction.SELECT -> "切换会话"
+                RunningSessionAction.FORK -> "分叉会话"
+                RunningSessionAction.CLONE -> "克隆会话"
+            }
+        AlertDialog(
+            onDismissRequest = {
+                pendingRunningAction = null
+                pendingSessionId = null
+            },
+            title = { Text(actionLabel) },
+            text = { Text("继续将停止当前 Agent 运行，并取消正在等待的交互请求。") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        when (action) {
+                            RunningSessionAction.NEW -> state.newAgentSession()
+                            RunningSessionAction.SELECT -> pendingSessionId?.let(state::selectAgentSession)
+                            RunningSessionAction.FORK -> state.cloneAgentSession(fork = true)
+                            RunningSessionAction.CLONE -> state.cloneAgentSession()
+                        }
+                        pendingRunningAction = null
+                        pendingSessionId = null
+                    },
+                ) {
+                    Text("停止并继续")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        pendingRunningAction = null
+                        pendingSessionId = null
+                    },
+                ) {
+                    Text("取消")
+                }
+            },
         )
     }
 }
@@ -1117,12 +1209,18 @@ private fun ToggleSetting(
     enabled: Boolean = true,
     onChange: (Boolean) -> Unit,
 ) {
-    Row(Modifier.fillMaxWidth().height(54.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(54.dp)
+            .clickable(enabled = enabled) { onChange(!checked) },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyMedium, color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline)
             Text(detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
         }
-        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }
 
