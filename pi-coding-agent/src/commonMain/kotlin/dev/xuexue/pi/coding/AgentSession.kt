@@ -51,8 +51,10 @@ import dev.xuexue.pi.coding.extensions.PiExtensionEventResult
 import dev.xuexue.pi.coding.extensions.PiExtensionEventType
 import dev.xuexue.pi.coding.extensions.PiExtensionMode
 import dev.xuexue.pi.coding.extensions.PiExtensionRunner
+import dev.xuexue.pi.coding.extensions.PiModLoader
 import dev.xuexue.pi.coding.extensions.ProjectTrustDecision
 import dev.xuexue.pi.coding.extensions.ResourceDiscoverReason
+import dev.xuexue.pi.coding.extensions.SessionApi
 import dev.xuexue.pi.coding.extensions.SessionShutdownReason
 import dev.xuexue.pi.coding.extensions.SessionStartReason
 import dev.xuexue.pi.coding.extensions.TreePreparation
@@ -100,6 +102,17 @@ private data class ActiveSessionRun(
     val completion: CompletableDeferred<Unit>,
 )
 
+private fun CustomMessageDelivery?.toStreamingBehavior(): StreamingBehavior? =
+    when (this) {
+        CustomMessageDelivery.STEER -> StreamingBehavior.STEER
+
+        CustomMessageDelivery.FOLLOW_UP -> StreamingBehavior.FOLLOW_UP
+
+        CustomMessageDelivery.NEXT_TURN,
+        null,
+        -> null
+    }
+
 private data class ExtensionStartResult(
     val messages: List<CustomMessage>,
     val systemPrompt: String?,
@@ -138,6 +151,7 @@ class AgentSession(
     private var scopedModelEntries: List<ScopedModel> = config.scopedModels.toList()
     private val resourceLoader = config.resourceLoader
     private val extensionRunner: PiExtensionRunner? = config.extensionRunner
+    private val modLoader: PiModLoader? = config.modLoader
     private val packageManager: PiPackageManager? = config.packageManager
     private val bashExecutor: AgentSessionBashExecutor? = config.bashExecutor
     private val htmlExporter: AgentSessionHtmlExporter? = config.htmlExporter
@@ -177,6 +191,7 @@ class AgentSession(
         rebuildSystemPrompt()
         refreshState()
         reconnectToAgent()
+        modLoader?.bindSession(createModSessionApi())
     }
 
     val currentState: AgentSessionState
@@ -484,6 +499,7 @@ class AgentSession(
         if (!disposed.compareAndSet(false, true)) return
         abortBranchSummary()
         extensionRunner?.dispose(reason, targetSessionFile)
+        modLoader?.unbindSession()
         runCatching { agent.abort() }
         disconnectFromAgent()
         listeners.store(emptyList())
@@ -949,6 +965,59 @@ class AgentSession(
         refreshState()
         return entryId
     }
+
+    private fun createModSessionApi(): SessionApi =
+        object : SessionApi {
+            override val state: AgentSessionState
+                get() = currentState
+
+            override val isIdle: Boolean
+                get() = this@AgentSession.isIdle
+
+            override suspend fun prompt(
+                text: String,
+                images: List<ImageContent>,
+                behavior: StreamingBehavior?,
+            ) {
+                this@AgentSession.prompt(
+                    text,
+                    PromptOptions(
+                        images = images,
+                        streamingBehavior = behavior,
+                    ),
+                )
+            }
+
+            override suspend fun sendUserMessage(
+                text: String,
+                options: CustomMessageOptions,
+            ) {
+                this@AgentSession.sendUserMessage(text, options.deliverAs.toStreamingBehavior())
+            }
+
+            override suspend fun sendCustomMessage(
+                message: CustomMessageInput,
+                options: CustomMessageOptions,
+            ) {
+                this@AgentSession.sendCustomMessage(message, options)
+            }
+
+            override fun steer(message: AgentMessage) {
+                agent.steer(message)
+                refreshState()
+            }
+
+            override fun followUp(message: AgentMessage) {
+                agent.followUp(message)
+                refreshState()
+            }
+
+            override suspend fun abort() {
+                this@AgentSession.abort()
+            }
+
+            override fun appendCustomEntry(message: CustomMessageInput): String = this@AgentSession.appendCustomEntry(message.customType, message.details)
+        }
 
     fun recordBashResult(
         command: String,

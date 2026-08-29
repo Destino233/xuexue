@@ -25,6 +25,7 @@ import dev.xuexue.pi.ai.UserMessage
 import dev.xuexue.pi.ai.UserText
 import dev.xuexue.pi.ai.createAssistantMessageEventStream
 import dev.xuexue.pi.coding.extensions.PiExtensionRunner
+import dev.xuexue.pi.coding.extensions.PiModLoader
 import dev.xuexue.pi.coding.resources.DefaultResourceLoader
 import dev.xuexue.pi.coding.resources.SystemPromptDocumentation
 import dev.xuexue.pi.coding.session.SessionManager
@@ -40,6 +41,7 @@ internal class AgentSessionHarness(
     streamFunction: StreamFunction? = null,
     resourceLoader: DefaultResourceLoader? = null,
     extensionRunner: PiExtensionRunner? = null,
+    modLoader: PiModLoader? = null,
     modelRegistry: ModelRegistry? = null,
     apiKey: String? = null,
     scopedModels: List<ScopedModel> = emptyList(),
@@ -78,6 +80,7 @@ internal class AgentSessionHarness(
                 scopedModels = scopedModels,
                 resourceLoader = resourceLoader,
                 extensionRunner = extensionRunner,
+                modLoader = modLoader,
                 bashExecutor = bashExecutor,
                 systemPromptDocumentation = systemPromptDocumentation,
                 currentDate = currentDate,

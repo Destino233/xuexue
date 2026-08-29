@@ -1,4 +1,5 @@
 @file:Suppress("TooManyFunctions", "TooGenericExceptionCaught")
+@file:OptIn(kotlin.concurrent.atomics.ExperimentalAtomicApi::class)
 
 package dev.xuexue.pi.coding.extensions
 
@@ -26,6 +27,7 @@ import dev.xuexue.pi.coding.resources.ResourceExtensionPaths
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonElement
+import kotlin.concurrent.atomics.AtomicReference
 
 data class ModRunSnapshot(
     val info: ModInfo,
@@ -57,6 +59,7 @@ class PiModLoader(
     private val lock = Mutex()
     private val loaded = linkedMapOf<ModId, LoadedMod>()
     private val diagnostics = mutableListOf<ModRunDiagnostic>()
+    private val sessionApi = AtomicReference<SessionApi>(UnavailableSessionApi)
 
     private val toolCatalog = ModOwnedRegistry<AgentTool>(ModContributionKind.TOOL)
     private val commandCatalog = ModOwnedRegistry<ModCommand>(ModContributionKind.COMMAND)
@@ -76,6 +79,15 @@ class PiModLoader(
                     )
             },
         )
+
+    /** Binds this loader to a live AgentSession without invalidating existing mod contexts. */
+    fun bindSession(session: SessionApi) {
+        sessionApi.store(session)
+    }
+
+    fun unbindSession() {
+        sessionApi.store(UnavailableSessionApi)
+    }
 
     /** Enables a package, replacing a previous active run with the same ID. */
     suspend fun load(
@@ -288,7 +300,7 @@ class PiModLoader(
             providers = ProviderRegistry(providerCatalog, run),
             imageProviders = ImageProviderRegistry(imageProviderCatalog, run),
             resources = ResourceRegistry(resourceCatalog, run),
-            session = UnavailableSessionApi,
+            session = DelegatingSessionApi(sessionApi),
             runtime = UnavailableRuntimeRegistry,
             ui = EmptyUiRegistry,
             storage = InMemoryStorageApi(),
@@ -415,6 +427,42 @@ private object UnavailableSessionApi : SessionApi {
     override suspend fun abort() = error("Session API is not attached to this mod host")
 
     override fun appendCustomEntry(message: CustomMessageInput): String? = error("Session API is not attached to this mod host")
+}
+
+private class DelegatingSessionApi(
+    private val delegate: AtomicReference<SessionApi>,
+) : SessionApi {
+    private fun current(): SessionApi = delegate.load()
+
+    override val state: AgentSessionState?
+        get() = current().state
+
+    override val isIdle: Boolean
+        get() = current().isIdle
+
+    override suspend fun prompt(
+        text: String,
+        images: List<dev.xuexue.pi.ai.ImageContent>,
+        behavior: StreamingBehavior?,
+    ) = current().prompt(text, images, behavior)
+
+    override suspend fun sendUserMessage(
+        text: String,
+        options: CustomMessageOptions,
+    ) = current().sendUserMessage(text, options)
+
+    override suspend fun sendCustomMessage(
+        message: CustomMessageInput,
+        options: CustomMessageOptions,
+    ) = current().sendCustomMessage(message, options)
+
+    override fun steer(message: AgentMessage) = current().steer(message)
+
+    override fun followUp(message: AgentMessage) = current().followUp(message)
+
+    override suspend fun abort() = current().abort()
+
+    override fun appendCustomEntry(message: CustomMessageInput): String? = current().appendCustomEntry(message)
 }
 
 private object UnavailableRuntimeRegistry : RuntimeRegistry {

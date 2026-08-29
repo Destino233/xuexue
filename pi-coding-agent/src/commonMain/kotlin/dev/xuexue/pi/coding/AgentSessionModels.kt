@@ -9,6 +9,7 @@ import dev.xuexue.pi.ai.UserContent
 import dev.xuexue.pi.coding.compaction.CompactionSettings
 import dev.xuexue.pi.coding.extensions.PiExtensionMode
 import dev.xuexue.pi.coding.extensions.PiExtensionRunner
+import dev.xuexue.pi.coding.extensions.PiModLoader
 import dev.xuexue.pi.coding.packages.PiPackageManager
 import dev.xuexue.pi.coding.resources.DefaultResourceLoader
 import dev.xuexue.pi.coding.resources.SystemPromptDocumentation
@@ -34,6 +35,7 @@ data class AgentSessionConfig(
     val settingsManager: AgentSessionSettings = InMemoryAgentSessionSettings(),
     val resourceLoader: DefaultResourceLoader? = null,
     val extensionRunner: PiExtensionRunner? = null,
+    val modLoader: PiModLoader? = null,
     val packageManager: PiPackageManager? = null,
     val bashExecutor: AgentSessionBashExecutor? = null,
     val extensionMode: PiExtensionMode = PiExtensionMode.PRINT,
