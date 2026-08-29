@@ -63,7 +63,11 @@ class PiModLoaderTest {
             assertNotEquals(firstRun, secondRun)
             assertEquals(listOf("first:$firstRun"), disabled)
             assertEquals("second", loader.getAllRegisteredTools().single().label)
-            assertEquals(secondRun, loader.getRuns().single().info.runId)
+            val activeRun = loader.getRuns().single()
+            assertEquals(
+                secondRun,
+                activeRun.info.runId,
+            )
         }
 
     @Test

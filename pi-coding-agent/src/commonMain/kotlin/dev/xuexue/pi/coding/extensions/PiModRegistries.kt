@@ -70,11 +70,12 @@ class ModOwnedRegistry<T>(
         var removed = 0
         while (true) {
             val current = entries.load()
-            val next = current.filterValues { entry ->
-                val keep = entry.owner.runId != owner
-                if (!keep) removed++
-                keep
-            }
+            val next =
+                current.filterValues { entry ->
+                    val keep = entry.owner.runId != owner
+                    if (!keep) removed++
+                    keep
+                }
             if (entries.compareAndSet(current, next)) {
                 current
                     .filterValues { it.owner.runId == owner }

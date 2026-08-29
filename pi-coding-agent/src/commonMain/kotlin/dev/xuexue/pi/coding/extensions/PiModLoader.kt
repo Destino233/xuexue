@@ -2,9 +2,9 @@
 
 package dev.xuexue.pi.coding.extensions
 
-import dev.xuexue.pi.agent.AgentTool
 import dev.xuexue.pi.agent.AfterToolCallContext
 import dev.xuexue.pi.agent.AfterToolCallResult
+import dev.xuexue.pi.agent.AgentTool
 import dev.xuexue.pi.agent.BeforeToolCallContext
 import dev.xuexue.pi.agent.BeforeToolCallResult
 import dev.xuexue.pi.agent.ContextTransformer
@@ -117,8 +117,7 @@ class PiModLoader(
         extension: PiExtension,
         packageInfo: ModPackage = extension.defaultPackage(),
         trusted: Boolean = projectTrusted,
-    ): ModLoadResult =
-        load(LegacyPiExtensionMod(extension, this), packageInfo, trusted)
+    ): ModLoadResult = load(LegacyPiExtensionMod(extension, this), packageInfo, trusted)
 
     suspend fun disable(id: ModId): Boolean =
         lock.withLock {
@@ -240,8 +239,8 @@ class PiModLoader(
                     run,
                     command.name,
                     ModCommand(command.description) { args, _ ->
-                            command.handler(args, defaultExtensionContext())
-                        },
+                        command.handler(args, defaultExtensionContext())
+                    },
                 )
             }
 
@@ -387,8 +386,7 @@ private class LoaderModContext(
     override val storage: StorageApi,
     override val permissions: PermissionBroker,
     override val diagnostics: DiagnosticsRegistry,
-) : ModContext {
-}
+) : ModContext
 
 private object UnavailableSessionApi : SessionApi {
     override val state: AgentSessionState? = null
@@ -416,8 +414,7 @@ private object UnavailableSessionApi : SessionApi {
 
     override suspend fun abort() = error("Session API is not attached to this mod host")
 
-    override fun appendCustomEntry(message: CustomMessageInput): String? =
-        error("Session API is not attached to this mod host")
+    override fun appendCustomEntry(message: CustomMessageInput): String? = error("Session API is not attached to this mod host")
 }
 
 private object UnavailableRuntimeRegistry : RuntimeRegistry {
@@ -455,11 +452,9 @@ private object UnavailableRuntimeRegistry : RuntimeRegistry {
 }
 
 private object EmptyUiRegistry : UiRegistry {
-    override fun registerPanel(contribution: UiPanelContribution): Registration =
-        error("UI API is not attached to this mod host")
+    override fun registerPanel(contribution: UiPanelContribution): Registration = error("UI API is not attached to this mod host")
 
-    override fun registerAction(contribution: UiActionContribution): Registration =
-        error("UI API is not attached to this mod host")
+    override fun registerAction(contribution: UiActionContribution): Registration = error("UI API is not attached to this mod host")
 
     override fun panels(): List<RegisteredModEntry<UiPanelContribution>> = emptyList()
 
