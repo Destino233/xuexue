@@ -1,5 +1,7 @@
 package dev.xuexue.pi.coding
 
+import dev.xuexue.pi.ai.Context
+import dev.xuexue.pi.ai.UserMessage
 import dev.xuexue.pi.ai.UserText
 import dev.xuexue.pi.coding.extensions.ModContext
 import dev.xuexue.pi.coding.extensions.ModHandle
@@ -48,5 +50,43 @@ class AgentSessionModApiTest {
             val message = harness.session.messages.last() as CustomMessage
             assertEquals("example.notice", message.customType)
             assertEquals("from mod", (message.content as UserText).value)
+        }
+
+    @Test
+    fun runtimeModTransformsContextBeforeTheModelCall() =
+        runTest {
+            var observed = ""
+            val loader = PiModLoader("/workspace")
+            val harness =
+                AgentSessionHarness(
+                    modLoader = loader,
+                    responses =
+                        listOf(
+                            { context: Context ->
+                                observed = context.messages.toString()
+                                testAssistant("ok")
+                            },
+                        ),
+                )
+            loader.load(
+                object : PiMod {
+                    override val id = ModId("example.runtime")
+                    override val version = ModVersion("1.0.0")
+
+                    override suspend fun enable(context: ModContext): ModHandle? {
+                        context.runtime.registerContextTransformer(
+                            id = "append",
+                            transformer = { messages, _ ->
+                                messages + UserMessage(UserText("runtime"), 9)
+                            },
+                        )
+                        return null
+                    }
+                },
+            )
+
+            harness.session.prompt("hello")
+
+            assertTrue(observed.contains("runtime"))
         }
 }

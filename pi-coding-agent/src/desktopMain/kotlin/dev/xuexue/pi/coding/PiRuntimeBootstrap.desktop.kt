@@ -7,6 +7,7 @@ import dev.xuexue.pi.coding.exec.PiCommandExecutor
 import dev.xuexue.pi.coding.extensions.PiExtensionContext
 import dev.xuexue.pi.coding.extensions.PiExtensionMode
 import dev.xuexue.pi.coding.extensions.PiExtensionRunner
+import dev.xuexue.pi.coding.extensions.PiModLoader
 import dev.xuexue.pi.coding.extensions.PiPluginDiscovery
 import dev.xuexue.pi.coding.extensions.PiPluginDiscoveryOptions
 import dev.xuexue.pi.coding.extensions.PiPluginLoadResult
@@ -40,6 +41,7 @@ data class PiRuntimeBootstrapResult(
     val packageManager: DefaultPiPackageManager,
     val packageResolution: PiPackageResolution,
     val extensionRunner: PiExtensionRunner,
+    val modLoader: PiModLoader,
     val resourceLoader: DefaultResourceLoader,
     val userPlugins: PiPluginLoadResult,
     val projectPlugins: PiPluginLoadResult,
@@ -88,18 +90,31 @@ class PiRuntimeBootstrap(
                 mode = options.mode,
                 commandExecutor = options.commandExecutor,
             )
+        val modLoader =
+            PiModLoader(
+                cwd = options.cwd,
+                mode = options.mode,
+                commandExecutor = options.commandExecutor,
+                projectTrusted = false,
+                interaction = options.interactionPort,
+            )
         return try {
             userPlugins.extensions.forEach { extension -> extensionRunner.load(extension) }
+            userPlugins.mods.forEach { plugin ->
+                modLoader.load(plugin.mod, plugin.packageInfo, trusted = true)
+            }
             val trusted = resolveTrust(settingsManager, extensionRunner)
             if (!trusted) {
                 extensionRunner.dispose()
+                modLoader.reload()
                 null
             } else {
                 settingsManager.setProjectTrusted(true)
-                finishBootstrap(settingsManager, extensionRunner, userPlugins, packageManager)
+                finishBootstrap(settingsManager, extensionRunner, modLoader, userPlugins, packageManager)
             }
         } catch (error: Throwable) {
             extensionRunner.dispose()
+            modLoader.reload()
             throw error
         }
     }
@@ -129,6 +144,7 @@ class PiRuntimeBootstrap(
     private suspend fun finishBootstrap(
         settingsManager: SettingsManager,
         extensionRunner: PiExtensionRunner,
+        modLoader: PiModLoader,
         userPlugins: PiPluginLoadResult,
         packageManager: DefaultPiPackageManager,
     ): PiRuntimeBootstrapResult {
@@ -156,6 +172,9 @@ class PiRuntimeBootstrap(
                 ),
             ).loadAll()
         projectPlugins.extensions.forEach { extension -> extensionRunner.load(extension) }
+        projectPlugins.mods.forEach { plugin ->
+            modLoader.load(plugin.mod, plugin.packageInfo, trusted = true)
+        }
         val resourceLoader =
             DefaultResourceLoader(
                 ResourceLoaderOptions(
@@ -169,6 +188,7 @@ class PiRuntimeBootstrap(
             packageManager = packageManager,
             packageResolution = packageResolution,
             extensionRunner = extensionRunner,
+            modLoader = modLoader,
             resourceLoader = resourceLoader,
             userPlugins = userPlugins,
             projectPlugins = projectPlugins,

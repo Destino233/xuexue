@@ -73,6 +73,7 @@ class Agent(
     var onResponse: ResponseObserver? = options.onResponse
     var beforeToolCall: BeforeToolCallHook? = options.beforeToolCall
     var afterToolCall: AfterToolCallHook? = options.afterToolCall
+    var shouldStopAfterTurn: ContinuationPolicy? = options.shouldStopAfterTurn
     var prepareNextTurn: LegacyPrepareNextTurn? = options.prepareNextTurn
     var prepareNextTurnWithContext: ContextualPrepareNextTurn? = options.prepareNextTurnWithContext
     var sessionId: String? = options.sessionId
@@ -297,6 +298,7 @@ class Agent(
         val apiKeyResolver = getApiKey
         val beforeHook = beforeToolCall
         val afterHook = afterToolCall
+        val stopPolicy = shouldStopAfterTurn
         val hasPrepareNextTurn = prepareNextTurnWithContext != null || prepareNextTurn != null
         val options = createStreamOptions(snapshot)
         var skipSteeringPoll = skipFirstSteeringPoll
@@ -313,6 +315,8 @@ class Agent(
             ): List<AgentMessage> = transformer?.invoke(messages, signal) ?: messages
 
             override suspend fun getApiKey(provider: String): String? = apiKeyResolver?.invoke(provider)
+
+            override suspend fun shouldStopAfterTurn(context: ShouldStopAfterTurnContext): Boolean = stopPolicy?.invoke(context) ?: false
 
             override suspend fun prepareNextTurn(context: ShouldStopAfterTurnContext): AgentLoopTurnUpdate? {
                 if (!hasPrepareNextTurn) return null

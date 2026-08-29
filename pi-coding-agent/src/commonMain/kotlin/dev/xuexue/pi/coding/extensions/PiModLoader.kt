@@ -66,6 +66,7 @@ class PiModLoader(
     private val providerCatalog = ModOwnedRegistry<PiProvider>(ModContributionKind.PROVIDER)
     private val imageProviderCatalog = ModOwnedRegistry<PiImageProvider>(ModContributionKind.IMAGE_PROVIDER)
     private val resourceCatalog = ModOwnedRegistry<ResourceExtensionPaths>(ModContributionKind.RESOURCE)
+    private val runtimeCatalog = ModRuntimeCatalog()
     private val eventCatalog =
         ModEventCatalog(
             bus = events,
@@ -195,6 +196,30 @@ class PiModLoader(
 
     fun getToolDefinition(id: String): AgentTool? = toolCatalog.get(id)
 
+    internal fun hasRuntimeHooks(): Boolean = runtimeCatalog.hasHooks()
+
+    internal suspend fun transformRuntimeContext(
+        messages: List<AgentMessage>,
+        signal: AbortSignal?,
+    ): List<AgentMessage> = runtimeCatalog.transformContext(messages, signal)
+
+    internal suspend fun beforeRuntimeToolCall(
+        context: BeforeToolCallContext,
+        signal: AbortSignal?,
+    ): BeforeToolCallResult? = runtimeCatalog.beforeToolCall(context, signal)
+
+    internal suspend fun afterRuntimeToolCall(
+        context: AfterToolCallContext,
+        signal: AbortSignal?,
+    ): AfterToolCallResult? = runtimeCatalog.afterToolCall(context, signal)
+
+    internal suspend fun shouldStopAfterRuntimeTurn(context: ShouldStopAfterTurnContext): Boolean = runtimeCatalog.shouldStopAfterTurn(context)
+
+    internal suspend fun prepareRuntimeNextTurn(
+        context: ShouldStopAfterTurnContext,
+        signal: AbortSignal?,
+    ): dev.xuexue.pi.agent.AgentLoopTurnUpdate? = runtimeCatalog.prepareNextTurn(context, signal)
+
     fun getRegisteredCommands(): List<RegisteredModCommand> =
         commandCatalog.snapshot().map { entry ->
             RegisteredModCommand(
@@ -301,7 +326,7 @@ class PiModLoader(
             imageProviders = ImageProviderRegistry(imageProviderCatalog, run),
             resources = ResourceRegistry(resourceCatalog, run),
             session = DelegatingSessionApi(sessionApi),
-            runtime = UnavailableRuntimeRegistry,
+            runtime = runtimeCatalog.forRun(run),
             ui = EmptyUiRegistry,
             storage = InMemoryStorageApi(),
             permissions = DefaultPermissionBroker(run.packageInfo.permissions, run.info.trusted),

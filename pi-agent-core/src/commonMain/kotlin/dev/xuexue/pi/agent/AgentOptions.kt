@@ -13,6 +13,7 @@ typealias ContextTransformer = suspend (messages: List<AgentMessage>, signal: Ab
 typealias ApiKeyResolver = suspend (provider: String) -> String?
 typealias BeforeToolCallHook = suspend (context: BeforeToolCallContext, signal: AbortSignal?) -> BeforeToolCallResult?
 typealias AfterToolCallHook = suspend (context: AfterToolCallContext, signal: AbortSignal?) -> AfterToolCallResult?
+typealias ContinuationPolicy = suspend (context: ShouldStopAfterTurnContext) -> Boolean
 typealias LegacyPrepareNextTurn = suspend (signal: AbortSignal?) -> AgentLoopTurnUpdate?
 typealias ContextualPrepareNextTurn =
     suspend (context: ShouldStopAfterTurnContext, signal: AbortSignal?) -> AgentLoopTurnUpdate?
@@ -27,6 +28,7 @@ data class AgentOptions(
     val onResponse: ResponseObserver? = null,
     val beforeToolCall: BeforeToolCallHook? = null,
     val afterToolCall: AfterToolCallHook? = null,
+    val shouldStopAfterTurn: ContinuationPolicy? = null,
     val prepareNextTurn: LegacyPrepareNextTurn? = null,
     val prepareNextTurnWithContext: ContextualPrepareNextTurn? = null,
     val steeringMode: QueueMode = QueueMode.ONE_AT_A_TIME,

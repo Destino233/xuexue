@@ -192,6 +192,7 @@ class AgentSession(
         refreshState()
         reconnectToAgent()
         modLoader?.bindSession(createModSessionApi())
+        installModRuntimeHooks()
     }
 
     val currentState: AgentSessionState
@@ -1584,6 +1585,77 @@ class AgentSession(
                 )
             }
         }
+    }
+
+    private fun installModRuntimeHooks() {
+        val loader = modLoader ?: return
+        val previousTransformContext = agent.transformContext
+        val previousBeforeToolCall = agent.beforeToolCall
+        val previousAfterToolCall = agent.afterToolCall
+        val previousPrepareNextTurn = agent.prepareNextTurnWithContext
+        val previousStopPolicy = agent.shouldStopAfterTurn
+
+        agent.transformContext = { messages, signal ->
+            val transformed = previousTransformContext?.invoke(messages, signal) ?: messages
+            if (loader.hasRuntimeHooks()) loader.transformRuntimeContext(transformed, signal) else transformed
+        }
+        agent.beforeToolCall = { context, signal ->
+            val previous = previousBeforeToolCall?.invoke(context, signal)
+            if (previous?.block == true || !loader.hasRuntimeHooks()) {
+                previous
+            } else {
+                val extension = loader.beforeRuntimeToolCall(context, signal)
+                if (extension?.block == true) {
+                    BeforeToolCallResult(block = true, reason = extension.reason)
+                } else {
+                    previous
+                }
+            }
+        }
+        agent.afterToolCall = { context, signal ->
+            val previous = previousAfterToolCall?.invoke(context, signal)
+            if (!loader.hasRuntimeHooks()) {
+                previous
+            } else {
+                val extension = loader.afterRuntimeToolCall(context, signal)
+                mergeAfterToolCallResults(previous, extension)
+            }
+        }
+        agent.prepareNextTurnWithContext = { context, signal ->
+            val previous = previousPrepareNextTurn?.invoke(context, signal)
+            val extension = loader.prepareRuntimeNextTurn(context, signal)
+            mergeTurnUpdates(previous, extension)
+        }
+        agent.shouldStopAfterTurn = { context ->
+            previousStopPolicy?.invoke(context) == true || loader.shouldStopAfterRuntimeTurn(context)
+        }
+    }
+
+    private fun mergeAfterToolCallResults(
+        previous: AfterToolCallResult?,
+        extension: AfterToolCallResult?,
+    ): AfterToolCallResult? {
+        if (previous == null) return extension
+        if (extension == null) return previous
+        return AfterToolCallResult(
+            content = extension.content ?: previous.content,
+            details = extension.details ?: previous.details,
+            isError = extension.isError ?: previous.isError,
+            terminate = extension.terminate ?: previous.terminate,
+        )
+    }
+
+    private fun mergeTurnUpdates(
+        previous: dev.xuexue.pi.agent.AgentLoopTurnUpdate?,
+        extension: dev.xuexue.pi.agent.AgentLoopTurnUpdate?,
+    ): dev.xuexue.pi.agent.AgentLoopTurnUpdate? {
+        if (previous == null) return extension
+        if (extension == null) return previous
+        return dev.xuexue.pi.agent.AgentLoopTurnUpdate(
+            context = extension.context ?: previous.context,
+            model = extension.model ?: previous.model,
+            thinkingLevel = extension.thinkingLevel ?: previous.thinkingLevel,
+        )
     }
 
     private fun extensionContext(): PiExtensionContext =
