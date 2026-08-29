@@ -60,13 +60,21 @@ data class ModVersion(
     }
 
     private val core: List<Int>
-        get() = value.substringBefore('-').substringBefore('+').split('.').map(String::toInt)
+        get() =
+            value
+                .substringBefore('-')
+                .substringBefore('+')
+                .split('.')
+                .map(String::toInt)
 
     private val prerelease: List<String>
-        get() = value.substringAfter('-', missingDelimiterValue = "").substringBefore('+')
-            .takeIf(String::isNotEmpty)
-            ?.split('.')
-            .orEmpty()
+        get() =
+            value
+                .substringAfter('-', missingDelimiterValue = "")
+                .substringBefore('+')
+                .takeIf(String::isNotEmpty)
+                ?.split('.')
+                .orEmpty()
 
     override fun compareTo(other: ModVersion): Int {
         val leftCore = core
@@ -234,7 +242,7 @@ interface PiMod {
     suspend fun enable(context: ModContext): ModHandle?
 }
 
-internal class ModRun(
+class ModRun internal constructor(
     val packageInfo: ModPackage,
     val info: ModInfo,
     private val diagnostics: MutableList<ModRunDiagnostic>,
@@ -366,11 +374,15 @@ internal class ModRun(
         next: ModRunState,
     ) {
         check(mutableState.compareAndSet(expected, next)) {
-            "Invalid mod ${info.id} run $runId transition ${state} -> $next"
+            "Invalid mod ${info.id} run $runId transition $state -> $next"
         }
     }
 }
 
 private val MOD_ID_PATTERN = Regex("[a-z0-9][a-z0-9_.-]*(?::[a-z0-9][a-z0-9_.-]*)?")
 internal val MOD_NAME_PATTERN = Regex("[a-zA-Z0-9][a-zA-Z0-9_.:-]*")
-private val MOD_VERSION_PATTERN = Regex("0|[1-9]\\d*\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?")
+private val MOD_VERSION_PATTERN =
+    Regex(
+        "(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)" +
+            "(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?",
+    )

@@ -24,6 +24,7 @@ data class PiPluginManifest(
     val runtime: PiPluginRuntime,
     val entrypoint: String? = null,
     val executable: String? = null,
+    val dependencies: List<String> = emptyList(),
     val permissions: List<String> = emptyList(),
     val contributes: List<String> = emptyList(),
 )
@@ -74,8 +75,27 @@ fun PiPluginManifest.validate() {
     }
 }
 
+fun PiPluginManifest.toModPackage(sourcePath: String? = null): ModPackage =
+    ModPackage(
+        id = ModId.parse(id),
+        version = ModVersion(version),
+        apiVersion = apiVersion,
+        runtime = runtime,
+        entrypoint = entrypoint,
+        executable = executable,
+        dependencies = dependencies.map(ModDependency::parse),
+        permissions = permissions.toSet(),
+        contributes = contributes.toSet(),
+        sourcePath = sourcePath,
+    )
+
 interface PiExtensionProvider {
     fun createPiExtension(): PiExtension
+}
+
+/** Entry point implemented by new, ownership-aware JVM mods. */
+interface PiModProvider {
+    fun createPiMod(): PiMod
 }
 
 const val PI_PLUGIN_MANIFEST_PATH: String = "META-INF/xuexue-pi-plugin.json"

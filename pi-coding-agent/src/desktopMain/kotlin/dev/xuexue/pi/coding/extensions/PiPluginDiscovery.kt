@@ -30,6 +30,13 @@ data class PiPluginLoadResult(
     val candidates: List<PiPluginCandidate>,
     val extensions: List<PiExtension>,
     val errors: List<PiPluginLoadError>,
+    val mods: List<PiPluginMod> = emptyList(),
+)
+
+data class PiPluginMod(
+    val mod: PiMod,
+    val packageInfo: ModPackage,
+    val candidate: PiPluginCandidate,
 )
 
 data class PiPluginDiscoveryOptions(
@@ -115,6 +122,7 @@ class PiPluginDiscovery(
     fun loadAll(): PiPluginLoadResult {
         val (candidates, discoveryErrors) = discover()
         val extensions = mutableListOf<PiExtension>()
+        val mods = mutableListOf<PiPluginMod>()
         val errors = discoveryErrors.toMutableList()
         candidates.forEach { candidate ->
             if (candidate.scope == PiPluginScope.PROJECT && !options.projectTrusted) return@forEach
@@ -122,25 +130,35 @@ class PiPluginDiscovery(
             runCatching {
                 when (candidate.manifest.runtime) {
                     PiPluginRuntime.JVM -> {
-                        JvmPiPluginLoader().load(
-                            candidate.path,
-                            trusted = options.projectTrusted || candidate.scope != PiPluginScope.PROJECT,
-                            sourceInfo = candidate.sourceInfo(),
-                        )
+                        val loaded =
+                            JvmPiPluginLoader().loadAny(
+                                candidate.path,
+                                trusted = options.projectTrusted || candidate.scope != PiPluginScope.PROJECT,
+                                sourceInfo = candidate.sourceInfo(),
+                            )
+                        loaded.extension?.let(extensions::add)
+                        loaded.mod?.let { mod ->
+                            mods +=
+                                PiPluginMod(
+                                    mod = mod,
+                                    packageInfo = candidate.manifest.toModPackage(candidate.path),
+                                    candidate = candidate,
+                                )
+                        }
                     }
 
                     PiPluginRuntime.PROCESS -> {
-                        ProcessPiExtension.fromManifest(
-                            candidate.manifest,
-                            candidate.path,
-                            sourceInfo = candidate.sourceInfo(),
-                        )
+                        extensions +=
+                            ProcessPiExtension.fromManifest(
+                                candidate.manifest,
+                                candidate.path,
+                                sourceInfo = candidate.sourceInfo(),
+                            )
                     }
                 }
-            }.onSuccess(extensions::add)
-                .onFailure { error -> errors += PiPluginLoadError(candidate.path, error.message.orEmpty()) }
+            }.onFailure { error -> errors += PiPluginLoadError(candidate.path, error.message.orEmpty()) }
         }
-        return PiPluginLoadResult(candidates, extensions, errors)
+        return PiPluginLoadResult(candidates, extensions, errors, mods)
     }
 
     private fun discoverRoot(
