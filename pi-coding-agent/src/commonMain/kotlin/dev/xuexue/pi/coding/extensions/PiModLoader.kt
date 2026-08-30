@@ -24,6 +24,7 @@ import dev.xuexue.pi.coding.StreamingBehavior
 import dev.xuexue.pi.coding.exec.PiCommandExecutor
 import dev.xuexue.pi.coding.exec.UnavailablePiCommandExecutor
 import dev.xuexue.pi.coding.resources.ResourceExtensionPaths
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonElement
@@ -67,6 +68,7 @@ class PiModLoader(
     private val imageProviderCatalog = ModOwnedRegistry<PiImageProvider>(ModContributionKind.IMAGE_PROVIDER)
     private val resourceCatalog = ModOwnedRegistry<ResourceExtensionPaths>(ModContributionKind.RESOURCE)
     private val runtimeCatalog = ModRuntimeCatalog()
+    private val uiCatalog = ModUiCatalog()
     private val eventCatalog =
         ModEventCatalog(
             bus = events,
@@ -90,6 +92,10 @@ class PiModLoader(
         sessionApi.store(UnavailableSessionApi)
     }
 
+    /** Live UI contributions for Compose or another host renderer. */
+    val uiSnapshot: StateFlow<ModUiSnapshot>
+        get() = uiCatalog.snapshot
+
     /** Enables a package, replacing a previous active run with the same ID. */
     suspend fun load(
         mod: PiMod,
@@ -103,6 +109,7 @@ class PiModLoader(
             loaded.remove(packageInfo.id)?.let { previous ->
                 eventCatalog.untrack(previous.run)
                 previous.run.stop(previous.handle?.let { handle -> { handle.disable() } })
+                uiCatalog.refresh()
             }
             val runDiagnostics = mutableListOf<ModRunDiagnostic>()
             val run = ModRun.create(packageInfo, trusted, runDiagnostics)
@@ -120,6 +127,7 @@ class PiModLoader(
                 run.markFailed("Mod enable failed", error)
                 loaded.remove(packageInfo.id)
                 eventCatalog.untrack(run)
+                uiCatalog.refresh()
                 diagnostics += runDiagnostics
                 ModLoadResult(snapshot(run, runDiagnostics), runDiagnostics.toList())
             }
@@ -137,6 +145,7 @@ class PiModLoader(
             val active = loaded.remove(id) ?: return@withLock false
             eventCatalog.untrack(active.run)
             active.run.stop(active.handle?.let { handle -> { handle.disable() } })
+            uiCatalog.refresh()
             true
         }
 
@@ -146,6 +155,7 @@ class PiModLoader(
             loaded.remove(entry.key)
             eventCatalog.untrack(entry.value.run)
             entry.value.run.stop(entry.value.handle?.let { handle -> { handle.disable() } })
+            uiCatalog.refresh()
             true
         }
 
@@ -156,6 +166,7 @@ class PiModLoader(
                 active.run.stop(active.handle?.let { handle -> { handle.disable() } })
             }
             loaded.clear()
+            uiCatalog.refresh()
         }
         return mods.map { (mod, packageInfo) -> load(mod, packageInfo) }
     }
@@ -195,6 +206,20 @@ class PiModLoader(
     }
 
     fun getToolDefinition(id: String): AgentTool? = toolCatalog.get(id)
+
+    fun getUiPanels(): List<RegisteredModEntry<UiPanelContribution>> = uiCatalog.panels()
+
+    fun getUiActions(): List<RegisteredModEntry<UiActionContribution>> = uiCatalog.actions()
+
+    /** Invokes an active UI action by its qualified contribution ID. */
+    suspend fun invokeUiAction(id: String): Boolean {
+        val action = uiCatalog.actions().firstOrNull { it.id == id } ?: return false
+        val active = loaded[action.owner.id] ?: return false
+        if (active.run.runId != action.owner.runId || !action.value.enabled) return false
+        return runCatching {
+            action.value.invoke(createContext(active.run))
+        }.isSuccess
+    }
 
     internal fun hasRuntimeHooks(): Boolean = runtimeCatalog.hasHooks()
 
@@ -327,7 +352,7 @@ class PiModLoader(
             resources = ResourceRegistry(resourceCatalog, run),
             session = DelegatingSessionApi(sessionApi),
             runtime = runtimeCatalog.forRun(run),
-            ui = EmptyUiRegistry,
+            ui = uiCatalog.forRun(run),
             storage = InMemoryStorageApi(),
             permissions = DefaultPermissionBroker(run.packageInfo.permissions, run.info.trusted),
             diagnostics = RunDiagnosticsRegistry(run, diagnostics),

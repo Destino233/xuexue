@@ -33,6 +33,8 @@ import dev.xuexue.pi.coding.PiRuntimeBootstrapResult
 import dev.xuexue.pi.coding.ScopedModel
 import dev.xuexue.pi.coding.exec.LocalPiCommandExecutor
 import dev.xuexue.pi.coding.extensions.PiExtensionRunner
+import dev.xuexue.pi.coding.extensions.PiModLoader
+import dev.xuexue.pi.coding.extensions.ModUiSnapshot
 import dev.xuexue.pi.coding.extensions.PiPluginDiscovery
 import dev.xuexue.pi.coding.extensions.PiPluginDiscoveryOptions
 import dev.xuexue.pi.coding.extensions.PiPluginScope
@@ -64,6 +66,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -104,6 +109,11 @@ class WorkbenchAgentController(
     private var approvalDeferred: CompletableDeferred<AgentApprovalDecision>? = null
     private var trustBootstrapCwd: String? = null
     private var trustBootstrap: PiRuntimeBootstrapResult? = null
+    private var modUiBinding: Job? = null
+    private val mutableModUiSnapshot = MutableStateFlow(ModUiSnapshot())
+    private var activeModLoader: PiModLoader? = null
+
+    val modUiSnapshot: StateFlow<ModUiSnapshot> = mutableModUiSnapshot
 
     val canRestoreDeletedSession: Boolean get() = lastDeletedSession != null
 
@@ -154,6 +164,13 @@ class WorkbenchAgentController(
     }
 
     fun respondInteraction(response: InteractionResponse): Boolean = runtime.respondAgentInteraction(response)
+
+    fun invokeModUiAction(id: String) {
+        scope.launch {
+            val loader = activeModLoader ?: return@launch
+            if (loader.invokeUiAction(id)) onStatus("插件动作已执行") else onStatus("插件动作不可用")
+        }
+    }
 
     fun decideApproval(decision: AgentApprovalDecision) {
         runtime.applyApprovalDecision(decision) ?: return
@@ -533,9 +550,13 @@ class WorkbenchAgentController(
                     agentDirectory = agentDirectory.toString(),
                     settingsManager = settingsManager,
                 )
-        val extensionRunner =
-            prepared?.extensionRunner
-                ?: loadSessionExtensions(cwd, agentDirectory.toString(), settingsManager, packageManager)
+        val sessionHosts =
+            prepared?.let { bootstrap ->
+                SessionExtensionHosts(bootstrap.extensionRunner, bootstrap.modLoader)
+            } ?: loadSessionExtensions(cwd, agentDirectory.toString(), settingsManager, packageManager)
+        val extensionRunner = sessionHosts.extensionRunner
+        val modLoader = sessionHosts.modLoader
+        bindModUi(modLoader)
         val resourceLoader =
             prepared?.resourceLoader
                 ?: DefaultResourceLoader(
@@ -572,6 +593,7 @@ class WorkbenchAgentController(
                 settingsManager = settingsManager,
                 resourceLoader = resourceLoader,
                 extensionRunner = extensionRunner,
+                modLoader = modLoader,
                 packageManager = packageManager,
                 bashExecutor = LocalBashExecutor(),
                 htmlExporter = LocalSessionHtmlExporter(),
@@ -585,7 +607,7 @@ class WorkbenchAgentController(
         agentDirectory: String,
         settingsManager: SettingsManager,
         packageManager: DefaultPiPackageManager,
-    ): PiExtensionRunner {
+    ): SessionExtensionHosts {
         val packageResolution = packageManager.resolve { PiPackageMissingAction.SKIP }
         val discoveredPlugins =
             PiPluginDiscovery(
@@ -611,8 +633,23 @@ class WorkbenchAgentController(
             ).loadAll()
         val extensionRunner = PiExtensionRunner(cwd, commandExecutor = LocalPiCommandExecutor())
         discoveredPlugins.extensions.forEach { extension -> extensionRunner.load(extension) }
-        return extensionRunner
+        val modLoader =
+            PiModLoader(
+                cwd = cwd,
+                commandExecutor = LocalPiCommandExecutor(),
+                projectTrusted = settingsManager.isProjectTrusted(),
+                interaction = runtime.interactionBroker,
+            )
+        discoveredPlugins.mods.forEach { plugin ->
+            modLoader.load(plugin.mod, plugin.packageInfo, trusted = settingsManager.isProjectTrusted())
+        }
+        return SessionExtensionHosts(extensionRunner, modLoader)
     }
+
+    private data class SessionExtensionHosts(
+        val extensionRunner: PiExtensionRunner,
+        val modLoader: PiModLoader,
+    )
 
     private fun agentDirectory(): Path =
         Path
@@ -626,6 +663,7 @@ class WorkbenchAgentController(
     ): Boolean {
         if (!runtime.workspaceTrusted) {
             trustBootstrap?.extensionRunner?.dispose()
+            trustBootstrap?.modLoader?.reload()
             trustBootstrapCwd = null
             trustBootstrap = null
             return false
@@ -633,6 +671,7 @@ class WorkbenchAgentController(
         if (trustBootstrapCwd == cwd && trustBootstrap != null) return true
 
         trustBootstrap?.extensionRunner?.dispose()
+        trustBootstrap?.modLoader?.reload()
         val prepared =
             PiRuntimeBootstrap(
                 PiRuntimeBootstrapOptions(
@@ -686,11 +725,24 @@ class WorkbenchAgentController(
     }
 
     private fun resetFormalRuntime() {
+        modUiBinding?.cancel()
+        modUiBinding = null
+        activeModLoader = null
+        mutableModUiSnapshot.value = ModUiSnapshot()
         val oldRuntime = formalRuntime ?: return
         runtime.bindFormalRuntime(null, scope)
         formalRuntime = null
         runtime.interactionBroker.cancelAll("session replaced")
         scope.launch { oldRuntime.dispose() }
+    }
+
+    private fun bindModUi(loader: PiModLoader) {
+        activeModLoader = loader
+        modUiBinding?.cancel()
+        modUiBinding =
+            scope.launch {
+                loader.uiSnapshot.collect { snapshot -> mutableModUiSnapshot.value = snapshot }
+            }
     }
 
     private fun agentModel(): Model =

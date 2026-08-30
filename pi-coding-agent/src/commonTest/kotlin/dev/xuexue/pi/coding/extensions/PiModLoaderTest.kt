@@ -107,6 +107,37 @@ class PiModLoaderTest {
             assertNull(loader.getToolDefinition("legacy-tool"))
         }
 
+    @Test
+    fun uiContributionsAreInvokableAndOwnedByTheRun() =
+        runTest {
+            var invoked = 0
+            val loader = PiModLoader("/workspace")
+            val result =
+                loader.load(
+                    testMod("example.ui") { context ->
+                        context.ui.registerPanel(UiPanelContribution("review", "Review", UiSlot.RIGHT_DOCK))
+                        context.ui.registerAction(
+                            UiActionContribution(
+                                id = "run",
+                                label = "Run review",
+                                location = UiSlot.TOOLBAR,
+                                invoke = { invoked++ },
+                            ),
+                        )
+                        null
+                    },
+                )
+
+            assertTrue(result.loaded)
+            assertEquals("example.ui:review", loader.getUiPanels().single().id)
+            assertTrue(loader.invokeUiAction("example.ui:run"))
+            assertEquals(1, invoked)
+            assertTrue(loader.disable(ModId("example.ui")))
+            assertTrue(loader.getUiPanels().isEmpty())
+            assertTrue(loader.getUiActions().isEmpty())
+            assertFalse(loader.invokeUiAction("example.ui:run"))
+        }
+
     private fun testMod(
         id: String,
         enable: suspend (ModContext) -> ModHandle?,
