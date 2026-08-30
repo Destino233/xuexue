@@ -1876,3 +1876,7 @@ class WorkbenchState(
             }
     }
 }
+import dev.xuexue.pi.coding.extensions.ModUiSnapshot
+    val modUiSnapshot: StateFlow<ModUiSnapshot> get() = agentController.modUiSnapshot
+
+    fun invokeModUiAction(id: String) = agentController.invokeModUiAction(id)

@@ -1526,3 +1526,73 @@ private fun chooseWorkspace(create: Boolean): Path? {
         }
     return if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) chooser.selectedFile.toPath() else null
 }
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.runtime.collectAsState
+import dev.xuexue.pi.coding.extensions.ModUiSnapshot
+import dev.xuexue.pi.coding.extensions.UiPanelContribution
+import dev.xuexue.pi.coding.extensions.UiSlot
+    val modUiSnapshot by state.modUiSnapshot.collectAsState()
+                    modUiSnapshot = modUiSnapshot,
+                                modUiSnapshot = modUiSnapshot,
+                                modUiSnapshot = modUiSnapshot,
+    modUiSnapshot: ModUiSnapshot,
+    val modPanels =
+        modUiSnapshot.panels
+            .filter { it.value.slot == UiSlot.RIGHT_DOCK }
+            .sortedWith(compareBy({ it.value.order }, { it.id }))
+                        AnimatedVisibility(
+                            visible = modPanels.isNotEmpty(),
+                            enter = expandHorizontally(expandFrom = Alignment.End) + fadeIn(WorkbenchMotion.fastTween()),
+                            exit = shrinkHorizontally(shrinkTowards = Alignment.End) + fadeOut(WorkbenchMotion.exitTween()),
+                        ) {
+                            ModUiPanelColumn(
+                                panels = modPanels,
+                                modifier = Modifier.width(250.dp).fillMaxHeight(),
+                            )
+                        }
+@Composable
+private fun ModUiPanelColumn(
+    panels: List<dev.xuexue.pi.coding.extensions.RegisteredModEntry<UiPanelContribution>>,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier
+            .background(MaterialTheme.colorScheme.background)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        panels.forEach { entry ->
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                shape = RoundedCornerShape(6.dp),
+            ) {
+                Column(Modifier.padding(10.dp)) {
+                    Text(entry.value.title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                    entry.value.state?.toString()?.takeIf(String::isNotBlank)?.let { value ->
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            value,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 8,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+    modUiSnapshot: ModUiSnapshot,
+    modUiSnapshot: ModUiSnapshot,
+                modUiSnapshot.actions
+                    .filter { it.value.location == UiSlot.TOOLBAR && it.value.enabled }
+                    .sortedBy { it.value.order }
+                    .forEach { entry ->
+                        HeaderIconAction(
+                            Icons.Default.Extension,
+                            entry.value.label,
+                        ) { state.invokeModUiAction(entry.id) }
+                    }
