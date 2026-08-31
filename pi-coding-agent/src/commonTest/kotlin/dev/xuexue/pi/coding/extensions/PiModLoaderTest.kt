@@ -138,6 +138,36 @@ class PiModLoaderTest {
             assertFalse(loader.invokeUiAction("example.ui:run"))
         }
 
+    @Test
+    fun dependencyResolutionSelectsHighestCompatibleVersionAndDropsCycles() {
+        val mod = { id: String, version: String, dependencies: List<ModDependency> ->
+            ModCandidate(
+                ModPackage(
+                    id = ModId(id),
+                    version = ModVersion(version),
+                    apiVersion = PI_PLUGIN_API_VERSION,
+                    runtime = PiPluginRuntime.JVM,
+                    dependencies = dependencies,
+                ),
+                id,
+            )
+        }
+        val resolution =
+            ModDependencyResolver.resolve(
+                listOf(
+                    mod("example.api", "1.0.0", emptyList()),
+                    mod("example.api", "2.0.0", emptyList()),
+                    mod("example.feature", "1.0.0", listOf(ModDependency(ModId("example.api"), ModVersionRange.AtLeast(ModVersion("2.0.0"))))),
+                    mod("example.a", "1.0.0", listOf(ModDependency(ModId("example.b")))),
+                    mod("example.b", "1.0.0", listOf(ModDependency(ModId("example.a")))),
+                ),
+            )
+
+        assertEquals(listOf("example.api", "example.feature"), resolution.selected.map { it.value })
+        assertTrue(resolution.diagnostics.any { it.modId == ModId("example.a") })
+        assertTrue(resolution.diagnostics.any { it.modId == ModId("example.b") })
+    }
+
     private fun testMod(
         id: String,
         enable: suspend (ModContext) -> ModHandle?,

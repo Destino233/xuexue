@@ -35,6 +35,7 @@ import dev.xuexue.pi.coding.exec.LocalPiCommandExecutor
 import dev.xuexue.pi.coding.extensions.PiExtensionRunner
 import dev.xuexue.pi.coding.extensions.PiModLoader
 import dev.xuexue.pi.coding.extensions.ModUiSnapshot
+import dev.xuexue.pi.coding.extensions.ModCandidate
 import dev.xuexue.pi.coding.extensions.PiPluginDiscovery
 import dev.xuexue.pi.coding.extensions.PiPluginDiscoveryOptions
 import dev.xuexue.pi.coding.extensions.PiPluginScope
@@ -640,9 +641,10 @@ class WorkbenchAgentController(
                 projectTrusted = settingsManager.isProjectTrusted(),
                 interaction = runtime.interactionBroker,
             )
-        discoveredPlugins.mods.forEach { plugin ->
-            modLoader.load(plugin.mod, plugin.packageInfo, trusted = settingsManager.isProjectTrusted())
-        }
+        modLoader.loadAll(
+            discoveredPlugins.mods.map { plugin -> ModCandidate(plugin.packageInfo, plugin.mod) },
+            trusted = settingsManager.isProjectTrusted(),
+        )
         return SessionExtensionHosts(extensionRunner, modLoader)
     }
 

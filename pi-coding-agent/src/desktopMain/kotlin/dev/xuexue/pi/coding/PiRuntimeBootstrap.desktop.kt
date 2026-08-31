@@ -8,6 +8,7 @@ import dev.xuexue.pi.coding.extensions.PiExtensionContext
 import dev.xuexue.pi.coding.extensions.PiExtensionMode
 import dev.xuexue.pi.coding.extensions.PiExtensionRunner
 import dev.xuexue.pi.coding.extensions.PiModLoader
+import dev.xuexue.pi.coding.extensions.ModCandidate
 import dev.xuexue.pi.coding.extensions.PiPluginDiscovery
 import dev.xuexue.pi.coding.extensions.PiPluginDiscoveryOptions
 import dev.xuexue.pi.coding.extensions.PiPluginLoadResult
@@ -100,9 +101,10 @@ class PiRuntimeBootstrap(
             )
         return try {
             userPlugins.extensions.forEach { extension -> extensionRunner.load(extension) }
-            userPlugins.mods.forEach { plugin ->
-                modLoader.load(plugin.mod, plugin.packageInfo, trusted = true)
-            }
+            modLoader.loadAll(
+                userPlugins.mods.map { plugin -> ModCandidate(plugin.packageInfo, plugin.mod) },
+                trusted = true,
+            )
             val trusted = resolveTrust(settingsManager, extensionRunner)
             if (!trusted) {
                 extensionRunner.dispose()
@@ -172,9 +174,10 @@ class PiRuntimeBootstrap(
                 ),
             ).loadAll()
         projectPlugins.extensions.forEach { extension -> extensionRunner.load(extension) }
-        projectPlugins.mods.forEach { plugin ->
-            modLoader.load(plugin.mod, plugin.packageInfo, trusted = true)
-        }
+        modLoader.loadAll(
+            (userPlugins.mods + projectPlugins.mods).map { plugin -> ModCandidate(plugin.packageInfo, plugin.mod) },
+            trusted = true,
+        )
         val resourceLoader =
             DefaultResourceLoader(
                 ResourceLoaderOptions(

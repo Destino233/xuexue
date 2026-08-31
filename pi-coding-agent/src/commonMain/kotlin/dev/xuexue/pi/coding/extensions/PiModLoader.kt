@@ -45,6 +45,11 @@ data class ModLoadResult(
         get() = run?.state == ModRunState.RUNNING
 }
 
+data class ModBatchLoadResult(
+    val loads: List<ModLoadResult>,
+    val resolution: ModDependencyResolution<PiMod>,
+)
+
 /**
  * Dynamic mod host. The loader owns package runs and all contribution catalogs;
  * a run can only mutate entries carrying its own ModRunId.
@@ -69,6 +74,7 @@ class PiModLoader(
     private val resourceCatalog = ModOwnedRegistry<ResourceExtensionPaths>(ModContributionKind.RESOURCE)
     private val runtimeCatalog = ModRuntimeCatalog()
     private val uiCatalog = ModUiCatalog()
+    private val permissionCatalog = ModPermissionCatalog(interaction)
     private val eventCatalog =
         ModEventCatalog(
             bus = events,
@@ -95,6 +101,10 @@ class PiModLoader(
     /** Live UI contributions for Compose or another host renderer. */
     val uiSnapshot: StateFlow<ModUiSnapshot>
         get() = uiCatalog.snapshot
+
+    /** Per-package user approval decisions retained across reloads. */
+    val permissionGrants: StateFlow<List<ModPermissionGrant>>
+        get() = permissionCatalog.grants
 
     /** Enables a package, replacing a previous active run with the same ID. */
     suspend fun load(
@@ -132,6 +142,19 @@ class PiModLoader(
                 ModLoadResult(snapshot(run, runDiagnostics), runDiagnostics.toList())
             }
         }
+
+    /** Resolves all versions and required dependencies before activating any mod. */
+    suspend fun loadAll(
+        mods: List<ModCandidate<PiMod>>,
+        trusted: Boolean = projectTrusted,
+    ): ModBatchLoadResult {
+        val resolution = ModDependencyResolver.resolve(mods)
+        val loads =
+            resolution.selected.map { candidate ->
+                load(candidate.value, candidate.packageInfo, trusted)
+            }
+        return ModBatchLoadResult(loads, resolution)
+    }
 
     /** Loads a legacy extension through the new ownership-aware runtime. */
     suspend fun load(
@@ -354,7 +377,10 @@ class PiModLoader(
             runtime = runtimeCatalog.forRun(run),
             ui = uiCatalog.forRun(run),
             storage = InMemoryStorageApi(),
-            permissions = DefaultPermissionBroker(run.packageInfo.permissions, run.info.trusted),
+            permissions =
+                permissionCatalog.forRun(run) { message ->
+                    diagnostics += ModRunDiagnostic(run.runId, run.state, message)
+                },
             diagnostics = RunDiagnosticsRegistry(run, diagnostics),
         )
 
@@ -575,20 +601,6 @@ private class InMemoryStorageApi : StorageApi {
     override suspend fun remove(key: String) {
         values.remove(key)
     }
-}
-
-private class DefaultPermissionBroker(
-    private val declared: Set<String>,
-    private val trusted: Boolean,
-) : PermissionBroker {
-    override fun check(permission: String): PermissionDecision =
-        when {
-            !trusted -> PermissionDecision.DENIED
-            permission !in declared -> PermissionDecision.DENIED
-            else -> PermissionDecision.GRANTED
-        }
-
-    override suspend fun request(permission: String): PermissionDecision = check(permission)
 }
 
 private class RunDiagnosticsRegistry(
