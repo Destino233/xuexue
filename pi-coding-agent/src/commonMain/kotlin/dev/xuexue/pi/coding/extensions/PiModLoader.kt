@@ -25,6 +25,8 @@ import dev.xuexue.pi.coding.exec.PiCommandExecutor
 import dev.xuexue.pi.coding.exec.UnavailablePiCommandExecutor
 import dev.xuexue.pi.coding.resources.ResourceExtensionPaths
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonElement
@@ -75,6 +77,7 @@ class PiModLoader(
     private val runtimeCatalog = ModRuntimeCatalog()
     private val uiCatalog = ModUiCatalog()
     private val permissionCatalog = ModPermissionCatalog(interaction)
+    private val mutableSnapshot = MutableStateFlow(ModLoaderSnapshot())
     private val eventCatalog =
         ModEventCatalog(
             bus = events,
@@ -106,6 +109,9 @@ class PiModLoader(
     val permissionGrants: StateFlow<List<ModPermissionGrant>>
         get() = permissionCatalog.grants
 
+    val snapshot: StateFlow<ModLoaderSnapshot>
+        get() = mutableSnapshot.asStateFlow()
+
     /** Enables a package, replacing a previous active run with the same ID. */
     suspend fun load(
         mod: PiMod,
@@ -120,6 +126,7 @@ class PiModLoader(
                 eventCatalog.untrack(previous.run)
                 previous.run.stop(previous.handle?.let { handle -> { handle.disable() } })
                 uiCatalog.refresh()
+                refreshSnapshot()
             }
             val runDiagnostics = mutableListOf<ModRunDiagnostic>()
             val run = ModRun.create(packageInfo, trusted, runDiagnostics)
@@ -131,6 +138,7 @@ class PiModLoader(
             try {
                 active.handle = mod.enable(context)
                 run.markRunning()
+                refreshSnapshot()
                 ModLoadResult(snapshot(run, runDiagnostics), runDiagnostics.toList())
             } catch (error: Throwable) {
                 run.stop()
@@ -138,6 +146,7 @@ class PiModLoader(
                 loaded.remove(packageInfo.id)
                 eventCatalog.untrack(run)
                 uiCatalog.refresh()
+                refreshSnapshot()
                 diagnostics += runDiagnostics
                 ModLoadResult(snapshot(run, runDiagnostics), runDiagnostics.toList())
             }
@@ -169,6 +178,7 @@ class PiModLoader(
             eventCatalog.untrack(active.run)
             active.run.stop(active.handle?.let { handle -> { handle.disable() } })
             uiCatalog.refresh()
+            refreshSnapshot()
             true
         }
 
@@ -179,6 +189,7 @@ class PiModLoader(
             eventCatalog.untrack(entry.value.run)
             entry.value.run.stop(entry.value.handle?.let { handle -> { handle.disable() } })
             uiCatalog.refresh()
+            refreshSnapshot()
             true
         }
 
@@ -190,6 +201,7 @@ class PiModLoader(
             }
             loaded.clear()
             uiCatalog.refresh()
+            refreshSnapshot()
         }
         return mods.map { (mod, packageInfo) -> load(mod, packageInfo) }
     }
@@ -233,6 +245,16 @@ class PiModLoader(
     fun getUiPanels(): List<RegisteredModEntry<UiPanelContribution>> = uiCatalog.panels()
 
     fun getUiActions(): List<RegisteredModEntry<UiActionContribution>> = uiCatalog.actions()
+
+    private fun refreshSnapshot() {
+        mutableSnapshot.value =
+            ModLoaderSnapshot(
+                runs = getRuns(),
+                diagnostics = getDiagnostics(),
+                permissions = permissionCatalog.grants.value,
+                ui = uiCatalog.snapshot.value,
+            )
+    }
 
     /** Invokes an active UI action by its qualified contribution ID. */
     suspend fun invokeUiAction(id: String): Boolean {
