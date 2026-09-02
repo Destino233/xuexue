@@ -1178,6 +1178,7 @@ fun AgentSettingsDialog(
     onDismiss: () -> Unit,
 ) {
     var section by remember { mutableStateOf(AgentSettingsSection.MODEL) }
+    val modSnapshot by state.modSnapshot.collectAsState()
     AlertDialog(
         onDismissRequest = onDismiss,
         modifier = Modifier.widthIn(min = 560.dp, max = 780.dp),
@@ -1257,9 +1258,58 @@ fun AgentSettingsDialog(
                         }
 
                         AgentSettingsSection.EXTENSIONS -> {
-                            SettingsStatusRow("自定义工具", "Runtime 工具注册", "未配置")
-                            SettingsStatusRow("事件钩子", "会话与工具事件", "未配置")
-                            SettingsStatusRow("Pi Packages", "npm 与 Git 包", "0 已安装")
+                            SettingsStatusRow(
+                                "Mod 运行实例",
+                                "JVM / Process 插件",
+                                "${modSnapshot.runs.count { it.state.name == "RUNNING" }} 运行中",
+                            )
+                            if (modSnapshot.runs.isEmpty()) {
+                                Text(
+                                    "当前工作区没有已加载插件",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(vertical = 8.dp),
+                                )
+                            } else {
+                                modSnapshot.runs.forEach { run ->
+                                    Row(
+                                        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(run.info.id.value, style = MaterialTheme.typography.bodyMedium)
+                                            Text(
+                                                "v${run.packageInfo.version} · ${run.state.name.lowercase()} · " +
+                                                    if (run.info.trusted) "已信任" else "未信任",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                            run.info.sourcePath?.let { source ->
+                                                Text(
+                                                    source,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.outline,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
+                                            if (run.diagnostics.isNotEmpty()) {
+                                                Text(
+                                                    "${run.diagnostics.size} 条诊断",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.error,
+                                                )
+                                            }
+                                        }
+                                        TextButton(onClick = { state.disableMod(run.info.id.value) }) {
+                                            Icon(Icons.Default.Stop, contentDescription = "禁用插件", modifier = Modifier.size(15.dp))
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("禁用")
+                                        }
+                                    }
+                                }
+                            }
+                            SettingsStatusRow("Pi Packages", "npm 与 Git 包", "由插件目录提供")
                             SettingsStatusRow("上下文压缩", "自动压缩与分支摘要", "默认")
                         }
 

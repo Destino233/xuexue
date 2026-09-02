@@ -3,6 +3,8 @@ package dev.xuexue.pi.coding
 import dev.xuexue.pi.ai.Context
 import dev.xuexue.pi.ai.UserMessage
 import dev.xuexue.pi.ai.UserText
+import dev.xuexue.pi.agent.AgentTool
+import dev.xuexue.pi.agent.AgentToolResult
 import dev.xuexue.pi.coding.extensions.ModContext
 import dev.xuexue.pi.coding.extensions.ModHandle
 import dev.xuexue.pi.coding.extensions.ModId
@@ -11,6 +13,7 @@ import dev.xuexue.pi.coding.extensions.PiMod
 import dev.xuexue.pi.coding.extensions.PiModLoader
 import dev.xuexue.pi.coding.session.CustomMessage
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.buildJsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -88,5 +91,37 @@ class AgentSessionModApiTest {
             harness.session.prompt("hello")
 
             assertTrue(observed.contains("runtime"))
+        }
+
+    @Test
+    fun modToolsAreInstalledIntoTheAgentLoop() =
+        runTest {
+            val loader = PiModLoader("/workspace")
+            loader.load(
+                object : PiMod {
+                    override val id = ModId("example.tool")
+                    override val version = ModVersion("1.0.0")
+
+                    override suspend fun enable(context: ModContext): ModHandle? {
+                        context.tools.register(
+                            "inspect",
+                            AgentTool(
+                                name = "inspect",
+                                label = "Inspect",
+                                description = "Inspect the workspace",
+                                parameters = buildJsonObject {},
+                                execute = { _, _, _, _ ->
+                                    AgentToolResult(listOf(dev.xuexue.pi.ai.TextContent("ok")), buildJsonObject {})
+                                },
+                            ),
+                        )
+                        return null
+                    }
+                },
+            )
+            val harness = AgentSessionHarness(modLoader = loader)
+            val tool = harness.session.agent.currentState.tools.single { it.name == "inspect" }
+
+            assertEquals("ok", (tool.execute("call", buildJsonObject {}, null, null).content.single() as dev.xuexue.pi.ai.TextContent).text)
         }
 }

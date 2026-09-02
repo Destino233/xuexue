@@ -35,6 +35,7 @@ import dev.xuexue.pi.coding.exec.LocalPiCommandExecutor
 import dev.xuexue.pi.coding.extensions.PiExtensionRunner
 import dev.xuexue.pi.coding.extensions.PiModLoader
 import dev.xuexue.pi.coding.extensions.ModUiSnapshot
+import dev.xuexue.pi.coding.extensions.ModLoaderSnapshot
 import dev.xuexue.pi.coding.extensions.ModCandidate
 import dev.xuexue.pi.coding.extensions.PiPluginDiscovery
 import dev.xuexue.pi.coding.extensions.PiPluginDiscoveryOptions
@@ -112,9 +113,11 @@ class WorkbenchAgentController(
     private var trustBootstrap: PiRuntimeBootstrapResult? = null
     private var modUiBinding: Job? = null
     private val mutableModUiSnapshot = MutableStateFlow(ModUiSnapshot())
+    private val mutableModSnapshot = MutableStateFlow(ModLoaderSnapshot())
     private var activeModLoader: PiModLoader? = null
 
     val modUiSnapshot: StateFlow<ModUiSnapshot> = mutableModUiSnapshot
+    val modSnapshot: StateFlow<ModLoaderSnapshot> = mutableModSnapshot
 
     val canRestoreDeletedSession: Boolean get() = lastDeletedSession != null
 
@@ -170,6 +173,16 @@ class WorkbenchAgentController(
         scope.launch {
             val loader = activeModLoader ?: return@launch
             if (loader.invokeUiAction(id)) onStatus("插件动作已执行") else onStatus("插件动作不可用")
+        }
+    }
+
+    fun disableMod(id: String) {
+        scope.launch {
+            val loader = activeModLoader ?: return@launch
+            if (loader.disable(dev.xuexue.pi.coding.extensions.ModId(id))) {
+                formalRuntime?.session?.refreshExtensionContributions()
+                onStatus("插件已禁用")
+            }
         }
     }
 
@@ -731,6 +744,7 @@ class WorkbenchAgentController(
         modUiBinding = null
         activeModLoader = null
         mutableModUiSnapshot.value = ModUiSnapshot()
+        mutableModSnapshot.value = ModLoaderSnapshot()
         val oldRuntime = formalRuntime ?: return
         runtime.bindFormalRuntime(null, scope)
         formalRuntime = null
@@ -743,7 +757,10 @@ class WorkbenchAgentController(
         modUiBinding?.cancel()
         modUiBinding =
             scope.launch {
-                loader.uiSnapshot.collect { snapshot -> mutableModUiSnapshot.value = snapshot }
+                loader.snapshot.collect { snapshot ->
+                    mutableModSnapshot.value = snapshot
+                    mutableModUiSnapshot.value = snapshot.ui
+                }
             }
     }
 

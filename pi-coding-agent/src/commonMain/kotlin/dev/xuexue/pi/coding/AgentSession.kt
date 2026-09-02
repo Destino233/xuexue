@@ -177,6 +177,8 @@ class AgentSession(
     private val mutableEvents = MutableSharedFlow<AgentSessionEvent>(extraBufferCapacity = EVENT_BUFFER_CAPACITY)
     private val mutableState = MutableStateFlow(config.initialState())
     private val agentSubscription = AtomicReference<AgentSubscription?>(null)
+    /** Names installed by extension/mod registries on the previous refresh. */
+    private val installedContributionToolNames = mutableSetOf<String>()
 
     val events: SharedFlow<AgentSessionEvent> = mutableEvents.asSharedFlow()
     val state: StateFlow<AgentSessionState> = mutableState.asStateFlow()
@@ -476,6 +478,13 @@ class AgentSession(
         rebuildSystemPrompt()
         refreshState()
         return loader.getDiagnostics()
+    }
+
+    /** Reconciles Agent tools with the live extension and mod registries. */
+    fun refreshExtensionContributions() {
+        installExtensionTools()
+        rebuildSystemPrompt()
+        refreshState()
     }
 
     /** Runs extension resource discovery and reloads the shared resource view. */
@@ -1494,11 +1503,20 @@ class AgentSession(
     }
 
     private fun installExtensionTools() {
-        val runner = extensionRunner ?: return
+        val runnerTools = extensionRunner?.getAllRegisteredTools().orEmpty()
+        val modTools = modLoader?.getAllRegisteredTools().orEmpty()
+        if (runnerTools.isEmpty() && modTools.isEmpty() && installedContributionToolNames.isEmpty()) return
+
         val currentTools = agent.currentState.tools
-        val currentNames = currentTools.mapTo(mutableSetOf(), dev.xuexue.pi.agent.AgentTool::name)
-        val extensionTools = runner.getAllRegisteredTools().filter { it.name !in currentNames }
-        if (extensionTools.isNotEmpty()) agent.setTools(currentTools + extensionTools)
+        val hostTools = currentTools.filterNot { it.name in installedContributionToolNames }
+        val hostNames = hostTools.mapTo(mutableSetOf(), dev.xuexue.pi.agent.AgentTool::name)
+        val contributions =
+            (runnerTools + modTools)
+                .distinctBy(dev.xuexue.pi.agent.AgentTool::name)
+                .filter { it.name !in hostNames }
+        installedContributionToolNames.clear()
+        installedContributionToolNames.addAll(contributions.map(dev.xuexue.pi.agent.AgentTool::name))
+        agent.setTools(hostTools + contributions)
     }
 
     private suspend fun reloadExt(
