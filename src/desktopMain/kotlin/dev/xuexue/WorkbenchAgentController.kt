@@ -647,10 +647,53 @@ class WorkbenchAgentController(
                 extensionRunner = extensionRunner,
                 modLoader = modLoader,
                 packageManager = packageManager,
+                reloadPackages = {
+                    reloadSessionPackages(
+                        cwd = cwd,
+                        agentDirectory = agentDirectory.toString(),
+                        settingsManager = settingsManager,
+                        packageManager = packageManager,
+                        extensionRunner = extensionRunner,
+                        modLoader = modLoader,
+                    )
+                },
                 bashExecutor = LocalBashExecutor(),
                 htmlExporter = LocalSessionHtmlExporter(),
                 interactionPort = runtime.interactionBroker,
             ),
+        )
+    }
+
+    private suspend fun reloadSessionPackages(
+        cwd: String,
+        agentDirectory: String,
+        settingsManager: SettingsManager,
+        packageManager: DefaultPiPackageManager,
+        extensionRunner: PiExtensionRunner,
+        modLoader: PiModLoader,
+    ) {
+        val resolution = packageManager.resolve { PiPackageMissingAction.SKIP }
+        val discovered =
+            PiPluginDiscovery(
+                PiPluginDiscoveryOptions.fromSettings(
+                    cwd = cwd,
+                    agentDirectory = agentDirectory,
+                    settingsManager = settingsManager,
+                    projectTrusted = settingsManager.isProjectTrusted(),
+                    additionalPaths = resolution.extensionPaths.map { it.path },
+                    scopesToLoad = PiPluginScope.entries.toSet(),
+                ),
+            ).loadAll()
+        extensionRunner.dispose()
+        discovered.extensions.forEach { extension -> extensionRunner.load(extension) }
+        modLoader.reload()
+        modLoader.publishDiscovery(
+            discovered.toModInventory(settingsManager.isProjectTrusted()),
+            discovered.toModDiagnostics(),
+        )
+        modLoader.loadAll(
+            discovered.mods.map { plugin -> ModCandidate(plugin.packageInfo, plugin.mod) },
+            trusted = settingsManager.isProjectTrusted(),
         )
     }
 

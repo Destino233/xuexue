@@ -153,6 +153,7 @@ class AgentSession(
     private val extensionRunner: PiExtensionRunner? = config.extensionRunner
     private val modLoader: PiModLoader? = config.modLoader
     private val packageManager: PiPackageManager? = config.packageManager
+    private val reloadPackages: (suspend () -> Unit)? = config.reloadPackages
     private val bashExecutor: AgentSessionBashExecutor? = config.bashExecutor
     private val htmlExporter: AgentSessionHtmlExporter? = config.htmlExporter
     private val extensionMode: PiExtensionMode = config.extensionMode
@@ -491,7 +492,7 @@ class AgentSession(
     suspend fun updatePackages(source: String? = null): Int {
         val manager = packageManager ?: return 0
         val updated = manager.update(source)
-        reloadExt(ResourceDiscoverReason.RELOAD)
+        reloadPackages?.invoke() ?: reloadExt(ResourceDiscoverReason.RELOAD)
         refreshExtensionContributions()
         return updated.size
     }

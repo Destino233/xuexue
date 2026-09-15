@@ -37,6 +37,8 @@ data class AgentSessionConfig(
     val extensionRunner: PiExtensionRunner? = null,
     val modLoader: PiModLoader? = null,
     val packageManager: PiPackageManager? = null,
+    /** Re-discovers and re-activates package-provided extensions after an update. */
+    val reloadPackages: (suspend () -> Unit)? = null,
     val bashExecutor: AgentSessionBashExecutor? = null,
     val extensionMode: PiExtensionMode = PiExtensionMode.PRINT,
     val interactionPort: InteractionPort = NoOpInteractionPort,
