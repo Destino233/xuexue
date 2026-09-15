@@ -1307,6 +1307,16 @@ fun AgentSettingsDialog(
                                             Spacer(Modifier.width(4.dp))
                                             Text("禁用")
                                         }
+                                        TextButton(onClick = { state.reloadMod(run.info.id.value) }) {
+                                            Icon(Icons.Default.Restore, contentDescription = "重新加载插件", modifier = Modifier.size(15.dp))
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("重载")
+                                        }
+                                        if (run.rollbackAvailable) {
+                                            TextButton(onClick = { state.rollbackMod(run.info.id.value) }) {
+                                                Text("回滚")
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1342,6 +1352,11 @@ fun AgentSettingsDialog(
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                         )
+                                        if (packageInfo.status == ModDiscoveryStatus.DISABLED || packageInfo.status == ModDiscoveryStatus.FAILED) {
+                                            TextButton(onClick = { state.undefineMod(packageInfo.id.value) }) {
+                                                Text("移除记录")
+                                            }
+                                        }
                                     }
                                 }
                             }

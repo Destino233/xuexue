@@ -186,6 +186,36 @@ class WorkbenchAgentController(
         }
     }
 
+    fun reloadMod(id: String) {
+        scope.launch {
+            val loader = activeModLoader ?: return@launch
+            if (loader.reload(dev.xuexue.pi.coding.extensions.ModId(id))?.loaded == true) {
+                formalRuntime?.session?.refreshExtensionContributions()
+                onStatus("插件已重新加载")
+            }
+        }
+    }
+
+    fun rollbackMod(id: String) {
+        scope.launch {
+            val loader = activeModLoader ?: return@launch
+            if (loader.rollback(dev.xuexue.pi.coding.extensions.ModId(id))?.loaded == true) {
+                formalRuntime?.session?.refreshExtensionContributions()
+                onStatus("插件已回滚")
+            }
+        }
+    }
+
+    fun undefineMod(id: String) {
+        scope.launch {
+            val loader = activeModLoader ?: return@launch
+            if (loader.undefine(dev.xuexue.pi.coding.extensions.ModId(id))) {
+                formalRuntime?.session?.refreshExtensionContributions()
+                onStatus("插件已移除")
+            }
+        }
+    }
+
     fun decideApproval(decision: AgentApprovalDecision) {
         runtime.applyApprovalDecision(decision) ?: return
         onStatus(

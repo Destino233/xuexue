@@ -37,6 +37,7 @@ data class ModRunSnapshot(
     val packageInfo: ModPackage,
     val state: ModRunState,
     val diagnostics: List<ModRunDiagnostic> = emptyList(),
+    val rollbackAvailable: Boolean = false,
 )
 
 data class ModLoadResult(
@@ -67,6 +68,8 @@ class PiModLoader(
     private val lock = Mutex()
     private val loaded = linkedMapOf<ModId, LoadedMod>()
     private val revisions = linkedMapOf<ModId, ArrayDeque<ModRevision>>()
+    private val disabled = mutableSetOf<ModId>()
+    private val failed = linkedMapOf<ModId, String>()
     private var discoveredPackages: List<ModDiscoveredPackage> = emptyList()
     private var discoveryDiagnostics: List<ModDiscoveryDiagnostic> = emptyList()
     private val diagnostics = mutableListOf<ModRunDiagnostic>()
@@ -144,6 +147,8 @@ class PiModLoader(
             require(packageInfo.id == mod.id) {
                 "Mod package id ${packageInfo.id} does not match implementation ${mod.id}"
             }
+            disabled.remove(packageInfo.id)
+            failed.remove(packageInfo.id)
             loaded.remove(packageInfo.id)?.let { previous ->
                 if (recordRevision) {
                     revisions.getOrPut(packageInfo.id) { ArrayDeque() }
@@ -172,8 +177,9 @@ class PiModLoader(
                 loaded.remove(packageInfo.id)
                 eventCatalog.untrack(run)
                 uiCatalog.refresh()
-                refreshSnapshot()
                 diagnostics += runDiagnostics
+                failed[packageInfo.id] = error.message ?: "Mod enable failed"
+                refreshSnapshot()
                 ModLoadResult(snapshot(run, runDiagnostics), runDiagnostics.toList())
             }
     }
@@ -196,6 +202,13 @@ class PiModLoader(
             loadLocked(revision.mod, revision.packageInfo, revision.trusted, recordRevision = false)
         }
 
+    /** Recreates the current run with a fresh run identity and registrations. */
+    suspend fun reload(id: ModId): ModLoadResult? =
+        lock.withLock {
+            val active = loaded[id] ?: return@withLock null
+            loadLocked(active.mod, active.run.packageInfo, active.trusted, recordRevision = true)
+        }
+
     /** Stops a mod and forgets all retained revisions. */
     suspend fun undefine(id: ModId): Boolean =
         lock.withLock {
@@ -205,6 +218,8 @@ class PiModLoader(
                 active.run.stop(active.handle?.let { handle -> { handle.disable() } })
             }
             revisions.remove(id)
+            disabled.remove(id)
+            failed.remove(id)
             uiCatalog.refresh()
             refreshSnapshot()
             active != null
@@ -233,6 +248,7 @@ class PiModLoader(
     suspend fun disable(id: ModId): Boolean =
         lock.withLock {
             val active = loaded.remove(id) ?: return@withLock false
+            disabled += id
             eventCatalog.untrack(active.run)
             active.run.stop(active.handle?.let { handle -> { handle.disable() } })
             uiCatalog.refresh()
@@ -244,6 +260,7 @@ class PiModLoader(
         lock.withLock {
             val entry = loaded.entries.firstOrNull { it.value.run.runId == runId } ?: return@withLock false
             loaded.remove(entry.key)
+            disabled += entry.key
             eventCatalog.untrack(entry.value.run)
             entry.value.run.stop(entry.value.handle?.let { handle -> { handle.disable() } })
             uiCatalog.refresh()
@@ -313,6 +330,8 @@ class PiModLoader(
                     discoveredPackages.map { packageInfo ->
                         when {
                             packageInfo.id in activeIds -> packageInfo.copy(status = ModDiscoveryStatus.RUNNING)
+                            packageInfo.id in failed -> packageInfo.copy(status = ModDiscoveryStatus.FAILED, error = failed[packageInfo.id])
+                            packageInfo.id in disabled -> packageInfo.copy(status = ModDiscoveryStatus.DISABLED)
                             packageInfo.id in revisions -> packageInfo.copy(status = ModDiscoveryStatus.DISABLED)
                             !packageInfo.trusted -> packageInfo.copy(status = ModDiscoveryStatus.BLOCKED)
                             else -> packageInfo
@@ -492,6 +511,7 @@ class PiModLoader(
             packageInfo = run.packageInfo,
             state = run.state,
             diagnostics = runDiagnostics.toList(),
+            rollbackAvailable = revisions[run.info.id]?.isNotEmpty() == true,
         )
 
     private data class LoadedMod(
