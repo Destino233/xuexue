@@ -32,6 +32,8 @@ import dev.xuexue.core.WorkspaceIndex
 import dev.xuexue.core.agentSendAvailability
 import dev.xuexue.core.requiresExplicitApproval
 import dev.xuexue.pi.coding.InteractionResponse
+import dev.xuexue.pi.coding.extensions.ModUiSnapshot
+import dev.xuexue.pi.coding.extensions.ModLoaderSnapshot
 import dev.xuexue.platform.AgentClient
 import dev.xuexue.platform.AgentMessage
 import dev.xuexue.platform.AgentProviderConfig
@@ -78,9 +80,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.StateFlow
+import java.lang.management.ManagementFactory
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
+import java.nio.file.StandardOpenOption
 import kotlin.io.path.name
 import kotlin.io.path.pathString
 
@@ -92,9 +97,20 @@ private data class NavigationLocation(
 )
 
 private const val PDF_RESOURCE_TRIM_DELAY_MILLIS = 250L
+private const val PDF_RESOURCE_TRIM_RETRIES = 3
 private const val PDF_MEMORY_PRESSURE_CHECK_DELAY_MILLIS = 2_000L
 private const val PDF_MEMORY_PRESSURE_FRACTION = 0.7
-private const val PDF_RASTER_HANDOFF_PERMITS = 4
+private const val PDF_MEMORY_LOG_INTERVAL_MILLIS = 2_000L
+
+// Page navigation is a hard working-set boundary. Keeping the previous page
+// warm makes a flip look smooth, but temporarily combines two full page
+// generations and defeats the low-memory target. Zoom transitions still keep
+// their previous LOD through the active texture lease.
+private const val PDF_TEXTURE_KEEP_PAGE_RADIUS = 0
+
+// Limit native rasters being converted to Compose at once. Each conversion
+// can briefly hold both the native buffer and the Skia image backing store.
+private const val PDF_RASTER_HANDOFF_PERMITS = 1
 
 private data class WorkspaceEntryLoad(
     val kind: DocumentKind,
@@ -190,6 +206,8 @@ class WorkbenchState(
         private set
 
     val canRestoreDeletedAgentSession: Boolean get() = agentController.canRestoreDeletedSession
+    val modUiSnapshot: StateFlow<ModUiSnapshot> get() = agentController.modUiSnapshot
+    val modSnapshot: StateFlow<ModLoaderSnapshot> get() = agentController.modSnapshot
     private var watcherJob: Job? = null
     private val agentController =
         WorkbenchAgentController(
@@ -294,6 +312,65 @@ class WorkbenchState(
             while (isActive) {
                 delay(PDF_MEMORY_PRESSURE_CHECK_DELAY_MILLIS)
                 trimPdfResourcesUnderPressure()
+                // Return freed-but-retained CRT-heap pages to the OS so RSS
+                // follows the live working set instead of the allocation-churn
+                // high watermark (SumatraPDF steady state; _heapmin is cheap
+                // when there is nothing to return).
+                runCatching { MuPdfNative.nativeHeapMin() }
+            }
+        }
+
+    private var pdfResourceTrimJob: Job? = null
+
+    // Diagnostic memory sampler: when XUEXUE_PDF_MEMORY_LOG points at a file,
+    // append a CSV line every 2s with cache bytes and heap usage. Used to
+    // attribute RSS growth during navigation (Sumatra-style audit); inert
+    // unless the environment variable is set.
+    private val pdfMemoryLogJob: Job? =
+        System.getenv("XUEXUE_PDF_MEMORY_LOG")?.takeIf(String::isNotBlank)?.let { logPath ->
+            scope.launch(SupervisorJob()) {
+                val path = Path.of(logPath)
+                runCatching { path.toAbsolutePath().parent?.let(Files::createDirectories) }
+                while (isActive) {
+                    try {
+                        val snapshot = pdfMetrics.snapshot()
+                        val runtime = Runtime.getRuntime()
+                        val osBean =
+                            runCatching {
+                                ManagementFactory.getOperatingSystemMXBean() as com.sun.management.OperatingSystemMXBean
+                            }.getOrNull()
+                        val poolStats = runCatching { MuPdfNative.nativeRasterPoolStats() }.getOrNull()
+                        val line =
+                            listOf(
+                                System.currentTimeMillis(),
+                                "textureBytes=" + snapshot.textureCacheBytes,
+                                "peakTexture=" + snapshot.peakTextureCacheBytes,
+                                "rasterBytes=" + snapshot.cacheBytes,
+                                "heapUsed=" + (runtime.totalMemory() - runtime.freeMemory()),
+                                "heapCommitted=" + runtime.totalMemory(),
+                                "committedVirt=" + (osBean?.committedVirtualMemorySize ?: -1L),
+                                "nativeBuffers=" +
+                                    runCatching { MuPdfNative.nativeOutstandingRasterBuffers() }.getOrDefault(-1L),
+                                "poolBytes=" + (poolStats?.getOrNull(0) ?: -1L),
+                                "poolEntries=" + (poolStats?.getOrNull(1) ?: -1L),
+                                "rasterProduced=" + snapshot.rasterBytesProduced,
+                                "renders=" + snapshot.completedRenders,
+                                "viewportRenders=" + snapshot.viewportRenders,
+                                "thumbnailRenders=" + snapshot.thumbnailRenders,
+                                "analysisRenders=" + snapshot.analysisRenders,
+                                "evictions=" + snapshot.textureCacheEvictions,
+                            ).joinToString(",")
+                        Files.writeString(
+                            path,
+                            line + System.lineSeparator(),
+                            StandardOpenOption.CREATE,
+                            StandardOpenOption.APPEND,
+                        )
+                    } catch (_: Throwable) {
+                        // keep sampling; a transient IO failure must not kill the job
+                    }
+                    delay(PDF_MEMORY_LOG_INTERVAL_MILLIS)
+                }
             }
         }
 
