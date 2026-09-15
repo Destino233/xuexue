@@ -111,6 +111,7 @@ import dev.xuexue.core.DocumentKind
 import dev.xuexue.pi.coding.InteractionRequest
 import dev.xuexue.pi.coding.InteractionResponse
 import dev.xuexue.pi.coding.InteractionSeverity
+import dev.xuexue.pi.coding.extensions.ModDiscoveryStatus
 import kotlinx.coroutines.delay
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
@@ -1306,6 +1307,41 @@ fun AgentSettingsDialog(
                                             Spacer(Modifier.width(4.dp))
                                             Text("禁用")
                                         }
+                                    }
+                                }
+                            }
+                            val activeIds = modSnapshot.runs.mapTo(mutableSetOf()) { it.info.id }
+                            val inactivePackages = modSnapshot.discovered.filterNot { it.id in activeIds }
+                            if (inactivePackages.isNotEmpty()) {
+                                Spacer(Modifier.height(8.dp))
+                                Text("插件库存", style = MaterialTheme.typography.labelMedium)
+                                inactivePackages.forEach { packageInfo ->
+                                    Column(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+                                        Text(packageInfo.id.value, style = MaterialTheme.typography.bodyMedium)
+                                        Text(
+                                            "v${packageInfo.version} · ${packageInfo.runtime.name} · " +
+                                                "${packageInfo.scope.lowercase()} · " +
+                                                when (packageInfo.status) {
+                                                    ModDiscoveryStatus.BLOCKED -> "未信任"
+                                                    ModDiscoveryStatus.FAILED -> "加载失败"
+                                                    ModDiscoveryStatus.DISABLED -> "已禁用"
+                                                    else -> "待启用"
+                                                },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color =
+                                                if (packageInfo.status == ModDiscoveryStatus.FAILED) {
+                                                    MaterialTheme.colorScheme.error
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                },
+                                        )
+                                        Text(
+                                            packageInfo.error ?: packageInfo.sourcePath,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.outline,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
                                     }
                                 }
                             }

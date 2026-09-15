@@ -31,7 +31,34 @@ data class PiPluginLoadResult(
     val extensions: List<PiExtension>,
     val errors: List<PiPluginLoadError>,
     val mods: List<PiPluginMod> = emptyList(),
-)
+) {
+    /** Converts discovery into the host-neutral inventory shown by management UIs. */
+    fun toModInventory(projectTrusted: Boolean): List<ModDiscoveredPackage> {
+        val errorsByPath = errors.associateBy(PiPluginLoadError::path)
+        return candidates.map { candidate ->
+            val error = errorsByPath[candidate.path]
+            val trusted = projectTrusted || candidate.scope != PiPluginScope.PROJECT
+            ModDiscoveredPackage(
+                id = ModId.parse(candidate.manifest.id),
+                version = ModVersion(candidate.manifest.version),
+                runtime = candidate.manifest.runtime,
+                sourcePath = candidate.path,
+                scope = candidate.scope.name,
+                trusted = trusted,
+                status =
+                    when {
+                        candidate.scope == PiPluginScope.PROJECT && !projectTrusted -> ModDiscoveryStatus.BLOCKED
+                        error != null -> ModDiscoveryStatus.FAILED
+                        else -> ModDiscoveryStatus.DISCOVERED
+                    },
+                error = error?.message,
+            )
+        }
+    }
+
+    fun toModDiagnostics(): List<ModDiscoveryDiagnostic> =
+        errors.map { error -> ModDiscoveryDiagnostic(error.path, error.message) }
+}
 
 data class PiPluginMod(
     val mod: PiMod,

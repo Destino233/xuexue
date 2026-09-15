@@ -99,6 +99,10 @@ class PiRuntimeBootstrap(
                 projectTrusted = false,
                 interaction = options.interactionPort,
             )
+        modLoader.publishDiscovery(
+            userPlugins.toModInventory(projectTrusted = false),
+            userPlugins.toModDiagnostics(),
+        )
         return try {
             userPlugins.extensions.forEach { extension -> extensionRunner.load(extension) }
             modLoader.loadAll(
@@ -173,6 +177,10 @@ class PiRuntimeBootstrap(
                     scopesToLoad = setOf(PiPluginScope.PROJECT, PiPluginScope.TEMPORARY),
                 ),
             ).loadAll()
+        modLoader.publishDiscovery(
+            (userPlugins.toModInventory(projectTrusted = true) + projectPlugins.toModInventory(projectTrusted = true)),
+            userPlugins.toModDiagnostics() + projectPlugins.toModDiagnostics(),
+        )
         projectPlugins.extensions.forEach { extension -> extensionRunner.load(extension) }
         modLoader.loadAll(
             (userPlugins.mods + projectPlugins.mods).map { plugin -> ModCandidate(plugin.packageInfo, plugin.mod) },

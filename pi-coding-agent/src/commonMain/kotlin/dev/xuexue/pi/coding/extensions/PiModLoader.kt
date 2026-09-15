@@ -66,6 +66,9 @@ class PiModLoader(
 ) {
     private val lock = Mutex()
     private val loaded = linkedMapOf<ModId, LoadedMod>()
+    private val revisions = linkedMapOf<ModId, ArrayDeque<ModRevision>>()
+    private var discoveredPackages: List<ModDiscoveredPackage> = emptyList()
+    private var discoveryDiagnostics: List<ModDiscoveryDiagnostic> = emptyList()
     private val diagnostics = mutableListOf<ModRunDiagnostic>()
     private val sessionApi = AtomicReference<SessionApi>(UnavailableSessionApi)
 
@@ -112,6 +115,16 @@ class PiModLoader(
     val snapshot: StateFlow<ModLoaderSnapshot>
         get() = mutableSnapshot.asStateFlow()
 
+    /** Publishes manifest discovery before any entrypoint is activated. */
+    fun publishDiscovery(
+        packages: List<ModDiscoveredPackage>,
+        diagnostics: List<ModDiscoveryDiagnostic> = emptyList(),
+    ) {
+        discoveredPackages = packages.distinctBy { Triple(it.id, it.version, it.sourcePath) }
+        discoveryDiagnostics = diagnostics.toList()
+        refreshSnapshot()
+    }
+
     /** Enables a package, replacing a previous active run with the same ID. */
     suspend fun load(
         mod: PiMod,
@@ -119,10 +132,23 @@ class PiModLoader(
         trusted: Boolean = projectTrusted,
     ): ModLoadResult =
         lock.withLock {
+            loadLocked(mod, packageInfo, trusted, recordRevision = true)
+        }
+
+    private suspend fun loadLocked(
+        mod: PiMod,
+        packageInfo: ModPackage,
+        trusted: Boolean,
+        recordRevision: Boolean,
+    ): ModLoadResult {
             require(packageInfo.id == mod.id) {
                 "Mod package id ${packageInfo.id} does not match implementation ${mod.id}"
             }
             loaded.remove(packageInfo.id)?.let { previous ->
+                if (recordRevision) {
+                    revisions.getOrPut(packageInfo.id) { ArrayDeque() }
+                        .addLast(ModRevision(previous.mod, previous.run.packageInfo, previous.trusted))
+                }
                 eventCatalog.untrack(previous.run)
                 previous.run.stop(previous.handle?.let { handle -> { handle.disable() } })
                 uiCatalog.refresh()
@@ -133,9 +159,9 @@ class PiModLoader(
             eventCatalog.track(run)
             val context = createContext(run)
             run.beginStart()
-            val active = LoadedMod(mod, run)
+            val active = LoadedMod(mod, run, trusted)
             loaded[packageInfo.id] = active
-            try {
+            return try {
                 active.handle = mod.enable(context)
                 run.markRunning()
                 refreshSnapshot()
@@ -150,6 +176,38 @@ class PiModLoader(
                 diagnostics += runDiagnostics
                 ModLoadResult(snapshot(run, runDiagnostics), runDiagnostics.toList())
             }
+    }
+
+    /** Activates a new package revision while retaining the previous one for rollback. */
+    suspend fun update(
+        mod: PiMod,
+        packageInfo: ModPackage,
+        trusted: Boolean = projectTrusted,
+    ): ModLoadResult = load(mod, packageInfo, trusted)
+
+    /** Re-activates the previous revision, if one exists for this mod ID. */
+    suspend fun rollback(id: ModId): ModLoadResult? =
+        lock.withLock {
+            val history = revisions[id] ?: return@withLock null
+            val revision = history.removeLastOrNull() ?: return@withLock null
+            loaded[id]?.let { current ->
+                history.addLast(ModRevision(current.mod, current.run.packageInfo, current.trusted))
+            }
+            loadLocked(revision.mod, revision.packageInfo, revision.trusted, recordRevision = false)
+        }
+
+    /** Stops a mod and forgets all retained revisions. */
+    suspend fun undefine(id: ModId): Boolean =
+        lock.withLock {
+            val active = loaded.remove(id)
+            if (active != null) {
+                eventCatalog.untrack(active.run)
+                active.run.stop(active.handle?.let { handle -> { handle.disable() } })
+            }
+            revisions.remove(id)
+            uiCatalog.refresh()
+            refreshSnapshot()
+            active != null
         }
 
     /** Resolves all versions and required dependencies before activating any mod. */
@@ -247,9 +305,20 @@ class PiModLoader(
     fun getUiActions(): List<RegisteredModEntry<UiActionContribution>> = uiCatalog.actions()
 
     private fun refreshSnapshot() {
+        val activeIds = loaded.keys
         mutableSnapshot.value =
             ModLoaderSnapshot(
                 runs = getRuns(),
+                discovered =
+                    discoveredPackages.map { packageInfo ->
+                        when {
+                            packageInfo.id in activeIds -> packageInfo.copy(status = ModDiscoveryStatus.RUNNING)
+                            packageInfo.id in revisions -> packageInfo.copy(status = ModDiscoveryStatus.DISABLED)
+                            !packageInfo.trusted -> packageInfo.copy(status = ModDiscoveryStatus.BLOCKED)
+                            else -> packageInfo
+                        }
+                    },
+                discoveryDiagnostics = discoveryDiagnostics,
                 diagnostics = getDiagnostics(),
                 permissions = permissionCatalog.grants.value,
                 ui = uiCatalog.snapshot.value,
@@ -428,7 +497,14 @@ class PiModLoader(
     private data class LoadedMod(
         val mod: PiMod,
         val run: ModRun,
+        val trusted: Boolean,
         var handle: ModHandle? = null,
+    )
+
+    private data class ModRevision(
+        val mod: PiMod,
+        val packageInfo: ModPackage,
+        val trusted: Boolean,
     )
 
     private fun <T> registerLegacyContribution(

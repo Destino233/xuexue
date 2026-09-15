@@ -168,13 +168,50 @@ class PiModLoaderTest {
         assertTrue(resolution.diagnostics.any { it.modId == ModId("example.b") })
     }
 
+    @Test
+    fun updateRollbackAndDiscoveryInventoryKeepLifecycleStateCoherent() =
+        runTest {
+            val loader = PiModLoader("/workspace")
+            val first = testMod("example.lifecycle", "1.0.0") { context ->
+                context.tools.register("tool", testTool("first"))
+                null
+            }
+            val second = testMod("example.lifecycle", "2.0.0") { context ->
+                context.tools.register("tool", testTool("second"))
+                null
+            }
+            loader.publishDiscovery(
+                listOf(
+                    ModDiscoveredPackage(
+                        id = ModId("example.lifecycle"),
+                        version = ModVersion("2.0.0"),
+                        runtime = PiPluginRuntime.JVM,
+                        sourcePath = "/workspace/mod.jar",
+                        scope = "PROJECT",
+                        trusted = true,
+                    ),
+                ),
+            )
+
+            assertEquals(ModDiscoveryStatus.DISCOVERED, loader.snapshot.value.discovered.single().status)
+            assertTrue(loader.load(first).loaded)
+            assertEquals(ModDiscoveryStatus.RUNNING, loader.snapshot.value.discovered.single().status)
+            assertTrue(loader.update(second, ModPackage(ModId("example.lifecycle"), ModVersion("2.0.0"), PI_PLUGIN_API_VERSION, PiPluginRuntime.JVM)).loaded)
+            assertEquals("second", loader.getAllRegisteredTools().single().label)
+            assertTrue(loader.rollback(ModId("example.lifecycle"))?.loaded == true)
+            assertEquals("first", loader.getAllRegisteredTools().single().label)
+            assertTrue(loader.undefine(ModId("example.lifecycle")))
+            assertTrue(loader.snapshot.value.discovered.single().status != ModDiscoveryStatus.RUNNING)
+        }
+
     private fun testMod(
         id: String,
+        version: String = "1.0.0",
         enable: suspend (ModContext) -> ModHandle?,
     ): PiMod =
         object : PiMod {
             override val id = ModId(id)
-            override val version = ModVersion("1.0.0")
+            override val version = ModVersion(version)
 
             override suspend fun enable(context: ModContext): ModHandle? = enable(context)
         }

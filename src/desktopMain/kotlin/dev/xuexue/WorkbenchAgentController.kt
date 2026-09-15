@@ -654,6 +654,10 @@ class WorkbenchAgentController(
                 projectTrusted = settingsManager.isProjectTrusted(),
                 interaction = runtime.interactionBroker,
             )
+        modLoader.publishDiscovery(
+            discoveredPlugins.toModInventory(settingsManager.isProjectTrusted()),
+            discoveredPlugins.toModDiagnostics(),
+        )
         modLoader.loadAll(
             discoveredPlugins.mods.map { plugin -> ModCandidate(plugin.packageInfo, plugin.mod) },
             trusted = settingsManager.isProjectTrusted(),
