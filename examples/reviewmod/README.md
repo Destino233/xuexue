@@ -17,3 +17,7 @@ request, a Runtime context hook, and a right-dock panel.
 The complete API is intentionally data-oriented for Process compatibility:
 tools and UI contributions are ordinary registrations, while `SessionApi` and
 `RuntimeRegistry` are available to advanced mods that need Agent Loop control.
+
+For a dependency-free TypeScript Process client, see `process-sdk/index.ts`.
+It uses newline-delimited JSON and can be adapted to Node, Bun, or Deno stream
+interfaces without a framework dependency.
