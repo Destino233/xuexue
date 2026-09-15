@@ -39,9 +39,11 @@ import dev.xuexue.platform.AgentMessage
 import dev.xuexue.platform.AgentProviderConfig
 import dev.xuexue.platform.AppPreferences
 import dev.xuexue.platform.CachingPdfReaderBackend
+import dev.xuexue.platform.DEFAULT_AGENT_ENDPOINT
 import dev.xuexue.platform.DEFAULT_DOCUMENT_WHEEL_ZOOM_MULTIPLIER
 import dev.xuexue.platform.DocumentAnalysisEngineDescriptor
 import dev.xuexue.platform.DocumentAnalysisSettings
+import dev.xuexue.platform.MuPdfNative
 import dev.xuexue.platform.MuPdfReaderBackend
 import dev.xuexue.platform.OpenAiCompatibleAgentClient
 import dev.xuexue.platform.PdfDocumentMetadata
@@ -222,6 +224,18 @@ class WorkbenchState(
             onFileMessage = { message -> fileOperationMessage = message },
             persistWorkbench = ::persistWorkbench,
         )
+
+    fun invokeModUiAction(id: String) = agentController.invokeModUiAction(id)
+
+    fun disableMod(id: String) = agentController.disableMod(id)
+
+    fun reloadMod(id: String) = agentController.reloadMod(id)
+
+    fun rollbackMod(id: String) = agentController.rollbackMod(id)
+
+    fun undefineMod(id: String) = agentController.undefineMod(id)
+
+    fun updateModPackages(source: String? = null) = agentController.updateModPackages(source)
     private val fileController =
         WorkbenchFileController(
             scope = scope,
@@ -381,6 +395,15 @@ class WorkbenchState(
             }
         documentWheelZoomMultiplier = restored.first.documentWheelZoomMultiplier
         applicationMemoryLimitMiB = restored.first.applicationMemoryLimitMiB
+        agentEndpoint =
+            restored.first.agentEndpoint
+                .trim()
+                .ifBlank { DEFAULT_AGENT_ENDPOINT }
+        agentModel = restored.first.agentModel.trim()
+        // Resolve the environment at application runtime. This matters for
+        // native-image, where build-time initialization must not capture the
+        // builder's environment instead of the user's launch environment.
+        if (agentApiKey.isBlank()) agentApiKey = System.getenv("OPENAI_API_KEY").orEmpty()
         pdfOutlineController.restoreSettings(restored.first.documentAnalysisSettings)
         val root = restored.second ?: return
         openWorkspace(root, restore = true)
@@ -390,6 +413,8 @@ class WorkbenchState(
         if (shutdown) return
         shutdown = true
         pdfMemoryPressureJob.cancel()
+        pdfMemoryLogJob?.cancel()
+        pdfResourceTrimJob?.cancel()
         pdfOutlineController.close()
         runCatching {
             workspaceService.saveAppPreferences(
@@ -397,6 +422,8 @@ class WorkbenchState(
                     documentWheelZoomMultiplier = documentWheelZoomMultiplier,
                     documentAnalysisSettings = pdfOutlineController.settings,
                     applicationMemoryLimitMiB = applicationMemoryLimitMiB,
+                    agentEndpoint = agentEndpoint,
+                    agentModel = agentModel,
                 ),
             )
         }
@@ -992,13 +1019,17 @@ class WorkbenchState(
     }
 
     private fun schedulePdfResourceTrim() {
-        scope.launch {
-            delay(PDF_RESOURCE_TRIM_DELAY_MILLIS)
-            if (documents.none { document -> document.kind == DocumentKind.PDF }) {
-                pdfTextureCache.trimIdle()
-                runCatching { resolvedPdfReaderBackend.trimIdleResources() }
+        pdfResourceTrimJob?.cancel()
+        pdfResourceTrimJob =
+            scope.launch {
+                delay(PDF_RESOURCE_TRIM_DELAY_MILLIS)
+                repeat(PDF_RESOURCE_TRIM_RETRIES) { attempt ->
+                    pdfTextureCache.trimIdle()
+                    runCatching { resolvedPdfReaderBackend.trimIdleResources() }
+                    runCatching { MuPdfNative.nativeHeapMin() }
+                    if (attempt + 1 < PDF_RESOURCE_TRIM_RETRIES) delay(PDF_RESOURCE_TRIM_DELAY_MILLIS)
+                }
             }
-        }
     }
 
     private suspend fun trimPdfResourcesUnderPressure() {
@@ -1199,8 +1230,29 @@ class WorkbenchState(
         persist: Boolean = true,
         topNormalized: Float? = null,
     ) {
+        val previousPage = document?.takeIf { it.kind == DocumentKind.PDF }?.pdfPage
         pdfController.setPosition(document, page, scrollOffset, zoom, persist, topNormalized)
-        if (zoom != null) clearPdfIdleTextures(document)
+        // SumatraPDF rule (FreeNotVisible): release idle tiles of views that
+        // navigation left behind. Page flips keep only the destination page;
+        // zoom changes may retain the previous LOD while replacement tiles
+        // arrive.
+        val pageChanged = page != null && document?.pdfPage != previousPage
+        if (zoom != null || pageChanged) {
+            val keepPages =
+                if (pageChanged) {
+                    val destinationPage = document?.pdfPage ?: page
+                    val firstPage = destinationPage - PDF_TEXTURE_KEEP_PAGE_RADIUS
+                    val lastPage = destinationPage + PDF_TEXTURE_KEEP_PAGE_RADIUS
+                    firstPage..lastPage
+                } else {
+                    null
+                }
+            clearPdfIdleTextures(
+                document = document,
+                keepPages = keepPages,
+                scheduleResourceTrim = true,
+            )
+        }
     }
 
     fun setPdfFitMode(
@@ -1212,10 +1264,17 @@ class WorkbenchState(
     }
 
     /** Drops cached textures of the previous zoom/fit level; the visible tiles are
-     *  leased, so only the stale idle entries are released immediately. */
-    fun clearPdfIdleTextures(document: DocumentTab?) {
+     *  leased, so only the stale idle entries are released immediately. When
+     *  [keepPages] is given, idle tiles of those pages survive (Sumatra keeps
+     *  the visible +/- neighbour pages so back-navigation reuses them). */
+    fun clearPdfIdleTextures(
+        document: DocumentTab?,
+        keepPages: IntRange? = null,
+        scheduleResourceTrim: Boolean = true,
+    ) {
         val path = pdfTextureDocumentPath(document) ?: return
-        pdfTextureCache.trimIdle(path)
+        pdfTextureCache.trimIdle(path, keepPages)
+        if (scheduleResourceTrim) schedulePdfResourceTrim()
     }
 
     private fun pdfTextureDocumentPath(document: DocumentTab?): String? {
@@ -1810,6 +1869,8 @@ class WorkbenchState(
                 documentWheelZoomMultiplier = documentWheelZoomMultiplier,
                 documentAnalysisSettings = pdfOutlineController.settings,
                 applicationMemoryLimitMiB = applicationMemoryLimitMiB,
+                agentEndpoint = agentEndpoint,
+                agentModel = agentModel,
             )
         scope.launch(Dispatchers.IO) { runCatching { workspaceService.saveAppPreferences(preferences) } }
     }
@@ -1953,7 +2014,3 @@ class WorkbenchState(
             }
     }
 }
-import dev.xuexue.pi.coding.extensions.ModUiSnapshot
-    val modUiSnapshot: StateFlow<ModUiSnapshot> get() = agentController.modUiSnapshot
-
-    fun invokeModUiAction(id: String) = agentController.invokeModUiAction(id)

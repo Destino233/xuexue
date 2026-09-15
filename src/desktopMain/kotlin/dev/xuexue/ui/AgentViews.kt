@@ -1360,6 +1360,9 @@ fun AgentSettingsDialog(
                                     }
                                 }
                             }
+                            TextButton(onClick = { state.updateModPackages() }) {
+                                Text("更新插件包")
+                            }
                             SettingsStatusRow("Pi Packages", "npm 与 Git 包", "由插件目录提供")
                             SettingsStatusRow("上下文压缩", "自动压缩与分支摘要", "默认")
                         }

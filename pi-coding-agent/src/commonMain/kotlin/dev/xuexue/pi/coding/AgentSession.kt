@@ -487,6 +487,15 @@ class AgentSession(
         refreshState()
     }
 
+    /** Updates configured external packages, then refreshes their resources and contributions. */
+    suspend fun updatePackages(source: String? = null): Int {
+        val manager = packageManager ?: return 0
+        val updated = manager.update(source)
+        reloadExt(ResourceDiscoverReason.RELOAD)
+        refreshExtensionContributions()
+        return updated.size
+    }
+
     /** Runs extension resource discovery and reloads the shared resource view. */
     suspend fun reloadResourcesFromExtensions(): List<ResourceDiagnostic> = reloadExt(ResourceDiscoverReason.RELOAD)
 

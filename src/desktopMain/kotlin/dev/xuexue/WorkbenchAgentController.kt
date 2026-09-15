@@ -216,6 +216,14 @@ class WorkbenchAgentController(
         }
     }
 
+    fun updateModPackages(source: String? = null) {
+        scope.launch {
+            val session = formalRuntime?.session ?: return@launch
+            val count = runCatching { session.updatePackages(source) }.getOrDefault(0)
+            onStatus(if (count == 0) "没有可更新的插件包" else "已更新 $count 个插件包")
+        }
+    }
+
     fun decideApproval(decision: AgentApprovalDecision) {
         runtime.applyApprovalDecision(decision) ?: return
         onStatus(
