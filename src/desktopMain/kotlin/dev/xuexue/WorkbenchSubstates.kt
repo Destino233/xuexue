@@ -5,32 +5,10 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
-import dev.xuexue.core.AgentApprovalDecision
-import dev.xuexue.core.AgentApprovalRecord
-import dev.xuexue.core.AgentApprovalRequest
-import dev.xuexue.core.AgentSendAvailability
-import dev.xuexue.core.AgentStreamEvent
 import dev.xuexue.core.DocumentSplitDirection
 import dev.xuexue.core.ToolWindow
 import dev.xuexue.core.WorkbenchFocusTarget
-import dev.xuexue.pi.agent.Agent
-import dev.xuexue.pi.agent.AgentState
-import dev.xuexue.pi.coding.AgentSessionEvent
-import dev.xuexue.pi.coding.AgentSessionRuntime
-import dev.xuexue.pi.coding.InteractionRequest
-import dev.xuexue.pi.coding.InteractionRequestBroker
-import dev.xuexue.pi.coding.InteractionResponse
-import dev.xuexue.platform.AgentMessage
 import dev.xuexue.platform.PersistedLayoutPreset
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.launch
-import dev.xuexue.pi.coding.AgentSessionState as PiAgentSessionState
 
 interface WorkbenchLayoutModel {
     var activeTool: ToolWindow
@@ -285,241 +263,44 @@ class WorkbenchLayoutState : WorkbenchLayoutModel {
 }
 
 interface AgentRuntimeModel {
-    val piAgentState: StateFlow<AgentState>
     val agentSessions: SnapshotStateList<AgentSessionState>
     var activeAgentSessionId: String
     val activeAgentSession: AgentSessionState
     val agentMessages: SnapshotStateList<AgentMessage>
     var agentInput: String
-    var agentEndpoint: String
-    var agentModel: String
-    var agentApiKey: String
     var workspaceTrusted: Boolean
     var agentReadOnlyMode: Boolean
     var agentOfflineMode: Boolean
     var agentAllowWrite: Boolean
     var agentAllowShell: Boolean
-    var pendingAgentApproval: AgentApprovalRequest?
-    val agentApprovalHistory: SnapshotStateList<AgentApprovalRecord>
+    var permission: AgentPermission?
     var agentRunning: Boolean
     var includeActiveDocument: Boolean
-    val agentSendAvailability: AgentSendAvailability
     val agentContextPaths: SnapshotStateList<String>
     val agentContextSnippets: SnapshotStateList<AgentContextSnippet>
-    val agentInteractionRequests: StateFlow<List<InteractionRequest>>
-    val agentInteractionNotifications: SharedFlow<InteractionRequest.Notify>
-    val formalAgentState: StateFlow<PiAgentSessionState?>
-    val formalAgentEvents: SharedFlow<AgentSessionEvent>
 }
 
-@Suppress("TooManyFunctions")
+class AgentPermission(
+    val summary: String,
+) {
+    val decision = kotlinx.coroutines.CompletableDeferred<Boolean>()
+}
+
 class AgentRuntimeState : AgentRuntimeModel {
-    val piAgent = Agent()
-    val interactionBroker = InteractionRequestBroker()
-    override val piAgentState: StateFlow<AgentState> = piAgent.state
-    override val agentSessions = mutableStateListOf(AgentSessionState("default", "默认会话"))
+    override val agentSessions = mutableStateListOf(AgentSessionState("default", "新会话"))
     override var activeAgentSessionId by mutableStateOf("default")
     override val activeAgentSession: AgentSessionState
         get() = agentSessions.firstOrNull { it.id == activeAgentSessionId } ?: agentSessions.first()
     override val agentMessages: SnapshotStateList<AgentMessage> get() = activeAgentSession.messages
     override var agentInput by mutableStateOf("")
-    override var agentEndpoint by mutableStateOf("https://api.openai.com/v1/chat/completions")
-    override var agentModel by mutableStateOf("")
-    override var agentApiKey by mutableStateOf(System.getenv("OPENAI_API_KEY").orEmpty())
     override var workspaceTrusted by mutableStateOf(true)
     override var agentReadOnlyMode by mutableStateOf(false)
     override var agentOfflineMode by mutableStateOf(false)
     override var agentAllowWrite by mutableStateOf(true)
     override var agentAllowShell by mutableStateOf(true)
-    override var pendingAgentApproval by mutableStateOf<AgentApprovalRequest?>(null)
-    override val agentApprovalHistory = mutableStateListOf<AgentApprovalRecord>()
+    override var permission by mutableStateOf<AgentPermission?>(null)
     override var agentRunning by mutableStateOf(false)
     override var includeActiveDocument by mutableStateOf(true)
-    override val agentSendAvailability: AgentSendAvailability
-        get() =
-            dev.xuexue.core.agentSendAvailability(
-                offline = agentOfflineMode,
-                model = agentModel,
-                apiKey = agentApiKey,
-                awaitingApproval = pendingAgentApproval != null,
-            )
     override val agentContextPaths = mutableStateListOf<String>()
     override val agentContextSnippets = mutableStateListOf<AgentContextSnippet>()
-    override val agentInteractionRequests: StateFlow<List<InteractionRequest>> = interactionBroker.requests
-    override val agentInteractionNotifications: SharedFlow<InteractionRequest.Notify> = interactionBroker.notifications
-    private val mutableFormalAgentState = MutableStateFlow<PiAgentSessionState?>(null)
-    private val mutableFormalAgentEvents = MutableSharedFlow<AgentSessionEvent>(extraBufferCapacity = 256)
-    private var formalRuntimeBinding: Job? = null
-    override val formalAgentState: StateFlow<PiAgentSessionState?> = mutableFormalAgentState
-    override val formalAgentEvents: SharedFlow<AgentSessionEvent> = mutableFormalAgentEvents
-
-    /** Bind Compose/RPC state to the formal Pi runtime and rebind on session replacement. */
-    fun bindFormalRuntime(
-        runtime: AgentSessionRuntime?,
-        scope: CoroutineScope,
-    ) {
-        formalRuntimeBinding?.cancel()
-        formalRuntimeBinding = null
-        mutableFormalAgentState.value = runtime?.state?.value
-        if (runtime == null) return
-        formalRuntimeBinding =
-            scope.launch {
-                launch {
-                    runtime.state.collect { state -> mutableFormalAgentState.value = state }
-                }
-                launch {
-                    runtime.events.collect { event -> mutableFormalAgentEvents.emit(event) }
-                }
-            }
-    }
-
-    fun respondAgentInteraction(response: InteractionResponse): Boolean = interactionBroker.respond(response)
-
-    fun applyStreamEvent(
-        session: AgentSessionState,
-        assistantId: String,
-        event: AgentStreamEvent,
-    ) {
-        val messages = session.messages
-
-        fun append(
-            role: String,
-            id: String,
-            text: String,
-            error: Boolean = false,
-        ) {
-            val index = messages.indexOfFirst { it.streamId == id && it.role == role }
-            if (index >= 0) {
-                messages[index] = messages[index].copy(content = messages[index].content + text, error = error)
-            } else {
-                messages += AgentMessage(role, text, error = error, streamId = id)
-            }
-        }
-        when (event) {
-            is AgentStreamEvent.TextDelta -> {
-                append("assistant", assistantId, event.text)
-            }
-
-            is AgentStreamEvent.ReasoningDelta -> {
-                append("reasoning", "reasoning:$assistantId", event.text)
-            }
-
-            is AgentStreamEvent.ToolStarted -> {
-                val content = listOf(event.name, event.target, event.detail).filter(String::isNotBlank).joinToString("\n")
-                messages += AgentMessage("tool_call", content, streamId = event.callId)
-            }
-
-            is AgentStreamEvent.ToolProgress -> {
-                append("tool_call", event.callId, "\n${event.detail}")
-            }
-
-            is AgentStreamEvent.ToolFinished -> {
-                messages += AgentMessage("tool", event.output, error = event.failed, streamId = event.callId)
-            }
-
-            is AgentStreamEvent.FileDiff -> {
-                messages +=
-                    AgentMessage(
-                        role = "diff",
-                        content = "--- a/${event.relativePath}\n+++ b/${event.relativePath}\n${event.patch}",
-                        streamId = "diff:${event.relativePath}:$assistantId",
-                    )
-            }
-
-            is AgentStreamEvent.Usage -> {
-                session.inputTokens = event.inputTokens
-                session.outputTokens = event.outputTokens
-                session.costUsd = event.costUsd
-            }
-        }
-    }
-
-    fun stop() {
-        agentRunning = false
-        agentMessages.indices.filter { agentMessages[it].role == "steering_queued" }.forEach { index ->
-            agentMessages[index] = agentMessages[index].copy(role = "steering_cancelled")
-        }
-    }
-
-    fun applyApprovalDecision(decision: AgentApprovalDecision): AgentApprovalRequest? {
-        val request = pendingAgentApproval ?: return null
-        if (decision == AgentApprovalDecision.ALLOW_SESSION) {
-            when (request.operation) {
-                dev.xuexue.core.AgentOperationKind.WRITE_FILE -> agentAllowWrite = true
-                dev.xuexue.core.AgentOperationKind.RUN_SHELL -> agentAllowShell = true
-                else -> Unit
-            }
-            if (request.operation == dev.xuexue.core.AgentOperationKind.WRITE_FILE) agentReadOnlyMode = false
-        }
-        agentApprovalHistory += AgentApprovalRecord(request, decision)
-        pendingAgentApproval = null
-        return request
-    }
-
-    fun setDiffDecision(
-        messageIndex: Int,
-        decision: String?,
-    ): Boolean {
-        if (decision !in setOf(null, "accepted", "rejected")) return false
-        val message = agentMessages.getOrNull(messageIndex) ?: return false
-        if (message.role != "diff" || message.decision == decision) return false
-        agentMessages[messageIndex] = message.copy(decision = decision)
-        return true
-    }
-
-    fun newSession(): AgentSessionState {
-        val session = AgentSessionState("session-${System.currentTimeMillis()}", "新会话 ${agentSessions.size + 1}")
-        agentSessions += session
-        activeAgentSessionId = session.id
-        return session
-    }
-
-    fun selectSession(id: String): Boolean {
-        if (id == activeAgentSessionId || agentSessions.none { it.id == id }) return false
-        activeAgentSessionId = id
-        return true
-    }
-
-    fun renameSession(
-        id: String,
-        name: String,
-    ) {
-        val clean = name.trim()
-        if (clean.isNotEmpty()) agentSessions.firstOrNull { it.id == id }?.name = clean
-    }
-
-    fun cloneSession(fork: Boolean): AgentSessionState {
-        val source = activeAgentSession
-        val suffix = if (fork) "分支" else "副本"
-        val session =
-            AgentSessionState(
-                id = "session-${System.currentTimeMillis()}",
-                name = "${source.name} · $suffix",
-                messages = source.messages.toList(),
-                protocolMessages = source.protocolMessages.toList(),
-                inputTokens = source.inputTokens,
-                outputTokens = source.outputTokens,
-                costUsd = source.costUsd,
-            )
-        agentSessions += session
-        activeAgentSessionId = session.id
-        return session
-    }
-
-    fun removeSession(id: String): AgentSessionState? {
-        val session = agentSessions.firstOrNull { it.id == id } ?: return null
-        if (agentSessions.size == 1) {
-            session.messages.clear()
-            session.name = "默认会话"
-            return null
-        }
-        agentSessions.remove(session)
-        if (activeAgentSessionId == id) activeAgentSessionId = agentSessions.first().id
-        return session
-    }
-
-    fun restoreSession(session: AgentSessionState) {
-        agentSessions += session
-        activeAgentSessionId = session.id
-    }
 }

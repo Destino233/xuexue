@@ -15,10 +15,28 @@ package is required.
 ./gradlew run
 ```
 
-The first screen lets you create or open a directory. Files remain the source
-of truth. Layout state is stored in `.xuexue/workbench.properties`; Agent
-sessions and PDF annotations are also stored under `.xuexue` and should be
-backed up when they matter.
+The first screen lets you create or open a directory. Layout state is stored
+in `.xuexue/workbench.properties`. See the [storage contract](docs/V0.1_ALPHA.md)
+for Agent history and PDF annotations.
+
+### DeepSeek Harness
+
+Install Node.js 24.9 or later with npm, then prepare the Agent runtime.
+
+```bash
+node tools/setup-dsh-runtime.mjs
+```
+
+Launch XueXue with `DEEPSEEK_API_KEY` set for the default DeepSeek route. DSH
+reads its settings and credentials from `~/.xuexue/dsh`, or from
+`XUEXUE_DSH_HOME` when set. Agent conversation requires an open workspace.
+
+To include the platform's Node.js and DSH in a Compose distribution, run the
+setup script with a staging directory and pass that directory to Gradle as
+`"-Pxuexue.dshRuntimeDir=/absolute/path/to/staging"`. Use a staging directory
+prepared on the OS and architecture of the package. For an existing DSH
+installation or compiled source checkout, set `XUEXUE_DSH_ENTRY` to the
+absolute path of its `lib/bin.js` and `XUEXUE_DSH_NODE` to its Node executable.
 
 ## Windows
 
@@ -132,8 +150,8 @@ so the output runs without a system JDK.
   links, search, annotations, persisted reading position, and progressive
   HTTP Range loading.
 - Image viewing.
-- Streaming OpenAI-compatible agent conversation with current-document context,
-  cancellation, and workspace-local session persistence.
+- DeepSeek Harness conversation with current-document context, tool approvals,
+  cancellation, and persistent sessions.
 - Restores the last workspace, open tabs, active document, tool, and panel sizes.
 
 See [docs/V0.1_ALPHA.md](docs/V0.1_ALPHA.md) for acceptance criteria and known

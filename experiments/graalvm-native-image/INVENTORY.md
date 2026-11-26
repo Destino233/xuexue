@@ -73,5 +73,4 @@ two lookups can be registered in `reflect-config.json`.
 
 - `xuexue/native/xuexue_mupdf.dll` (extracted to a runtime dir)
 - Compose resources dir (`compose.application.resources.dir`)
-- Prompt templates / agent skill resources under `pi-coding-agent`
 - `.xuexue/` workspace state (user data, not bundled)

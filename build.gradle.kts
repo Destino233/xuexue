@@ -108,6 +108,7 @@ val muPdfNativeLibraryName =
 val muPdfDirectory = layout.projectDirectory.dir(".mupdf/$muPdfVersion/$muPdfPlatform")
 val muPdfNativeLibrary = muPdfDirectory.file(muPdfNativeLibraryName)
 val muPdfAppResourcesRoot = layout.buildDirectory.dir("generated/mupdf-app-resources")
+val dshRuntimeDir = providers.gradleProperty("xuexue.dshRuntimeDir")
 
 val bootstrapMuPdf =
     tasks.register<Exec>("bootstrapMuPdf") {
@@ -144,6 +145,20 @@ val prepareMuPdfAppResources =
             include(muPdfNativeLibraryName, "COPYING")
         }
         into(muPdfAppResourcesRoot.map { root -> root.dir(composePlatform) })
+        if (dshRuntimeDir.isPresent) {
+            doNotTrackState("Copy the staged npm runtime without fingerprinting its dependency tree.")
+            val runtime = file(dshRuntimeDir.get())
+            from(runtime) {
+                include("node", "node.exe", "node_modules/**")
+                exclude("node_modules/.bin/**")
+                into("dsh-runtime")
+            }
+            doFirst {
+                require(runtime.resolve("node_modules/@deepseek-ai/dsh/lib/bin.js").isFile) {
+                    "Prepare the DSH runtime directory with tools/setup-dsh-runtime.mjs first."
+                }
+            }
+        }
     }
 
 tasks.matching { it.name == "compileKotlinDesktop" || it.name == "compileTestKotlinDesktop" }.configureEach {
@@ -204,8 +219,6 @@ kotlin {
         }
         getByName("desktopMain") {
             dependencies {
-                implementation(project(":pi-coding-agent"))
-                implementation(project(":pi-agent-core"))
                 implementation(compose.desktop.currentOs)
                 implementation(compose.material3)
                 implementation(compose.materialIconsExtended)

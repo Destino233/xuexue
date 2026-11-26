@@ -79,9 +79,16 @@ view mode, rotation, color mode, side panel, and continuous/paged scroll offsets
 are rebuildable navigation state. Agent transcripts and PDF annotations are
 durable application data.
 
-## Pi Agent
+## DeepSeek Harness
 
-The current Agent vertical slice is the migration starting point for a full
-Kotlin port of Pi's headless runtime. Module boundaries, parity milestones,
-plugin hosts, package compatibility, and acceptance gates are defined in
-[PI_AGENT_PORTING_PLAN.md](PI_AGENT_PORTING_PLAN.md).
+The workbench launches the official DSH runtime for the open workspace with
+the ACP profile. A Kotlin client exchanges ACP v1 JSON-RPC over stdio. DSH
+owns model adapters, its Agent loop, tools, permissions, plugins, and durable
+sessions. XueXue owns the Compose panel, document attachments, and permission
+prompts. Switching workspaces or closing the app closes the child process.
+
+The ACP profile exposes cancellation, permission requests, session resume,
+and a settled prompt response. XueXue uses these for the stop button and session
+selector. ACP resume restores the DSH context without replaying history. XueXue
+keeps an atomic local transcript for display and opens earlier Pi transcripts
+as read-only archives.

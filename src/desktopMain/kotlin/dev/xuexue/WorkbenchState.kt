@@ -8,12 +8,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.text.TextRange
-import dev.xuexue.core.AgentApprovalDecision
-import dev.xuexue.core.AgentApprovalRecord
-import dev.xuexue.core.AgentApprovalRequest
-import dev.xuexue.core.AgentOperationKind
-import dev.xuexue.core.AgentSendAvailability
-import dev.xuexue.core.AgentStreamEvent
 import dev.xuexue.core.DocumentKind
 import dev.xuexue.core.DocumentSplitDirection
 import dev.xuexue.core.EditorCommand
@@ -29,23 +23,13 @@ import dev.xuexue.core.WorkbenchCommand
 import dev.xuexue.core.WorkbenchFocusTarget
 import dev.xuexue.core.WorkspaceEntry
 import dev.xuexue.core.WorkspaceIndex
-import dev.xuexue.core.agentSendAvailability
-import dev.xuexue.core.requiresExplicitApproval
-import dev.xuexue.pi.coding.InteractionResponse
-import dev.xuexue.pi.coding.extensions.ModUiSnapshot
-import dev.xuexue.pi.coding.extensions.ModLoaderSnapshot
-import dev.xuexue.platform.AgentClient
-import dev.xuexue.platform.AgentMessage
-import dev.xuexue.platform.AgentProviderConfig
 import dev.xuexue.platform.AppPreferences
 import dev.xuexue.platform.CachingPdfReaderBackend
-import dev.xuexue.platform.DEFAULT_AGENT_ENDPOINT
 import dev.xuexue.platform.DEFAULT_DOCUMENT_WHEEL_ZOOM_MULTIPLIER
 import dev.xuexue.platform.DocumentAnalysisEngineDescriptor
 import dev.xuexue.platform.DocumentAnalysisSettings
 import dev.xuexue.platform.MuPdfNative
 import dev.xuexue.platform.MuPdfReaderBackend
-import dev.xuexue.platform.OpenAiCompatibleAgentClient
 import dev.xuexue.platform.PdfDocumentMetadata
 import dev.xuexue.platform.PdfLink
 import dev.xuexue.platform.PdfMemoryBudget
@@ -82,7 +66,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.flow.StateFlow
 import java.lang.management.ManagementFactory
 import java.nio.file.Files
 import java.nio.file.LinkOption
@@ -128,7 +111,6 @@ private data class PendingWorkspaceEntryOpen(
 class WorkbenchState(
     private val scope: CoroutineScope,
     private val workspaceService: WorkspaceService = WorkspaceService(),
-    private val agentClient: AgentClient = OpenAiCompatibleAgentClient(),
     private val pdfMetrics: PdfPerformanceMetrics = PdfPerformanceMetrics(),
     pdfReaderBackend: PdfReaderBackend? = null,
     private val layoutState: WorkbenchLayoutState = WorkbenchLayoutState(),
@@ -207,35 +189,18 @@ class WorkbenchState(
     var workspaceIndex by mutableStateOf(WorkspaceIndex(emptyList()))
         private set
 
-    val canRestoreDeletedAgentSession: Boolean get() = agentController.canRestoreDeletedSession
-    val modUiSnapshot: StateFlow<ModUiSnapshot> get() = agentController.modUiSnapshot
-    val modSnapshot: StateFlow<ModLoaderSnapshot> get() = agentController.modSnapshot
     private var watcherJob: Job? = null
     private val agentController =
         WorkbenchAgentController(
             scope = scope,
-            runtime = agentState,
-            client = agentClient,
+            state = agentState,
             workspaceService = workspaceService,
             workspaceRoot = { workspaceRoot },
             activeDocument = { activeDocument },
             revealPanel = { agentPanelVisible = true },
-            onStatus = { message -> status = message },
-            onFileMessage = { message -> fileOperationMessage = message },
-            persistWorkbench = ::persistWorkbench,
+            onStatus = { status = it },
         )
 
-    fun invokeModUiAction(id: String) = agentController.invokeModUiAction(id)
-
-    fun disableMod(id: String) = agentController.disableMod(id)
-
-    fun reloadMod(id: String) = agentController.reloadMod(id)
-
-    fun rollbackMod(id: String) = agentController.rollbackMod(id)
-
-    fun undefineMod(id: String) = agentController.undefineMod(id)
-
-    fun updateModPackages(source: String? = null) = agentController.updateModPackages(source)
     private val fileController =
         WorkbenchFileController(
             scope = scope,
@@ -395,15 +360,6 @@ class WorkbenchState(
             }
         documentWheelZoomMultiplier = restored.first.documentWheelZoomMultiplier
         applicationMemoryLimitMiB = restored.first.applicationMemoryLimitMiB
-        agentEndpoint =
-            restored.first.agentEndpoint
-                .trim()
-                .ifBlank { DEFAULT_AGENT_ENDPOINT }
-        agentModel = restored.first.agentModel.trim()
-        // Resolve the environment at application runtime. This matters for
-        // native-image, where build-time initialization must not capture the
-        // builder's environment instead of the user's launch environment.
-        if (agentApiKey.isBlank()) agentApiKey = System.getenv("OPENAI_API_KEY").orEmpty()
         pdfOutlineController.restoreSettings(restored.first.documentAnalysisSettings)
         val root = restored.second ?: return
         openWorkspace(root, restore = true)
@@ -412,6 +368,7 @@ class WorkbenchState(
     suspend fun shutdown() {
         if (shutdown) return
         shutdown = true
+        agentController.close(reset = false)
         pdfMemoryPressureJob.cancel()
         pdfMemoryLogJob?.cancel()
         pdfResourceTrimJob?.cancel()
@@ -422,8 +379,6 @@ class WorkbenchState(
                     documentWheelZoomMultiplier = documentWheelZoomMultiplier,
                     documentAnalysisSettings = pdfOutlineController.settings,
                     applicationMemoryLimitMiB = applicationMemoryLimitMiB,
-                    agentEndpoint = agentEndpoint,
-                    agentModel = agentModel,
                 ),
             )
         }
@@ -452,6 +407,7 @@ class WorkbenchState(
                     Triple(tree, workspaceService.buildIndex(safeRoot), state)
                 }
             discardWorkspaceEntryOpenRequests()
+            agentController.close()
             workspaceRoot = safeRoot
             val restoredRemotePdfUrls = remotePdfController.restoreRangeDownloads(safeRoot)
             workspaceTree = persisted.first
@@ -526,10 +482,7 @@ class WorkbenchState(
                 detachedDocuments.clear()
                 detachedDocuments += persisted.third.detachedDocuments.filter { path -> documents.any { it.relativePath == path } }
             }
-            agentController.loadTranscript(safeRoot)
-            persisted.third.activeAgentSession
-                ?.takeIf { id -> agentSessions.any { it.id == id } }
-                ?.let { activeAgentSessionId = it }
+            agentController.loadTranscript(safeRoot, persisted.third.activeAgentSession)
             status = safeRoot.fileName?.toString() ?: safeRoot.pathString
             startWorkspaceWatcher()
             persistWorkbench()
@@ -554,6 +507,7 @@ class WorkbenchState(
             remotePdfDialogVisible = false
             persistWorkbench()
             pendingPersistJob?.join()
+            agentController.close()
             workspaceRoot = null
             workspaceTree = null
             documents.clear()
@@ -570,12 +524,7 @@ class WorkbenchState(
             secondaryPath = null
             detachedDocuments.clear()
             agentFloating = false
-            pendingAgentApproval = null
-            agentApprovalHistory.clear()
             customLayoutPresets.clear()
-            agentSessions.clear()
-            agentSessions += AgentSessionState("default", "默认会话")
-            activeAgentSessionId = "default"
             status = "Ready"
         }
 
@@ -1734,23 +1683,9 @@ class WorkbenchState(
         agentController.stop()
     }
 
-    fun requestAgentApproval(request: AgentApprovalRequest): Boolean = agentController.requestApproval(request)
-
-    fun decideAgentApproval(decision: AgentApprovalDecision) {
-        agentController.decideApproval(decision)
-    }
-
-    fun respondAgentInteraction(response: InteractionResponse): Boolean = agentController.respondInteraction(response)
-
-    fun setAgentDiffDecision(
-        messageIndex: Int,
-        decision: String?,
-    ) {
-        agentController.setDiffDecision(messageIndex, decision)
-    }
-
     fun newAgentSession() {
         agentController.newSession()
+        persistWorkbench()
     }
 
     fun addAgentContext(relativePath: String) {
@@ -1806,34 +1741,16 @@ class WorkbenchState(
     }
 
     fun removeAgentContext(relativePath: String) {
-        agentController.removeContext(relativePath)
+        agentContextPaths.remove(relativePath)
     }
 
-    fun removeAgentSnippetContext(id: Long) {
-        agentController.removeSnippetContext(id)
+    fun removeAgentSnippetContext(id: String) {
+        agentContextSnippets.removeAll { it.id == id }
     }
 
     fun selectAgentSession(id: String) {
         agentController.selectSession(id)
-    }
-
-    fun renameAgentSession(
-        id: String,
-        name: String,
-    ) {
-        agentController.renameSession(id, name)
-    }
-
-    fun cloneAgentSession(fork: Boolean = false) {
-        agentController.cloneSession(fork)
-    }
-
-    fun deleteAgentSession(id: String) {
-        agentController.deleteSession(id)
-    }
-
-    fun restoreDeletedAgentSession() {
-        agentController.restoreDeletedSession()
+        persistWorkbench()
     }
 
     fun clearError() {
@@ -1869,8 +1786,6 @@ class WorkbenchState(
                 documentWheelZoomMultiplier = documentWheelZoomMultiplier,
                 documentAnalysisSettings = pdfOutlineController.settings,
                 applicationMemoryLimitMiB = applicationMemoryLimitMiB,
-                agentEndpoint = agentEndpoint,
-                agentModel = agentModel,
             )
         scope.launch(Dispatchers.IO) { runCatching { workspaceService.saveAppPreferences(preferences) } }
     }

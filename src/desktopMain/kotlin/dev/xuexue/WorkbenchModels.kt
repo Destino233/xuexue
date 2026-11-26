@@ -7,8 +7,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.TextRange
 import dev.xuexue.core.DocumentKind
 import dev.xuexue.core.EditorMode
-import dev.xuexue.core.PiAgentMessage
-import dev.xuexue.platform.AgentMessage
 import dev.xuexue.platform.PdfOutlineDocument
 import kotlinx.serialization.Serializable
 import java.util.Locale
@@ -79,29 +77,12 @@ class AgentSessionState(
     val id: String,
     name: String,
     messages: List<AgentMessage> = emptyList(),
-    protocolMessages: List<PiAgentMessage> = emptyList(),
-    inputTokens: Int = 0,
-    outputTokens: Int = 0,
-    costUsd: Double? = null,
+    var dshId: String? = null,
+    val legacy: Boolean = false,
 ) {
-    var name by mutableStateOf(name)
     val messages = mutableStateListOf<AgentMessage>().apply { addAll(messages) }
-    val protocolMessages = mutableStateListOf<PiAgentMessage>().apply { addAll(protocolMessages) }
-    var inputTokens by mutableStateOf(inputTokens)
-    var outputTokens by mutableStateOf(outputTokens)
-    var costUsd by mutableStateOf(costUsd)
+    var name by mutableStateOf(name)
 }
-
-@Serializable
-data class PersistedAgentSession(
-    val id: String,
-    val name: String,
-    val messages: List<AgentMessage>,
-    val protocolMessages: List<PiAgentMessage> = emptyList(),
-    val inputTokens: Int = 0,
-    val outputTokens: Int = 0,
-    val costUsd: Double? = null,
-)
 
 data class WorkspaceDragPayload(
     val relativePath: String,
@@ -109,7 +90,7 @@ data class WorkspaceDragPayload(
 )
 
 data class AgentContextSnippet(
-    val id: Long,
+    val id: String,
     val title: String,
     val content: String,
 )

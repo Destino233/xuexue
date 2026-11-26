@@ -35,7 +35,3 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "xuexue"
-
-include(":pi-ai")
-include(":pi-agent-core")
-include(":pi-coding-agent")

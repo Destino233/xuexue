@@ -124,9 +124,6 @@ import androidx.compose.ui.unit.dp
 import dev.xuexue.BuiltInLayoutPreset
 import dev.xuexue.ToolPanelDock
 import dev.xuexue.WorkbenchState
-import dev.xuexue.core.AgentApprovalDecision
-import dev.xuexue.core.AgentOperationKind
-import dev.xuexue.core.AgentSendAvailability
 import dev.xuexue.core.DocumentKind
 import dev.xuexue.core.MarkdownParser
 import dev.xuexue.core.ToolWindow
@@ -1452,6 +1449,7 @@ internal fun ToolIcon(
     icon: ImageVector,
     description: String,
     onClick: () -> Unit,
+    enabled: Boolean = true,
 ) {
     TooltipBox(
         positionProvider =
@@ -1460,7 +1458,7 @@ internal fun ToolIcon(
         tooltip = { PlainTooltip { Text(description) } },
         state = rememberTooltipState(),
     ) {
-        MotionIconButton(onClick = onClick, modifier = Modifier.size(32.dp)) {
+        MotionIconButton(onClick = onClick, modifier = Modifier.size(32.dp), enabled = enabled) {
             Icon(icon, description, modifier = Modifier.size(18.dp))
         }
     }

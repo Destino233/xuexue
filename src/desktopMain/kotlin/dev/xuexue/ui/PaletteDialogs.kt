@@ -96,7 +96,6 @@ import dev.xuexue.core.ToolWindow
 import dev.xuexue.core.WorkbenchCommand
 import dev.xuexue.core.WorkbenchFocusTarget
 import dev.xuexue.core.WorkspaceEntry
-import dev.xuexue.pi.coding.extensions.UiSlot
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -473,16 +472,6 @@ private fun commandPaletteEntries(
         add(command("显示任务中心", Icons.Default.CheckCircle, WorkbenchCommand.OpenTool(ToolWindow.TASKS)))
         add(command("显示 Agent", Icons.Default.SmartToy, WorkbenchCommand.ShowAgent, "Ctrl Alt A"))
         add(command("在文档区打开 Agent", Icons.Default.Description, WorkbenchCommand.OpenAgentDocument))
-        state.modUiSnapshot.value.actions
-            .filter { it.value.location == UiSlot.COMMAND_PALETTE && it.value.enabled }
-            .sortedWith(compareBy({ it.value.order }, { it.id }))
-            .forEach { entry ->
-                add(
-                    PaletteCommand(entry.value.label, Icons.Default.Extension) {
-                        state.invokeModUiAction(entry.id)
-                    },
-                )
-            }
         addAll(focusPaletteCommands(state))
         add(command("聚焦 Agent", Icons.Default.SmartToy, WorkbenchCommand.Focus(WorkbenchFocusTarget.AGENT)))
         add(

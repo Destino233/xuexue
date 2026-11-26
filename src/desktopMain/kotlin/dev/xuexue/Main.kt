@@ -12,8 +12,6 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import dev.xuexue.pi.coding.enableTimings
-import dev.xuexue.pi.coding.printTimings
 import dev.xuexue.ui.WindowChrome
 import dev.xuexue.ui.WorkbenchApp
 import kotlinx.coroutines.launch
@@ -21,8 +19,6 @@ import java.awt.Dimension
 
 fun main() {
     if (restartWithConfiguredMemory()) return
-    // Startup timing instrumentation mirrors Pi's PI_TIMING=1 diagnostics.
-    if (System.getenv("PI_TIMING") == "1") enableTimings()
     application {
         val scope = rememberCoroutineScope()
         val state = remember { WorkbenchState(scope) }
@@ -35,7 +31,6 @@ fun main() {
                 scope.launch {
                     state.persistLayout()
                     state.shutdown()
-                    printTimings()
                     exitApplication()
                 }
                 Unit
@@ -59,7 +54,6 @@ fun main() {
                         if (state.saveAllDirty()) {
                             state.persistLayout()
                             state.shutdown()
-                            printTimings()
                             exitApplication()
                         } else {
                             closeRequested = false
